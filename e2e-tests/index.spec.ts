@@ -1,28 +1,51 @@
 import { expect, test } from "@playwright/test";
 
-test("should load the counter demo page", async ({ page }) => {
+test("renders the control panel and starts (or reports) the WebGPU renderer", async ({
+  page,
+}) => {
   await page.goto("/");
 
-  await expect(page).toHaveTitle("Web App Template");
+  await expect(page).toHaveTitle("web-gi — Real-time GI Cornell Box");
+  await expect(page.getByRole("heading", { name: "web-gi" })).toBeVisible();
+  await expect(page.getByLabel("Cornell box render")).toBeVisible();
 
+  // WebGPU availability depends on the runner, so accept either outcome: a
+  // renderer that has accumulated at least one frame, or an explicit notice.
+  const accumulated = page.getByTestId("stat-accumulated");
+  const notice = page.getByRole("alert");
+
+  await expect
+    .poll(
+      async () => {
+        if ((await notice.count()) > 0) return "notice";
+        const text = await accumulated.textContent();
+        return Number(text ?? "0") > 0 ? "rendering" : "pending";
+      },
+      { timeout: 20_000 },
+    )
+    .not.toBe("pending");
+});
+
+test("exposes the ReSTIR stages as independent toggles", async ({ page }) => {
+  await page.goto("/");
+
+  const spatialReuse = page
+    .getByRole("region", { name: "Indirect light (ReSTIR GI)" })
+    .getByLabel("Spatial reuse");
+
+  await expect(page.getByRole("radio", { name: "ReSTIR" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await expect(spatialReuse).toBeEnabled();
+
+  // Reference path tracing bypasses resampling entirely.
+  await page.getByRole("radio", { name: "Reference PT" }).click();
   await expect(
-    page.getByRole("heading", { name: "Counter Demo" }),
-  ).toBeVisible();
+    page.getByRole("radio", { name: "Reference PT" }),
+  ).toHaveAttribute("aria-checked", "true");
+  await expect(spatialReuse).toBeDisabled();
 
-  const decrementButton = page.getByRole("button", {
-    name: "Decrement count",
-  });
-  const incrementButton = page.getByRole("button", {
-    name: "Increment count",
-  });
-
-  await expect(decrementButton).toBeVisible();
-  await expect(incrementButton).toBeVisible();
-
-  const count = page.getByRole("status", { name: "Current count" });
-  await expect(count).toHaveText("0");
-  await incrementButton.click();
-  await expect(count).toHaveText("1");
-  await decrementButton.click();
-  await expect(count).toHaveText("0");
+  await page.getByRole("radio", { name: "ReSTIR" }).click();
+  await expect(spatialReuse).toBeEnabled();
 });

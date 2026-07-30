@@ -1,0 +1,57 @@
+import {
+  DEFAULT_SETTINGS,
+  FLAG_DENOISE,
+  FLAG_DI_ENABLED,
+  FLAG_DI_SPATIAL,
+  FLAG_DI_TEMPORAL,
+  FLAG_GI_ENABLED,
+  FLAG_GI_SPATIAL,
+  FLAG_GI_TEMPORAL,
+  packFlags,
+  requiresAccumulationReset,
+} from "@/gi/settings";
+
+describe("packFlags", () => {
+  it("sets every bit when all stages are on", () => {
+    expect(packFlags(DEFAULT_SETTINGS)).toBe(
+      FLAG_DI_ENABLED |
+        FLAG_DI_TEMPORAL |
+        FLAG_DI_SPATIAL |
+        FLAG_GI_ENABLED |
+        FLAG_GI_TEMPORAL |
+        FLAG_GI_SPATIAL |
+        FLAG_DENOISE,
+    );
+  });
+
+  it("clears only the toggled stage", () => {
+    const flags = packFlags({ ...DEFAULT_SETTINGS, giSpatial: false });
+    expect(flags & FLAG_GI_SPATIAL).toBe(0);
+    expect(flags & FLAG_GI_TEMPORAL).toBe(FLAG_GI_TEMPORAL);
+  });
+});
+
+describe("requiresAccumulationReset", () => {
+  it("resets when a sampling stage changes", () => {
+    expect(
+      requiresAccumulationReset(DEFAULT_SETTINGS, {
+        ...DEFAULT_SETTINGS,
+        diCandidates: 16,
+      }),
+    ).toBe(true);
+  });
+
+  // These only affect how the accumulated estimate is displayed or how far it
+  // is allowed to run, so throwing away converged samples would be wasteful.
+  it.each(["denoise", "exposure", "maxHistory"] as const)(
+    "keeps history when %s changes",
+    (key) => {
+      const next = { ...DEFAULT_SETTINGS, [key]: DEFAULT_SETTINGS[key] };
+      const changed =
+        key === "denoise"
+          ? { ...next, denoise: !DEFAULT_SETTINGS.denoise }
+          : { ...next, [key]: DEFAULT_SETTINGS[key] + 1 };
+      expect(requiresAccumulationReset(DEFAULT_SETTINGS, changed)).toBe(false);
+    },
+  );
+});

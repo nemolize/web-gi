@@ -1,5 +1,5 @@
 {
-  "name": "web-app-template",
+  "name": "web-gi",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -43,6 +43,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "@vitest/coverage-v8": "^4.1.10",
+    "@webgpu/types": "^0.1.71",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-simple-import-sort": "^13.0.0",
