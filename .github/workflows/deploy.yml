@@ -1,0 +1,61 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Queue production deploys so a rapid second push cannot cancel an
+  # in-flight `wrangler deploy`; preview uploads are safe to supersede.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  Deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # `pull-requests: write` is needed only by the sticky-comment steps, which
+    # are themselves gated on `github.event_name == 'pull_request'`.
+    permissions:
+      contents: read
+      pull-requests: write
+    # Manual production deploys are limited to main. Fork and Dependabot PRs cannot access this workflow's secret.
+    if: ${{ (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) }}
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'preview' }}
+      url: ${{ steps.deploy.outputs.deployment-url }}
+    steps:
+      - if: ${{ github.event_name == 'pull_request' }}
+        name: Show wip message in sticky comment
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          message: "Version Preview URL: ⏳deployment is in progress..."
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+
+      - run: pnpm run build
+
+      - id: deploy
+        name: Deploy
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: ${{ github.event_name == 'pull_request' && 'versions upload' || 'deploy' }}
+
+      - if: ${{ github.event_name == 'pull_request' }}
+        name: Show version preview URL in sticky comment
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          message: "Version Preview URL: ${{ steps.deploy.outputs.deployment-url }}"
+
+      - if: ${{ failure() && github.event_name == 'pull_request' }}
+        name: Show error message in sticky comment
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          message: "Version Preview URL: ❌deployment failed."
