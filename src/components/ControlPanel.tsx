@@ -1,3 +1,11 @@
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  memo,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
 import type { RendererStats } from "@/gi/renderer";
 import type { SceneVariant } from "@/gi/scene";
 import type { RenderMode, RenderSettings } from "@/gi/settings";
@@ -8,6 +16,9 @@ type ToggleProps = {
   readonly disabled: boolean;
   readonly onChange: (checked: boolean) => void;
 };
+
+const FOCUSABLE_CONTROL_SELECTOR =
+  'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 const Toggle = ({ label, checked, disabled, onChange }: ToggleProps) => (
   <label
@@ -133,222 +144,343 @@ export type ControlPanelProps = {
   readonly resetView: () => void;
 };
 
+type SettingsSectionsProps = Pick<
+  ControlPanelProps,
+  "settings" | "updateSettings" | "resetView"
+>;
+
+const SettingsSections = memo(
+  ({ settings, updateSettings, resetView }: SettingsSectionsProps) => {
+    const restir = settings.mode === "restir";
+
+    return (
+      <>
+        <Section title="Renderer">
+          <Segmented<RenderMode>
+            label="Mode"
+            value={settings.mode}
+            options={[
+              { value: "restir", label: "ReSTIR" },
+              { value: "reference", label: "Reference PT" },
+            ]}
+            onChange={(mode) => {
+              updateSettings({ mode });
+            }}
+          />
+          <Segmented<SceneVariant>
+            label="Scene"
+            value={settings.scene}
+            options={[
+              { value: "classic", label: "Classic" },
+              { value: "manyLights", label: "30 lights" },
+            ]}
+            onChange={(scene) => {
+              updateSettings({ scene });
+            }}
+          />
+        </Section>
+
+        <Section title="Direct light (ReSTIR DI)">
+          <Toggle
+            label="Enabled"
+            checked={settings.diEnabled}
+            disabled={!restir}
+            onChange={(diEnabled) => {
+              updateSettings({ diEnabled });
+            }}
+          />
+          <Toggle
+            label="Temporal reuse"
+            checked={settings.diTemporal}
+            disabled={!restir || !settings.diEnabled}
+            onChange={(diTemporal) => {
+              updateSettings({ diTemporal });
+            }}
+          />
+          <Toggle
+            label="Spatial reuse"
+            checked={settings.diSpatial}
+            disabled={!restir || !settings.diEnabled}
+            onChange={(diSpatial) => {
+              updateSettings({ diSpatial });
+            }}
+          />
+          <Slider
+            label="RIS candidates"
+            value={settings.diCandidates}
+            min={1}
+            max={32}
+            step={1}
+            format={(value) => `M = ${String(value)}`}
+            onChange={(diCandidates) => {
+              updateSettings({ diCandidates });
+            }}
+          />
+        </Section>
+
+        <Section title="Indirect light (ReSTIR GI)">
+          <Toggle
+            label="Enabled"
+            checked={settings.giEnabled}
+            disabled={!restir}
+            onChange={(giEnabled) => {
+              updateSettings({ giEnabled });
+            }}
+          />
+          <Toggle
+            label="Temporal reuse"
+            checked={settings.giTemporal}
+            disabled={!restir || !settings.giEnabled}
+            onChange={(giTemporal) => {
+              updateSettings({ giTemporal });
+            }}
+          />
+          <Toggle
+            label="Spatial reuse"
+            checked={settings.giSpatial}
+            disabled={!restir || !settings.giEnabled}
+            onChange={(giSpatial) => {
+              updateSettings({ giSpatial });
+            }}
+          />
+          <Slider
+            label="Bounces"
+            value={settings.maxBounces}
+            min={1}
+            max={6}
+            step={1}
+            format={(value) => String(value)}
+            onChange={(maxBounces) => {
+              updateSettings({ maxBounces });
+            }}
+          />
+        </Section>
+
+        <Section title="Reuse & filtering">
+          <Slider
+            label="Spatial neighbours"
+            value={settings.spatialSamples}
+            min={0}
+            max={8}
+            step={1}
+            format={(value) => String(value)}
+            onChange={(spatialSamples) => {
+              updateSettings({ spatialSamples });
+            }}
+          />
+          <Slider
+            label="Spatial radius"
+            value={settings.spatialRadius}
+            min={2}
+            max={64}
+            step={1}
+            format={(value) => `${String(value)} px`}
+            onChange={(spatialRadius) => {
+              updateSettings({ spatialRadius });
+            }}
+          />
+          <Slider
+            label="Accumulation window"
+            value={settings.maxHistory}
+            min={1}
+            max={1024}
+            step={1}
+            format={(value) => `${String(value)} frames`}
+            onChange={(maxHistory) => {
+              updateSettings({ maxHistory });
+            }}
+          />
+          <Toggle
+            label="À-trous filter"
+            checked={settings.denoise}
+            disabled={!restir}
+            onChange={(denoise) => {
+              updateSettings({ denoise });
+            }}
+          />
+        </Section>
+
+        <Section title="Output">
+          <Slider
+            label="Resolution scale"
+            value={settings.resolutionScale}
+            min={0.25}
+            max={1}
+            step={0.05}
+            format={(value) => `${String(Math.round(value * 100))}%`}
+            onChange={(resolutionScale) => {
+              updateSettings({ resolutionScale });
+            }}
+          />
+          <Slider
+            label="Exposure"
+            value={settings.exposure}
+            min={0.1}
+            max={4}
+            step={0.05}
+            format={(value) => value.toFixed(2)}
+            onChange={(exposure) => {
+              updateSettings({ exposure });
+            }}
+          />
+          <button
+            type="button"
+            onClick={resetView}
+            className="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm text-neutral-200 hover:bg-neutral-700"
+          >
+            Reset view
+          </button>
+        </Section>
+      </>
+    );
+  },
+);
+
 export const ControlPanel = ({
   settings,
   stats,
   updateSettings,
   resetView,
 }: ControlPanelProps) => {
-  const restir = settings.mode === "restir";
+  const [isOpen, setIsOpen] = useState(false);
+  const openButtonRef = useRef<HTMLButtonElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const fps = stats.frameMs > 0 ? 1000 / stats.frameMs : 0;
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    closeButtonRef.current?.focus();
+  }, [isOpen]);
+
+  useEffect(() => {
+    const desktopQuery = window.matchMedia("(min-width: 1024px)");
+    const closeAtDesktopWidth = (event: MediaQueryListEvent): void => {
+      if (event.matches) setIsOpen(false);
+    };
+
+    desktopQuery.addEventListener("change", closeAtDesktopWidth);
+    return () => {
+      desktopQuery.removeEventListener("change", closeAtDesktopWidth);
+    };
+  }, []);
+
+  const closePanel = (): void => {
+    setIsOpen(false);
+    openButtonRef.current?.focus();
+  };
+
+  const handlePanelKeyDown = (event: ReactKeyboardEvent<HTMLElement>): void => {
+    if (!isOpen) return;
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePanel();
+      return;
+    }
+
+    if (event.key !== "Tab" || panelRef.current === null) return;
+
+    const focusableControls = panelRef.current.querySelectorAll<HTMLElement>(
+      FOCUSABLE_CONTROL_SELECTOR,
+    );
+    const firstControl = focusableControls.item(0);
+    const lastControl = focusableControls.item(focusableControls.length - 1);
+
+    if (event.shiftKey && document.activeElement === firstControl) {
+      event.preventDefault();
+      lastControl.focus();
+    } else if (!event.shiftKey && document.activeElement === lastControl) {
+      event.preventDefault();
+      firstControl.focus();
+    }
+  };
+
   return (
-    <aside className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l border-neutral-800 bg-neutral-950 p-4">
-      <header>
-        <h1 className="text-lg font-semibold text-neutral-100">web-gi</h1>
-        <p className="text-xs text-neutral-500">
-          Real-time global illumination — ReSTIR DI/GI on WebGPU
-        </p>
-      </header>
+    <>
+      <button
+        ref={openButtonRef}
+        type="button"
+        aria-controls="render-controls"
+        aria-expanded={isOpen}
+        aria-hidden={isOpen}
+        tabIndex={isOpen ? -1 : undefined}
+        onClick={() => {
+          setIsOpen(true);
+        }}
+        className="fixed top-3 right-3 z-30 min-h-11 rounded-full border border-neutral-700 bg-neutral-950/90 px-4 text-sm font-medium text-neutral-100 shadow-lg backdrop-blur hover:bg-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400 lg:hidden"
+      >
+        Controls
+      </button>
 
-      <Section title="Renderer">
-        <Segmented<RenderMode>
-          label="Mode"
-          value={settings.mode}
-          options={[
-            { value: "restir", label: "ReSTIR" },
-            { value: "reference", label: "Reference PT" },
-          ]}
-          onChange={(mode) => {
-            updateSettings({ mode });
-          }}
+      {isOpen && (
+        <div
+          aria-hidden="true"
+          onPointerDown={closePanel}
+          className="fixed inset-0 z-30 bg-black/55 lg:hidden"
         />
-        <Segmented<SceneVariant>
-          label="Scene"
-          value={settings.scene}
-          options={[
-            { value: "classic", label: "Classic" },
-            { value: "manyLights", label: "30 lights" },
-          ]}
-          onChange={(scene) => {
-            updateSettings({ scene });
-          }}
-        />
-      </Section>
+      )}
 
-      <Section title="Direct light (ReSTIR DI)">
-        <Toggle
-          label="Enabled"
-          checked={settings.diEnabled}
-          disabled={!restir}
-          onChange={(diEnabled) => {
-            updateSettings({ diEnabled });
-          }}
-        />
-        <Toggle
-          label="Temporal reuse"
-          checked={settings.diTemporal}
-          disabled={!restir || !settings.diEnabled}
-          onChange={(diTemporal) => {
-            updateSettings({ diTemporal });
-          }}
-        />
-        <Toggle
-          label="Spatial reuse"
-          checked={settings.diSpatial}
-          disabled={!restir || !settings.diEnabled}
-          onChange={(diSpatial) => {
-            updateSettings({ diSpatial });
-          }}
-        />
-        <Slider
-          label="RIS candidates"
-          value={settings.diCandidates}
-          min={1}
-          max={32}
-          step={1}
-          format={(value) => `M = ${String(value)}`}
-          onChange={(diCandidates) => {
-            updateSettings({ diCandidates });
-          }}
-        />
-      </Section>
-
-      <Section title="Indirect light (ReSTIR GI)">
-        <Toggle
-          label="Enabled"
-          checked={settings.giEnabled}
-          disabled={!restir}
-          onChange={(giEnabled) => {
-            updateSettings({ giEnabled });
-          }}
-        />
-        <Toggle
-          label="Temporal reuse"
-          checked={settings.giTemporal}
-          disabled={!restir || !settings.giEnabled}
-          onChange={(giTemporal) => {
-            updateSettings({ giTemporal });
-          }}
-        />
-        <Toggle
-          label="Spatial reuse"
-          checked={settings.giSpatial}
-          disabled={!restir || !settings.giEnabled}
-          onChange={(giSpatial) => {
-            updateSettings({ giSpatial });
-          }}
-        />
-        <Slider
-          label="Bounces"
-          value={settings.maxBounces}
-          min={1}
-          max={6}
-          step={1}
-          format={(value) => String(value)}
-          onChange={(maxBounces) => {
-            updateSettings({ maxBounces });
-          }}
-        />
-      </Section>
-
-      <Section title="Reuse & filtering">
-        <Slider
-          label="Spatial neighbours"
-          value={settings.spatialSamples}
-          min={0}
-          max={8}
-          step={1}
-          format={(value) => String(value)}
-          onChange={(spatialSamples) => {
-            updateSettings({ spatialSamples });
-          }}
-        />
-        <Slider
-          label="Spatial radius"
-          value={settings.spatialRadius}
-          min={2}
-          max={64}
-          step={1}
-          format={(value) => `${String(value)} px`}
-          onChange={(spatialRadius) => {
-            updateSettings({ spatialRadius });
-          }}
-        />
-        <Slider
-          label="Accumulation window"
-          value={settings.maxHistory}
-          min={1}
-          max={1024}
-          step={1}
-          format={(value) => `${String(value)} frames`}
-          onChange={(maxHistory) => {
-            updateSettings({ maxHistory });
-          }}
-        />
-        <Toggle
-          label="À-trous filter"
-          checked={settings.denoise}
-          disabled={!restir}
-          onChange={(denoise) => {
-            updateSettings({ denoise });
-          }}
-        />
-      </Section>
-
-      <Section title="Output">
-        <Slider
-          label="Resolution scale"
-          value={settings.resolutionScale}
-          min={0.25}
-          max={1}
-          step={0.05}
-          format={(value) => `${String(Math.round(value * 100))}%`}
-          onChange={(resolutionScale) => {
-            updateSettings({ resolutionScale });
-          }}
-        />
-        <Slider
-          label="Exposure"
-          value={settings.exposure}
-          min={0.1}
-          max={4}
-          step={0.05}
-          format={(value) => value.toFixed(2)}
-          onChange={(exposure) => {
-            updateSettings({ exposure });
-          }}
-        />
-        <button
-          type="button"
-          onClick={resetView}
-          className="w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm text-neutral-200 hover:bg-neutral-700"
-        >
-          Reset view
-        </button>
-      </Section>
-
-      <Section title="Stats">
-        <dl className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-xs text-neutral-400">
-          <dt>resolution</dt>
-          <dd className="text-right text-neutral-200">
-            {stats.width}×{stats.height}
-          </dd>
-          <dt>frame</dt>
-          <dd className="text-right text-neutral-200">
-            {stats.frameMs.toFixed(1)} ms
-          </dd>
-          <dt>fps</dt>
-          <dd className="text-right text-neutral-200">{fps.toFixed(0)}</dd>
-          <dt>accumulated</dt>
-          <dd
-            data-testid="stat-accumulated"
-            className="text-right text-neutral-200"
+      <aside
+        ref={panelRef}
+        id="render-controls"
+        aria-label="Rendering controls"
+        role={isOpen ? "dialog" : undefined}
+        aria-modal={isOpen ? true : undefined}
+        onKeyDown={handlePanelKeyDown}
+        className={`fixed inset-x-0 bottom-0 z-40 flex max-h-[78svh] flex-col gap-4 overflow-y-auto overscroll-contain rounded-t-2xl border-t border-neutral-700 bg-neutral-950 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl lg:static lg:z-auto lg:max-h-none lg:w-80 lg:shrink-0 lg:translate-y-0 lg:rounded-none lg:border-t-0 lg:border-l lg:border-neutral-800 lg:p-4 lg:shadow-none ${
+          isOpen
+            ? "visible translate-y-0"
+            : "invisible translate-y-full lg:visible"
+        }`}
+      >
+        <header className="sticky -top-4 z-10 -mx-4 -mt-4 flex items-start justify-between border-b border-neutral-800 bg-neutral-950 px-4 py-3 lg:static lg:mx-0 lg:mt-0 lg:block lg:border-0 lg:bg-transparent lg:p-0">
+          <div>
+            <h1 className="text-lg font-semibold text-neutral-100">web-gi</h1>
+            <p className="text-xs text-neutral-500">
+              Real-time global illumination — ReSTIR DI/GI on WebGPU
+            </p>
+          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            aria-label="Close controls"
+            onClick={closePanel}
+            className="-mr-2 grid size-11 shrink-0 place-items-center rounded-full text-2xl leading-none text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400 lg:hidden"
           >
-            {stats.accumFrames}
-          </dd>
-        </dl>
-      </Section>
-    </aside>
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+
+        <SettingsSections
+          settings={settings}
+          updateSettings={updateSettings}
+          resetView={resetView}
+        />
+
+        <Section title="Stats">
+          <dl className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-xs text-neutral-400">
+            <dt>resolution</dt>
+            <dd className="text-right text-neutral-200">
+              {stats.width}×{stats.height}
+            </dd>
+            <dt>frame</dt>
+            <dd className="text-right text-neutral-200">
+              {stats.frameMs.toFixed(1)} ms
+            </dd>
+            <dt>fps</dt>
+            <dd className="text-right text-neutral-200">{fps.toFixed(0)}</dd>
+            <dt>accumulated</dt>
+            <dd
+              data-testid="stat-accumulated"
+              className="text-right text-neutral-200"
+            >
+              {stats.accumFrames}
+            </dd>
+          </dl>
+        </Section>
+      </aside>
+    </>
   );
 };

@@ -31,7 +31,7 @@ export const App = () => {
   } = useGiRenderer();
 
   return (
-    <div className="flex h-screen w-screen bg-neutral-900 text-neutral-100">
+    <div className="relative flex h-svh w-screen overflow-hidden bg-neutral-900 text-neutral-100">
       <main className="relative min-w-0 grow">
         <canvas
           ref={canvasRef}
@@ -55,7 +55,8 @@ export const App = () => {
         )}
         {status === "running" && (
           <p className="pointer-events-none absolute bottom-3 left-3 text-xs text-neutral-400">
-            Drag to orbit · scroll to dolly
+            Drag to orbit
+            <span className="hidden sm:inline"> · scroll to dolly</span>
           </p>
         )}
       </main>

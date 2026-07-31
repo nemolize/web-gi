@@ -49,3 +49,86 @@ test("exposes the ReSTIR stages as independent toggles", async ({ page }) => {
   await page.getByRole("radio", { name: "ReSTIR" }).click();
   await expect(spatialReuse).toBeEnabled();
 });
+
+test("keeps desktop sidebar keyboard navigation untrapped", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const resetView = page.getByRole("button", { name: "Reset view" });
+  await resetView.focus();
+  await page.keyboard.press("Escape");
+  await expect(resetView).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(resetView).not.toBeFocused();
+});
+
+test.describe("mobile controls", () => {
+  test.use({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    isMobile: true,
+  });
+
+  test("keeps the render full-screen until the controls are requested", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    const canvas = page.getByLabel("Cornell box render");
+    const controlsButton = page.getByRole("button", { name: "Controls" });
+    const panelElement = page.locator("#render-controls");
+    const panel = page.getByRole("dialog", { name: "Rendering controls" });
+
+    await expect(canvas).toBeVisible();
+    await expect(controlsButton).toBeVisible();
+    await expect(panelElement).not.toBeVisible();
+
+    await expect
+      .poll(async () => {
+        const box = await canvas.boundingBox();
+        return box === null ? null : { width: box.width, height: box.height };
+      })
+      .toEqual({ width: 390, height: 844 });
+
+    await controlsButton.click();
+    await expect(panel).toBeVisible();
+    await expect(page.getByRole("heading", { name: "web-gi" })).toBeVisible();
+    const closeButton = panel.getByRole("button", { name: "Close controls" });
+    await expect(closeButton).toBeFocused();
+
+    const panelBox = await panel.boundingBox();
+    expect(panelBox?.width).toBe(390);
+    expect(panelBox?.height).toBeLessThanOrEqual(844 * 0.78);
+
+    await page.keyboard.press("Shift+Tab");
+    await expect(
+      panel.getByRole("button", { name: "Reset view" }),
+    ).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(closeButton).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(panelElement).not.toBeVisible();
+    await expect(controlsButton).toBeFocused();
+  });
+
+  test("keeps on-demand controls on landscape phones", async ({ page }) => {
+    await page.setViewportSize({ width: 844, height: 390 });
+    await page.goto("/");
+
+    const canvas = page.getByLabel("Cornell box render");
+    const controlsButton = page.getByRole("button", { name: "Controls" });
+
+    await expect(controlsButton).toBeVisible();
+    await expect(
+      page.getByRole("dialog", { name: "Rendering controls" }),
+    ).not.toBeVisible();
+    await expect
+      .poll(async () => {
+        const box = await canvas.boundingBox();
+        return box === null ? null : { width: box.width, height: box.height };
+      })
+      .toEqual({ width: 844, height: 390 });
+  });
+});
