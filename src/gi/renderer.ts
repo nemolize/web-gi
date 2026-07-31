@@ -1,5 +1,6 @@
 import type { CameraBasis, OrbitCamera } from "@/gi/camera";
 import { cameraBasis } from "@/gi/camera";
+import { resolveRenderSize } from "@/gi/render-size";
 import type { Scene } from "@/gi/scene";
 import {
   buildScene,
@@ -42,8 +43,6 @@ const UNIFORM_BYTES = 192;
 const DI_RESERVOIR_BYTES = 32;
 const GI_RESERVOIR_BYTES = 48;
 const ATROUS_ITERATIONS = 3;
-/** Keeps the reservoir buffers well inside the default storage-binding limit. */
-const MAX_PIXELS = 1_000_000;
 
 type Binding =
   | { readonly kind: "uniform" }
@@ -511,16 +510,16 @@ export class GiRenderer {
 
   private resolveSize(): { width: number; height: number } {
     const rect = this.canvas.getBoundingClientRect();
-    const scale = this.settings.resolutionScale;
-    const rawWidth = Math.max(1, Math.floor(rect.width * scale));
-    const rawHeight = Math.max(1, Math.floor(rect.height * scale));
-    const overflow = (rawWidth * rawHeight) / MAX_PIXELS;
-    if (overflow <= 1) return { width: rawWidth, height: rawHeight };
-    const shrink = 1 / Math.sqrt(overflow);
-    return {
-      width: Math.max(1, Math.floor(rawWidth * shrink)),
-      height: Math.max(1, Math.floor(rawHeight * shrink)),
-    };
+    return resolveRenderSize(
+      rect.width,
+      rect.height,
+      this.settings.resolutionScale,
+      window.devicePixelRatio,
+      Math.min(
+        this.device.limits.maxTextureDimension2D,
+        this.device.limits.maxComputeWorkgroupsPerDimension * WORKGROUP_SIZE,
+      ),
+    );
   }
 
   private createTargets(width: number, height: number): Targets {
