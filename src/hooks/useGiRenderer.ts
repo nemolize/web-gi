@@ -19,7 +19,26 @@ export type UseGiRenderer = {
   readonly status: RendererStatus;
   readonly errorMessage: string | null;
   readonly resetView: () => void;
+  readonly retryRenderer: () => void;
 };
+
+export type RendererHandle = Pick<
+  GiRenderer,
+  | "destroy"
+  | "deviceLost"
+  | "notifyCameraChanged"
+  | "renderFrame"
+  | "setSettings"
+  | "stats"
+>;
+
+export type RendererFactory = (
+  canvas: HTMLCanvasElement,
+  settings: RenderSettings,
+) => Promise<RendererHandle>;
+
+const createRenderer: RendererFactory = (canvas, settings) =>
+  GiRenderer.create(canvas, settings);
 
 const EMPTY_STATS: RendererStats = {
   width: 0,
@@ -32,15 +51,24 @@ const STATS_INTERVAL_MS = 250;
 const ORBIT_SPEED = 0.005;
 const DOLLY_SPEED = 0.0015;
 
-export const useGiRenderer = (): UseGiRenderer => {
+export const useGiRenderer = (
+  rendererFactory: RendererFactory = createRenderer,
+): UseGiRenderer => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const rendererRef = useRef<GiRenderer | null>(null);
+  const rendererRef = useRef<RendererHandle | null>(null);
+  const rendererFactoryRef = useRef<RendererFactory>(rendererFactory);
   const cameraRef = useRef<OrbitCamera>(DEFAULT_CAMERA);
 
   const [settings, setSettings] = useState<RenderSettings>(DEFAULT_SETTINGS);
+  const settingsRef = useRef<RenderSettings>(settings);
   const [stats, setStats] = useState<RendererStats>(EMPTY_STATS);
   const [status, setStatus] = useState<RendererStatus>("initializing");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [rendererVersion, setRendererVersion] = useState(0);
+
+  useEffect(() => {
+    rendererFactoryRef.current = rendererFactory;
+  }, [rendererFactory]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -48,17 +76,44 @@ export const useGiRenderer = (): UseGiRenderer => {
 
     let disposed = false;
     let animationFrame = 0;
-    let renderer: GiRenderer | null = null;
+    let renderer: RendererHandle | null = null;
 
     const start = async (): Promise<void> => {
       try {
-        renderer = await GiRenderer.create(canvas, DEFAULT_SETTINGS);
+        renderer = await rendererFactoryRef.current(
+          canvas,
+          settingsRef.current,
+        );
         if (disposed) {
           renderer.destroy();
           return;
         }
+        renderer.setSettings(settingsRef.current);
         rendererRef.current = renderer;
+        setErrorMessage(null);
         setStatus("running");
+
+        const activeRenderer = renderer;
+        void activeRenderer.deviceLost.then((info) => {
+          if (
+            disposed ||
+            rendererRef.current !== activeRenderer ||
+            info.reason === "destroyed"
+          ) {
+            return;
+          }
+
+          cancelAnimationFrame(animationFrame);
+          rendererRef.current = null;
+          activeRenderer.destroy();
+          const detail = info.message.trim();
+          setErrorMessage(
+            detail.length > 0
+              ? `The WebGPU device was lost: ${detail}`
+              : "The WebGPU device was lost unexpectedly.",
+          );
+          setStatus("error");
+        });
 
         let lastStatsAt = 0;
         const loop = (): void => {
@@ -89,9 +144,10 @@ export const useGiRenderer = (): UseGiRenderer => {
       rendererRef.current = null;
       renderer?.destroy();
     };
-  }, []);
+  }, [rendererVersion]);
 
   useEffect(() => {
+    settingsRef.current = settings;
     rendererRef.current?.setSettings(settings);
   }, [settings]);
 
@@ -160,6 +216,12 @@ export const useGiRenderer = (): UseGiRenderer => {
     rendererRef.current?.notifyCameraChanged();
   }, []);
 
+  const retryRenderer = useCallback((): void => {
+    setStatus("initializing");
+    setErrorMessage(null);
+    setRendererVersion((version) => version + 1);
+  }, []);
+
   return {
     canvasRef,
     settings,
@@ -168,5 +230,6 @@ export const useGiRenderer = (): UseGiRenderer => {
     status,
     errorMessage,
     resetView,
+    retryRenderer,
   };
 };

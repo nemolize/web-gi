@@ -38,6 +38,8 @@ export type RendererStats = {
   readonly frameMs: number;
 };
 
+export type DeviceLossInfo = Pick<GPUDeviceLostInfo, "message" | "reason">;
+
 const WORKGROUP_SIZE = 8;
 const UNIFORM_BYTES = 192;
 const DI_RESERVOIR_BYTES = 32;
@@ -497,6 +499,10 @@ export class GiRenderer {
 
   resetAccumulation(): void {
     this.accumFrames = 0;
+  }
+
+  get deviceLost(): Promise<DeviceLossInfo> {
+    return this.device.lost;
   }
 
   get stats(): RendererStats {
