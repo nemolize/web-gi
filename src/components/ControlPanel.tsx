@@ -19,6 +19,7 @@ type ToggleProps = {
 
 const FOCUSABLE_CONTROL_SELECTOR =
   'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
 
 const Toggle = ({ label, checked, disabled, onChange }: ToggleProps) => (
   <label
@@ -346,6 +347,7 @@ export const ControlPanel = ({
   const openButtonRef = useRef<HTMLButtonElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
+  const lastFocusedControlRef = useRef<HTMLElement>(null);
   const fps = stats.frameMs > 0 ? 1000 / stats.frameMs : 0;
 
   useEffect(() => {
@@ -355,14 +357,56 @@ export const ControlPanel = ({
   }, [isOpen]);
 
   useEffect(() => {
-    const desktopQuery = window.matchMedia("(min-width: 1024px)");
+    const desktopQuery = window.matchMedia(DESKTOP_MEDIA_QUERY);
+    let focusFrame: number | undefined;
+
+    const scheduleFocus = (getTarget: () => HTMLElement | null | undefined) => {
+      if (focusFrame !== undefined) window.cancelAnimationFrame(focusFrame);
+      focusFrame = window.requestAnimationFrame(() => {
+        getTarget()?.focus();
+        focusFrame = undefined;
+      });
+    };
+
     const closeAtDesktopWidth = (event: MediaQueryListEvent): void => {
-      if (event.matches) setIsOpen(false);
+      const activeElement = document.activeElement;
+      const focusWasDropped = activeElement === document.body;
+      const focusWasInPanel =
+        panelRef.current?.contains(activeElement) === true ||
+        (focusWasDropped &&
+          panelRef.current?.contains(lastFocusedControlRef.current) === true);
+      const focusWasOnOpener =
+        activeElement === openButtonRef.current ||
+        (focusWasDropped &&
+          lastFocusedControlRef.current === openButtonRef.current);
+      const activePanelControlIsVisible =
+        activeElement instanceof HTMLElement &&
+        panelRef.current?.contains(activeElement) === true &&
+        activeElement.getClientRects().length > 0;
+
+      if (event.matches) {
+        setIsOpen(false);
+        if (
+          (focusWasInPanel || focusWasOnOpener) &&
+          !activePanelControlIsVisible
+        ) {
+          scheduleFocus(() =>
+            Array.from(
+              panelRef.current?.querySelectorAll<HTMLElement>(
+                FOCUSABLE_CONTROL_SELECTOR,
+              ) ?? [],
+            ).find((control) => control.getClientRects().length > 0),
+          );
+        }
+      } else if (focusWasInPanel) {
+        scheduleFocus(() => openButtonRef.current);
+      }
     };
 
     desktopQuery.addEventListener("change", closeAtDesktopWidth);
     return () => {
       desktopQuery.removeEventListener("change", closeAtDesktopWidth);
+      if (focusFrame !== undefined) window.cancelAnimationFrame(focusFrame);
     };
   }, []);
 
@@ -406,6 +450,9 @@ export const ControlPanel = ({
         aria-expanded={isOpen}
         aria-hidden={isOpen}
         tabIndex={isOpen ? -1 : undefined}
+        onFocus={() => {
+          lastFocusedControlRef.current = openButtonRef.current;
+        }}
         onClick={() => {
           setIsOpen(true);
         }}
@@ -428,6 +475,11 @@ export const ControlPanel = ({
         aria-label="Rendering controls"
         role={isOpen ? "dialog" : undefined}
         aria-modal={isOpen ? true : undefined}
+        onFocusCapture={(event) => {
+          if (event.target instanceof HTMLElement) {
+            lastFocusedControlRef.current = event.target;
+          }
+        }}
         onKeyDown={handlePanelKeyDown}
         className={`fixed inset-x-0 bottom-0 z-40 flex max-h-[78svh] flex-col gap-4 overflow-y-auto overscroll-contain rounded-t-2xl border-t border-neutral-700 bg-neutral-950 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl lg:static lg:z-auto lg:max-h-none lg:w-80 lg:shrink-0 lg:translate-y-0 lg:rounded-none lg:border-t-0 lg:border-l lg:border-neutral-800 lg:p-4 lg:shadow-none ${
           isOpen

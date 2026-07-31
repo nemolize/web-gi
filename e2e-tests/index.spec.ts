@@ -131,4 +131,31 @@ test.describe("mobile controls", () => {
       })
       .toEqual({ width: 844, height: 390 });
   });
+
+  test("preserves visible focus across the desktop breakpoint", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    const controlsButton = page.getByRole("button", { name: "Controls" });
+    await controlsButton.click();
+    await expect(
+      page
+        .getByRole("dialog", { name: "Rendering controls" })
+        .getByRole("button", { name: "Close controls" }),
+    ).toBeFocused();
+
+    await page.setViewportSize({ width: 1024, height: 844 });
+    await expect(page.getByRole("radio", { name: "ReSTIR" })).toBeFocused();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(controlsButton).toBeFocused();
+    await expect(page.locator("#render-controls")).not.toBeVisible();
+
+    await controlsButton.click();
+    const exposure = page.getByLabel("Exposure");
+    await exposure.focus();
+    await page.setViewportSize({ width: 1024, height: 844 });
+    await expect(exposure).toBeFocused();
+  });
 });
