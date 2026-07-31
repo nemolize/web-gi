@@ -1,13 +1,14 @@
 import { ControlPanel } from "@/components/ControlPanel";
 import { useGiRenderer } from "@/hooks/useGiRenderer";
 
-const Overlay = ({
-  title,
-  detail,
-}: {
+interface OverlayProps {
   readonly title: string;
   readonly detail: string;
-}) => (
+  readonly actionLabel?: string;
+  readonly onAction?: () => void;
+}
+
+const Overlay = ({ title, detail, actionLabel, onAction }: OverlayProps) => (
   <div
     role="alert"
     className="absolute inset-0 flex items-center justify-center bg-neutral-950/90 p-8"
@@ -15,6 +16,15 @@ const Overlay = ({
     <div className="max-w-md text-center">
       <h2 className="text-lg font-semibold text-neutral-100">{title}</h2>
       <p className="mt-2 text-sm text-neutral-400">{detail}</p>
+      {actionLabel !== undefined && onAction !== undefined && (
+        <button
+          type="button"
+          className="mt-5 rounded-lg border border-neutral-600 bg-neutral-800 px-4 py-2 text-sm font-medium text-neutral-100 transition-colors hover:bg-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400"
+          onClick={onAction}
+        >
+          {actionLabel}
+        </button>
+      )}
     </div>
   </div>
 );
@@ -28,6 +38,7 @@ export const App = () => {
     status,
     errorMessage,
     resetView,
+    retryRenderer,
   } = useGiRenderer();
 
   return (
@@ -49,8 +60,10 @@ export const App = () => {
         )}
         {status === "error" && (
           <Overlay
-            title="Renderer failed to start"
+            title="Renderer unavailable"
             detail={errorMessage ?? "Unknown error."}
+            actionLabel="Retry renderer"
+            onAction={retryRenderer}
           />
         )}
         {status === "running" && (
