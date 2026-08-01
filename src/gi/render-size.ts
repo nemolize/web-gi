@@ -8,18 +8,28 @@ export const MAX_RENDER_PIXELS = 1_000_000;
 
 const MIN_RENDER_SIZE: RenderSize = { width: 1, height: 1 };
 
-/**
- * `maxPixels` is the caller's memory budget: every target scales with it, so a
- * device that cannot allocate at the default budget renders at a smaller one.
- */
-export const resolveRenderSize = (
-  cssWidth: number,
-  cssHeight: number,
-  resolutionScale: number,
-  devicePixelRatio: number,
-  maxDimension: number,
-  maxPixels: number = MAX_RENDER_PIXELS,
-): RenderSize => {
+export type RenderSizeRequest = {
+  readonly cssWidth: number;
+  readonly cssHeight: number;
+  readonly resolutionScale: number;
+  readonly devicePixelRatio: number;
+  /** Largest extent either axis may take, from the device's own limits. */
+  readonly maxDimension: number;
+  /**
+   * The caller's memory budget. Every target scales with it, so a device that
+   * cannot allocate at the default renders at a smaller one.
+   */
+  readonly maxPixels?: number;
+};
+
+export const resolveRenderSize = ({
+  cssWidth,
+  cssHeight,
+  resolutionScale,
+  devicePixelRatio,
+  maxDimension,
+  maxPixels = MAX_RENDER_PIXELS,
+}: RenderSizeRequest): RenderSize => {
   if (
     !Number.isFinite(cssWidth) ||
     !Number.isFinite(cssHeight) ||
