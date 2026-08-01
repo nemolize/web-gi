@@ -98,6 +98,51 @@ fn giTarget(r: GiReservoir) -> f32 {
   return r.radiance.w;
 }
 
+// Writes go through these too: with the lane mapping hardcoded at each write
+// site, reshuffling the lanes would update the readers and silently corrupt
+// the writers.
+fn giSetM(r: ptr<function, GiReservoir>, value: f32) {
+  (*r).samplePos.w = value;
+}
+
+fn giAddM(r: ptr<function, GiReservoir>, inc: f32) {
+  (*r).samplePos.w += inc;
+}
+
+fn giSetWSum(r: ptr<function, GiReservoir>, value: f32) {
+  (*r).sampleNormal.w = value;
+}
+
+fn giAddWSum(r: ptr<function, GiReservoir>, inc: f32) {
+  (*r).sampleNormal.w += inc;
+}
+
+/** Replaces the stored sample, preserving the running m and wSum. */
+fn giSetSample(
+  r: ptr<function, GiReservoir>,
+  samplePos: vec3f,
+  sampleNormal: vec3f,
+  radiance: vec3f,
+  targetPdf: f32,
+) {
+  (*r).samplePos = vec4f(samplePos, giM(*r));
+  (*r).sampleNormal = vec4f(sampleNormal, giWSum(*r));
+  (*r).radiance = vec4f(radiance, targetPdf);
+}
+
+/** A single-sample reservoir with m and wSum still zero. */
+fn giReservoirSample(
+  samplePos: vec3f,
+  sampleNormal: vec3f,
+  radiance: vec3f,
+) -> GiReservoir {
+  return GiReservoir(
+    vec4f(samplePos, 0.0),
+    vec4f(sampleNormal, 0.0),
+    vec4f(radiance, 0.0),
+  );
+}
+
 const FLAG_DI_ENABLED: u32 = 1u;
 const FLAG_DI_TEMPORAL: u32 = 2u;
 const FLAG_DI_SPATIAL: u32 = 4u;
@@ -248,15 +293,13 @@ fn giReservoirUpdate(
   mInc: f32,
   u: f32,
 ) {
-  (*r).samplePos.w += mInc;
+  giAddM(r, mInc);
   if (w <= 0.0) {
     return;
   }
-  (*r).sampleNormal.w += w;
-  if (u * (*r).sampleNormal.w <= w) {
-    (*r).samplePos = vec4f(samplePos, (*r).samplePos.w);
-    (*r).sampleNormal = vec4f(sampleNormal, (*r).sampleNormal.w);
-    (*r).radiance = vec4f(radiance, targetPdf);
+  giAddWSum(r, w);
+  if (u * giWSum(*r) <= w) {
+    giSetSample(r, samplePos, sampleNormal, radiance, targetPdf);
   }
 }
 
@@ -270,8 +313,8 @@ fn giReservoirCapM(r: GiReservoir, cap: f32) -> GiReservoir {
     return r;
   }
   var capped = r;
-  capped.sampleNormal.w = giWSum(r) * (cap / giM(r));
-  capped.samplePos.w = cap;
+  giSetWSum(&capped, giWSum(r) * (cap / giM(r)));
+  giSetM(&capped, cap);
   return capped;
 }
 

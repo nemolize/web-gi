@@ -118,7 +118,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       z += contributorM[i];
     }
   }
-  reservoir.samplePos.w = z;
+  giSetM(&reservoir, z);
 
   dstReservoirs[index] = reservoir;
 }

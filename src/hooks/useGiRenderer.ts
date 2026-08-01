@@ -26,7 +26,7 @@ export type RendererHandle = Pick<
   GiRenderer,
   | "destroy"
   | "deviceLost"
-  | "failure"
+  | "allocationError"
   | "notifyCameraChanged"
   | "renderFrame"
   | "setSettings"
@@ -124,7 +124,7 @@ export const useGiRenderer = (
           active.renderFrame(cameraRef.current);
           // A renderer that cannot allocate its targets keeps running and keeps
           // drawing black, so the failure has to be pulled out of it explicitly.
-          const failure = active.failure;
+          const failure = active.allocationError;
           if (failure !== null) {
             cancelAnimationFrame(animationFrame);
             rendererRef.current = null;

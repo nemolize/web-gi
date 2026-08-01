@@ -42,11 +42,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     // Emissive hits contribute nothing: direct light is ReSTIR DI's job, so
     // counting it again here would double the first bounce.
     let radiance = pathRadiance(hit.pos, hit.normal, hit.albedo, uni.maxBounces);
-    let candidate = GiReservoir(
-      vec4f(hit.pos, 0.0),
-      vec4f(hit.normal, 0.0),
-      vec4f(radiance, 0.0),
-    );
+    let candidate = giReservoirSample(hit.pos, hit.normal, radiance);
     let targetPdf = giTargetPdf(x, n, albedo, candidate);
     let sourcePdf = cosTheta * INV_PI;
     giReservoirUpdate(
@@ -60,7 +56,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       rand(),
     );
   } else {
-    reservoir.samplePos.w = 1.0;
+    giSetM(&reservoir, 1.0);
   }
 
   let temporal = (uni.flags & FLAG_GI_TEMPORAL) != 0u;
