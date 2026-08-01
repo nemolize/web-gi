@@ -3,11 +3,11 @@ import { MAX_RENDER_PIXELS, resolveRenderSize } from "@/gi/render-size";
 
 const MAX_RENDER_DIMENSION = 8192;
 
-/** Every case shares the device limit; only the interesting fields vary. */
-const resolve = (
-  request: Partial<RenderSizeRequest> &
-    Pick<RenderSizeRequest, "cssWidth" | "cssHeight">,
-) =>
+type Overrides = Partial<RenderSizeRequest> &
+  Pick<RenderSizeRequest, "cssWidth" | "cssHeight">;
+
+/** Fills in the fields a case is not exercising, so only those it is show up. */
+const resolve = (request: Overrides) =>
   resolveRenderSize({
     resolutionScale: 1,
     devicePixelRatio: 1,
@@ -105,45 +105,25 @@ describe("resolveRenderSize", () => {
     expect(size.width / size.height).toBeCloseTo(800 / 600, 2);
   });
 
-  it.each<RenderSizeRequest>([
-    {
-      cssWidth: Number.POSITIVE_INFINITY,
-      cssHeight: 600,
-      resolutionScale: 1,
-      devicePixelRatio: 1,
-      maxDimension: MAX_RENDER_DIMENSION,
-    },
+  it.each<Overrides>([
+    { cssWidth: Number.POSITIVE_INFINITY, cssHeight: 600 },
     {
       cssWidth: 800,
       cssHeight: 600,
       resolutionScale: Number.POSITIVE_INFINITY,
-      devicePixelRatio: 1,
-      maxDimension: MAX_RENDER_DIMENSION,
     },
     {
       cssWidth: 800,
       cssHeight: 600,
       resolutionScale: Number.MAX_VALUE,
       devicePixelRatio: Number.MAX_VALUE,
-      maxDimension: MAX_RENDER_DIMENSION,
     },
-    {
-      cssWidth: 800,
-      cssHeight: 600,
-      resolutionScale: 1,
-      devicePixelRatio: 1,
-      maxDimension: MAX_RENDER_DIMENSION,
-      maxPixels: 0,
-    },
-    {
-      cssWidth: 800,
-      cssHeight: 600,
-      resolutionScale: 1,
-      devicePixelRatio: 1,
-      maxDimension: MAX_RENDER_DIMENSION,
-      maxPixels: Number.NaN,
-    },
+    { cssWidth: 800, cssHeight: 600, maxPixels: 0 },
+    { cssWidth: 800, cssHeight: 600, maxPixels: Number.NaN },
+    // The only budget the finiteness check catches on its own: every other
+    // invalid value also collapses the shrink factor further down.
+    { cssWidth: 800, cssHeight: 600, maxPixels: Number.POSITIVE_INFINITY },
   ])("falls back safely for invalid or overflowing inputs", (request) => {
-    expect(resolveRenderSize(request)).toEqual({ width: 1, height: 1 });
+    expect(resolve(request)).toEqual({ width: 1, height: 1 });
   });
 });
