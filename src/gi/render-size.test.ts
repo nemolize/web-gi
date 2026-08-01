@@ -80,10 +80,27 @@ describe("resolveRenderSize", () => {
     },
   );
 
-  it.each([
+  // The renderer lowers the budget when a device cannot allocate the targets.
+  it("honours a caller-supplied pixel budget", () => {
+    const size = resolveRenderSize(
+      800,
+      600,
+      1,
+      1,
+      MAX_RENDER_DIMENSION,
+      65_536,
+    );
+
+    expect(size.width * size.height).toBeLessThanOrEqual(65_536);
+    expect(size.width / size.height).toBeCloseTo(800 / 600, 2);
+  });
+
+  it.each<Parameters<typeof resolveRenderSize>>([
     [Number.POSITIVE_INFINITY, 600, 1, 1, MAX_RENDER_DIMENSION],
     [800, 600, Number.POSITIVE_INFINITY, 1, MAX_RENDER_DIMENSION],
     [800, 600, Number.MAX_VALUE, Number.MAX_VALUE, MAX_RENDER_DIMENSION],
+    [800, 600, 1, 1, MAX_RENDER_DIMENSION, 0],
+    [800, 600, 1, 1, MAX_RENDER_DIMENSION, Number.NaN],
   ])("falls back safely for invalid or overflowing inputs", (...input) => {
     expect(resolveRenderSize(...input)).toEqual({ width: 1, height: 1 });
   });

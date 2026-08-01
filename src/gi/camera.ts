@@ -57,6 +57,20 @@ export const cameraPosition = (camera: OrbitCamera): Vec3 => {
   );
 };
 
+/**
+ * `fovY` frames the room on a viewport at least as wide as it is tall. Below
+ * that, the horizontal half-extent (`tanHalfFov * aspect`) keeps shrinking with
+ * the aspect ratio, which crops a phone's portrait view down to a patch of the
+ * back wall. Widening the vertical field of view instead holds the horizontal
+ * extent at its square-viewport value.
+ */
+const resolveTanHalfFov = (camera: OrbitCamera, aspect: number): number => {
+  const tanHalf = Math.tan(camera.fovY / 2);
+  return Number.isFinite(aspect) && aspect > 0 && aspect < 1
+    ? tanHalf / aspect
+    : tanHalf;
+};
+
 export const cameraBasis = (
   camera: OrbitCamera,
   aspect: number,
@@ -70,7 +84,7 @@ export const cameraBasis = (
     forward,
     right,
     up,
-    tanHalfFov: Math.tan(camera.fovY / 2),
+    tanHalfFov: resolveTanHalfFov(camera, aspect),
     aspect,
   };
 };

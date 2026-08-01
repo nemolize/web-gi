@@ -1,6 +1,6 @@
 import type { CameraBasis, OrbitCamera } from "@/gi/camera";
 import { cameraBasis } from "@/gi/camera";
-import { resolveRenderSize } from "@/gi/render-size";
+import { MAX_RENDER_PIXELS, resolveRenderSize } from "@/gi/render-size";
 import type { Scene } from "@/gi/scene";
 import {
   buildScene,
@@ -45,6 +45,12 @@ const UNIFORM_BYTES = 192;
 const DI_RESERVOIR_BYTES = 32;
 const GI_RESERVOIR_BYTES = 48;
 const ATROUS_ITERATIONS = 3;
+
+/** Widest per-pixel reservoir stride; bounds the storage-buffer allocations. */
+const MAX_RESERVOIR_BYTES = Math.max(DI_RESERVOIR_BYTES, GI_RESERVOIR_BYTES);
+
+/** Below this, shrinking further buys nothing worth looking at. */
+const MIN_PIXEL_BUDGET = 256 * 256;
 
 type Binding =
   | { readonly kind: "uniform" }
@@ -208,6 +214,17 @@ const writeCamera = (
 };
 
 export class GiRenderer {
+  /**
+   * Shared across instances: a device that cannot allocate at a given budget
+   * fails the same way after "Retry renderer", so what one instance learned has
+   * to outlive it. Reset it between tests or after the constraint is gone.
+   */
+  private static learnedPixelBudget = MAX_RENDER_PIXELS;
+
+  static resetLearnedPixelBudget(): void {
+    GiRenderer.learnedPixelBudget = MAX_RENDER_PIXELS;
+  }
+
   private readonly device: GPUDevice;
   private readonly context: GPUCanvasContext;
   private readonly canvas: HTMLCanvasElement;
@@ -225,6 +242,9 @@ export class GiRenderer {
   private targets: Targets | null = null;
 
   private settings: RenderSettings;
+  private pixelBudget: number;
+  private allocationFailure: string | null = null;
+  private deviceIsLost = false;
   private frame = 0;
   private accumFrames = 0;
   private parity = 0;
@@ -244,6 +264,13 @@ export class GiRenderer {
     this.context = context;
     this.canvas = canvas;
     this.settings = settings;
+    this.pixelBudget = Math.min(
+      GiRenderer.learnedPixelBudget,
+      Math.floor(
+        device.limits.maxStorageBufferBindingSize / MAX_RESERVOIR_BYTES,
+      ),
+      Math.floor(device.limits.maxBufferSize / MAX_RESERVOIR_BYTES),
+    );
     this.layouts = GiRenderer.createLayouts(device);
     this.pipelines = GiRenderer.createPipelines(device, this.layouts, format);
     this.uniformBuffer = device.createBuffer({
@@ -264,6 +291,10 @@ export class GiRenderer {
       });
       device.queue.writeBuffer(buffer, 0, new Int32Array([1 << i, 0, 0, 0]));
       return buffer;
+    });
+
+    void device.lost.then(() => {
+      this.deviceIsLost = true;
     });
 
     this.scene = buildScene(settings.scene);
@@ -290,6 +321,11 @@ export class GiRenderer {
       throw new WebGpuUnsupportedError("No suitable GPU adapter was found.");
     }
     const device = await adapter.requestDevice();
+    // Errors outside an error scope are invisible on browsers that don't log
+    // them, and a silent GPU error renders as a black canvas.
+    device.addEventListener("uncapturederror", (event) => {
+      console.error(`[web-gi] uncaptured WebGPU error: ${event.error.message}`);
+    });
     const context = canvas.getContext("webgpu");
     if (context === null) {
       throw new WebGpuUnsupportedError(
@@ -505,6 +541,11 @@ export class GiRenderer {
     return this.device.lost;
   }
 
+  /** Non-null once the targets cannot be allocated at any usable size. */
+  get allocationError(): string | null {
+    return this.allocationFailure;
+  }
+
   get stats(): RendererStats {
     return {
       width: this.targets?.width ?? 0,
@@ -525,6 +566,7 @@ export class GiRenderer {
         this.device.limits.maxTextureDimension2D,
         this.device.limits.maxComputeWorkgroupsPerDimension * WORKGROUP_SIZE,
       ),
+      this.pixelBudget,
     );
   }
 
@@ -694,6 +736,14 @@ export class GiRenderer {
     };
   }
 
+  private releaseTargets(): void {
+    const current = this.targets;
+    if (current === null) return;
+    this.targets = null;
+    for (const t of current.textures) t.destroy();
+    for (const b of current.buffers) b.destroy();
+  }
+
   private ensureTargets(): Targets {
     const { width, height } = this.resolveSize();
     const current = this.targets;
@@ -704,16 +754,59 @@ export class GiRenderer {
     ) {
       return current;
     }
-    if (current !== null) {
-      for (const t of current.textures) t.destroy();
-      for (const b of current.buffers) b.destroy();
-    }
+    this.releaseTargets();
     this.canvas.width = width;
     this.canvas.height = height;
+    this.device.pushErrorScope("out-of-memory");
+    this.device.pushErrorScope("validation");
     const targets = this.createTargets(width, height);
     this.targets = targets;
     this.resetAccumulation();
+    void this.watchAllocation(width * height);
     return targets;
+  }
+
+  /**
+   * A failed allocation is reported asynchronously and yields objects that are
+   * merely invalid, so every compute pass silently no-ops and the canvas stays
+   * black. Halving the budget and rebuilding is the only way back.
+   */
+  private async watchAllocation(pixels: number): Promise<void> {
+    // Both scopes are popped before the first await: awaiting between them lets
+    // a concurrent rebuild's push land in the middle and hand this call the
+    // other generation's error. LIFO — validation was pushed last.
+    const validation = this.device.popErrorScope();
+    const outOfMemory = this.device.popErrorScope();
+    let error: GPUError | null;
+    try {
+      error = (await validation) ?? (await outOfMemory);
+    } catch (reason) {
+      // Device loss is expected here and already reported through `deviceLost`;
+      // anything else would otherwise disable the back-off with no trace.
+      if (!this.destroyed && !this.deviceIsLost) {
+        console.error(`[web-gi] error scope failed: ${String(reason)}`);
+      }
+      return;
+    }
+    if (error === null || this.destroyed) return;
+
+    // Clamped, not compared: halving from just above the floor would otherwise
+    // skip the floor itself and give up on a budget that may well have worked.
+    const next = Math.max(MIN_PIXEL_BUDGET, Math.floor(pixels / 2));
+    if (next >= pixels) {
+      this.releaseTargets();
+      this.allocationFailure = `The GPU could not allocate the render targets: ${error.message}`;
+      return;
+    }
+    console.warn(
+      `[web-gi] render targets failed at ${String(pixels)} px, retrying at ${String(next)} px: ${error.message}`,
+    );
+    GiRenderer.learnedPixelBudget = Math.min(
+      GiRenderer.learnedPixelBudget,
+      next,
+    );
+    this.pixelBudget = next;
+    this.releaseTargets();
   }
 
   private writeUniforms(basis: CameraBasis, targets: Targets): void {
@@ -737,7 +830,7 @@ export class GiRenderer {
   }
 
   renderFrame(camera: OrbitCamera): void {
-    if (this.destroyed) return;
+    if (this.destroyed || this.allocationFailure !== null) return;
     // Wall-clock interval between submissions. requestAnimationFrame paces the
     // loop, so this reports the real (vsync- or GPU-bound) frame time rather
     // than the negligible command-encoding cost.
@@ -816,11 +909,7 @@ export class GiRenderer {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    const current = this.targets;
-    if (current !== null) {
-      for (const t of current.textures) t.destroy();
-      for (const b of current.buffers) b.destroy();
-    }
+    this.releaseTargets();
     this.quadBuffer.destroy();
     this.lightBuffer.destroy();
     this.uniformBuffer.destroy();

@@ -42,10 +42,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     // Emissive hits contribute nothing: direct light is ReSTIR DI's job, so
     // counting it again here would double the first bounce.
     let radiance = pathRadiance(hit.pos, hit.normal, hit.albedo, uni.maxBounces);
-    var candidate = giReservoirEmpty();
-    candidate.samplePos = hit.pos;
-    candidate.sampleNormal = hit.normal;
-    candidate.radiance = radiance;
+    let candidate = giReservoirSample(hit.pos, hit.normal, radiance);
     let targetPdf = giTargetPdf(x, n, albedo, candidate);
     let sourcePdf = cosTheta * INV_PI;
     giReservoirUpdate(
@@ -59,7 +56,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       rand(),
     );
   } else {
-    reservoir.m = 1.0;
+    giSetM(&reservoir, 1.0);
   }
 
   let temporal = (uni.flags & FLAG_GI_TEMPORAL) != 0u;
@@ -78,22 +75,22 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
           prevReservoirs[prevPixel.y * uni.resolution.x + prevPixel.x],
           TEMPORAL_M_CAP,
         );
-        if (prev.m > 0.0 && prev.targetPdf > 0.0) {
+        if (giM(prev) > 0.0 && giTarget(prev) > 0.0) {
           let jacobian = reconnectionJacobian(
             prevPosition.xyz,
             x,
-            prev.samplePos,
-            prev.sampleNormal,
+            prev.samplePos.xyz,
+            prev.sampleNormal.xyz,
           );
           let targetPdf = giTargetPdf(x, n, albedo, prev);
           giReservoirUpdate(
             &reservoir,
-            prev.samplePos,
-            prev.sampleNormal,
-            prev.radiance,
-            targetPdf * giReservoirWeight(prev) * jacobian * prev.m,
+            prev.samplePos.xyz,
+            prev.sampleNormal.xyz,
+            prev.radiance.xyz,
+            targetPdf * giReservoirWeight(prev) * jacobian * giM(prev),
             targetPdf,
-            prev.m,
+            giM(prev),
             rand(),
           );
         }

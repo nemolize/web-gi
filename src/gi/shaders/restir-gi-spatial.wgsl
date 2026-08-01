@@ -40,16 +40,16 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   var reservoir = giReservoirEmpty();
   giReservoirUpdate(
     &reservoir,
-    center.samplePos,
-    center.sampleNormal,
-    center.radiance,
-    center.targetPdf * giReservoirWeight(center) * center.m,
-    center.targetPdf,
-    center.m,
+    center.samplePos.xyz,
+    center.sampleNormal.xyz,
+    center.radiance.xyz,
+    giTarget(center) * giReservoirWeight(center) * giM(center),
+    giTarget(center),
+    giM(center),
     rand(),
   );
   contributors[0] = pixel;
-  contributorM[0] = center.m;
+  contributorM[0] = giM(center);
   var contributorCount = 1u;
 
   // Always dispatched so the final reservoir lands in the same buffer either
@@ -74,31 +74,31 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     }
 
     let other = srcReservoirs[neighbor.y * uni.resolution.x + neighbor.x];
-    if (other.m <= 0.0 || other.targetPdf <= 0.0) {
+    if (giM(other) <= 0.0 || giTarget(other) <= 0.0) {
       continue;
     }
     let targetPdf = giTargetPdf(x, n, albedo, other);
-    if (targetPdf <= 0.0 || !mutuallyVisible(x, n, other.samplePos)) {
+    if (targetPdf <= 0.0 || !mutuallyVisible(x, n, other.samplePos.xyz)) {
       continue;
     }
     let jacobian = reconnectionJacobian(
       neighborPosition.xyz,
       x,
-      other.samplePos,
-      other.sampleNormal,
+      other.samplePos.xyz,
+      other.sampleNormal.xyz,
     );
     giReservoirUpdate(
       &reservoir,
-      other.samplePos,
-      other.sampleNormal,
-      other.radiance,
-      targetPdf * giReservoirWeight(other) * jacobian * other.m,
+      other.samplePos.xyz,
+      other.sampleNormal.xyz,
+      other.radiance.xyz,
+      targetPdf * giReservoirWeight(other) * jacobian * giM(other),
       targetPdf,
-      other.m,
+      giM(other),
       rand(),
     );
     contributors[contributorCount] = neighbor;
-    contributorM[contributorCount] = other.m;
+    contributorM[contributorCount] = giM(other);
     contributorCount = contributorCount + 1u;
   }
 
@@ -118,7 +118,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       z += contributorM[i];
     }
   }
-  reservoir.m = z;
+  giSetM(&reservoir, z);
 
   dstReservoirs[index] = reservoir;
 }

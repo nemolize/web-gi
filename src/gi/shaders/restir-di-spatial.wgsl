@@ -39,7 +39,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   var reservoir = diReservoirEmpty();
   diReservoirUpdate(
     &reservoir,
-    center.lightPos,
+    center.lightPos.xyz,
     center.lightQuad,
     center.targetPdf * diReservoirWeight(center) * center.m,
     center.targetPdf,
@@ -77,10 +77,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       continue;
     }
     // The neighbour's sample is re-weighted against this pixel's surface.
-    let targetPdf = diTargetPdf(x, n, albedo, other.lightPos, other.lightQuad);
+    let targetPdf = diTargetPdf(x, n, albedo, other.lightPos.xyz, other.lightQuad);
     diReservoirUpdate(
       &reservoir,
-      other.lightPos,
+      other.lightPos.xyz,
       other.lightQuad,
       targetPdf * diReservoirWeight(other) * other.m,
       targetPdf,
@@ -104,7 +104,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       contributorPosition.xyz,
       contributorNormal,
       contributorAlbedo,
-      reservoir.lightPos,
+      reservoir.lightPos.xyz,
       reservoir.lightQuad,
     );
     if (pdf > 0.0) {
