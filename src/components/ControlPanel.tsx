@@ -6,7 +6,6 @@ import {
   useState,
 } from "react";
 
-import type { RendererStats } from "@/gi/renderer";
 import type { SceneVariant } from "@/gi/scene";
 import type { RenderMode, RenderSettings } from "@/gi/settings";
 
@@ -140,7 +139,6 @@ const Section = ({
 
 export type ControlPanelProps = {
   readonly settings: RenderSettings;
-  readonly stats: RendererStats;
   readonly updateSettings: (patch: Partial<RenderSettings>) => void;
   readonly resetView: () => void;
 };
@@ -339,7 +337,6 @@ const SettingsSections = memo(
 
 export const ControlPanel = ({
   settings,
-  stats,
   updateSettings,
   resetView,
 }: ControlPanelProps) => {
@@ -348,7 +345,6 @@ export const ControlPanel = ({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const lastFocusedControlRef = useRef<HTMLElement>(null);
-  const fps = stats.frameMs > 0 ? 1000 / stats.frameMs : 0;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -510,28 +506,6 @@ export const ControlPanel = ({
           updateSettings={updateSettings}
           resetView={resetView}
         />
-
-        <Section title="Stats">
-          <dl className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-xs text-neutral-400">
-            <dt>resolution</dt>
-            <dd className="text-right text-neutral-200">
-              {stats.width}×{stats.height}
-            </dd>
-            <dt>frame</dt>
-            <dd className="text-right text-neutral-200">
-              {stats.frameMs.toFixed(1)} ms
-            </dd>
-            <dt>fps</dt>
-            <dd className="text-right text-neutral-200">{fps.toFixed(0)}</dd>
-            <dt>accumulated</dt>
-            <dd
-              data-testid="stat-accumulated"
-              className="text-right text-neutral-200"
-            >
-              {stats.accumFrames}
-            </dd>
-          </dl>
-        </Section>
       </aside>
     </>
   );

@@ -1,4 +1,5 @@
 import { ControlPanel } from "@/components/ControlPanel";
+import { StatsOverlay } from "@/components/StatsOverlay";
 import { useGiRenderer } from "@/hooks/useGiRenderer";
 
 interface OverlayProps {
@@ -49,6 +50,7 @@ export const App = () => {
           aria-label="Cornell box render"
           className="block size-full cursor-grab touch-none active:cursor-grabbing"
         />
+        {status === "running" && <StatsOverlay stats={stats} />}
         {status === "initializing" && (
           <Overlay title="Starting WebGPU…" detail="Requesting a GPU device." />
         )}
@@ -75,7 +77,6 @@ export const App = () => {
       </main>
       <ControlPanel
         settings={settings}
-        stats={stats}
         updateSettings={updateSettings}
         resetView={resetView}
       />
