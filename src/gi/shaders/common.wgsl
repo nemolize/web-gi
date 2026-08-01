@@ -8,15 +8,25 @@ const RAY_EPS: f32 = 1e-4;
 const SURFACE_EPS: f32 = 1e-3;
 const T_FAR: f32 = 1e20;
 
+/**
+ * vec4f throughout: a `vec3f` followed by a scalar packs that scalar into the
+ * vec3's padding word, and drivers disagree on the resulting offsets (an Adreno
+ * device read `forward` as `up`). Byte layout matches the packed form, so the
+ * CPU-side writer is unchanged.
+ */
 struct Camera {
-  pos: vec3f,
-  tanHalfFov: f32,
-  right: vec3f,
-  aspect: f32,
-  up: vec3f,
-  _pad0: f32,
-  forward: vec3f,
-  _pad1: f32,
+  pos: vec4f,     // xyz = eye position, w = tanHalfFov
+  right: vec4f,   // xyz = right axis,   w = aspect
+  up: vec4f,      // xyz = up axis
+  forward: vec4f, // xyz = forward axis
+}
+
+fn camTanHalfFov(cam: Camera) -> f32 {
+  return cam.pos.w;
+}
+
+fn camAspect(cam: Camera) -> f32 {
+  return cam.right.w;
 }
 
 struct Uniforms {
@@ -39,19 +49,14 @@ struct Uniforms {
   _pad2: f32,
 }
 
+/** vec4f throughout for the same reason as `Camera`; layout is unchanged. */
 struct Quad {
-  origin: vec3f,
-  area: f32,
-  u: vec3f,
-  _pad0: f32,
-  v: vec3f,
-  _pad1: f32,
-  normal: vec3f,
-  _pad2: f32,
-  albedo: vec3f,
-  _pad3: f32,
-  emission: vec3f,
-  _pad4: f32,
+  origin: vec4f,   // xyz = corner, w = area
+  u: vec4f,        // xyz = first edge
+  v: vec4f,        // xyz = second edge
+  normal: vec4f,   // xyz = unit normal
+  albedo: vec4f,   // xyz = diffuse albedo
+  emission: vec4f, // xyz = emitted radiance
 }
 
 struct Light {
@@ -65,23 +70,32 @@ struct Light {
 // its normal and radiance are re-read from `quads[lightQuad]` on demand rather
 // than stored, which keeps the per-pixel footprint at 32 bytes.
 struct DiReservoir {
-  lightPos: vec3f,
+  lightPos: vec4f, // xyz = point on the emissive quad
   lightQuad: u32,
   wSum: f32,
   m: f32,
   targetPdf: f32,
-  _pad0: f32,
 }
 
 // Indirect-lighting reservoir. The sample is a surface point with the outgoing
-// radiance it carries towards the visible point that generated it.
+// radiance it carries towards the visible point that generated it. Scalars ride
+// in the w lanes for the same portability reason as `Camera`; still 48 bytes.
 struct GiReservoir {
-  samplePos: vec3f,
-  m: f32,
-  sampleNormal: vec3f,
-  wSum: f32,
-  radiance: vec3f,
-  targetPdf: f32,
+  samplePos: vec4f,    // xyz = sample point,  w = m
+  sampleNormal: vec4f, // xyz = sample normal, w = wSum
+  radiance: vec4f,     // xyz = outgoing radiance, w = targetPdf
+}
+
+fn giM(r: GiReservoir) -> f32 {
+  return r.samplePos.w;
+}
+
+fn giWSum(r: GiReservoir) -> f32 {
+  return r.sampleNormal.w;
+}
+
+fn giTarget(r: GiReservoir) -> f32 {
+  return r.radiance.w;
 }
 
 const FLAG_DI_ENABLED: u32 = 1u;
@@ -152,21 +166,21 @@ fn cosineSampleHemisphere(n: vec3f, u1: f32, u2: f32) -> vec3f {
 /** `ndc` is y-up in [-1, 1]. Mirrored by `primaryRayDirection` in camera.ts. */
 fn primaryRayDir(cam: Camera, ndc: vec2f) -> vec3f {
   return normalize(
-    cam.forward
-      + cam.right * (ndc.x * cam.tanHalfFov * cam.aspect)
-      + cam.up * (ndc.y * cam.tanHalfFov),
+    cam.forward.xyz
+      + cam.right.xyz * (ndc.x * camTanHalfFov(cam) * camAspect(cam))
+      + cam.up.xyz * (ndc.y * camTanHalfFov(cam)),
   );
 }
 
 /** Returns top-left-origin screen UV in xy; z is 1 when the point is on screen. */
 fn projectToUv(cam: Camera, p: vec3f) -> vec3f {
-  let d = p - cam.pos;
-  let z = dot(d, cam.forward);
+  let d = p - cam.pos.xyz;
+  let z = dot(d, cam.forward.xyz);
   if (z <= 1e-4) {
     return vec3f(0.0, 0.0, 0.0);
   }
-  let x = dot(d, cam.right) / (z * cam.tanHalfFov * cam.aspect);
-  let y = dot(d, cam.up) / (z * cam.tanHalfFov);
+  let x = dot(d, cam.right.xyz) / (z * camTanHalfFov(cam) * camAspect(cam));
+  let y = dot(d, cam.up.xyz) / (z * camTanHalfFov(cam));
   let onScreen = select(0.0, 1.0, abs(x) <= 1.0 && abs(y) <= 1.0);
   return vec3f(x * 0.5 + 0.5, 0.5 - y * 0.5, onScreen);
 }
@@ -174,7 +188,7 @@ fn projectToUv(cam: Camera, p: vec3f) -> vec3f {
 // ---------------------------------------------------------------- reservoirs
 
 fn diReservoirEmpty() -> DiReservoir {
-  return DiReservoir(vec3f(0.0), 0u, 0.0, 0.0, 0.0, 0.0);
+  return DiReservoir(vec4f(0.0), 0u, 0.0, 0.0, 0.0);
 }
 
 /** Weighted reservoir sampling: fold one candidate of weight `w` into `r`. */
@@ -193,7 +207,7 @@ fn diReservoirUpdate(
   }
   (*r).wSum += w;
   if (u * (*r).wSum <= w) {
-    (*r).lightPos = lightPos;
+    (*r).lightPos = vec4f(lightPos, 0.0);
     (*r).lightQuad = lightQuad;
     (*r).targetPdf = targetPdf;
   }
@@ -221,7 +235,7 @@ fn diReservoirCapM(r: DiReservoir, cap: f32) -> DiReservoir {
 }
 
 fn giReservoirEmpty() -> GiReservoir {
-  return GiReservoir(vec3f(0.0), 0.0, vec3f(0.0, 1.0, 0.0), 0.0, vec3f(0.0), 0.0);
+  return GiReservoir(vec4f(0.0), vec4f(0.0, 1.0, 0.0, 0.0), vec4f(0.0));
 }
 
 fn giReservoirUpdate(
@@ -234,31 +248,30 @@ fn giReservoirUpdate(
   mInc: f32,
   u: f32,
 ) {
-  (*r).m += mInc;
+  (*r).samplePos.w += mInc;
   if (w <= 0.0) {
     return;
   }
-  (*r).wSum += w;
-  if (u * (*r).wSum <= w) {
-    (*r).samplePos = samplePos;
-    (*r).sampleNormal = sampleNormal;
-    (*r).radiance = radiance;
-    (*r).targetPdf = targetPdf;
+  (*r).sampleNormal.w += w;
+  if (u * (*r).sampleNormal.w <= w) {
+    (*r).samplePos = vec4f(samplePos, (*r).samplePos.w);
+    (*r).sampleNormal = vec4f(sampleNormal, (*r).sampleNormal.w);
+    (*r).radiance = vec4f(radiance, targetPdf);
   }
 }
 
 fn giReservoirWeight(r: GiReservoir) -> f32 {
-  return safeDiv(r.wSum, r.m * r.targetPdf);
+  return safeDiv(giWSum(r), giM(r) * giTarget(r));
 }
 
 /** See `diReservoirCapM`. */
 fn giReservoirCapM(r: GiReservoir, cap: f32) -> GiReservoir {
-  if (r.m <= cap || r.m <= 0.0) {
+  if (giM(r) <= cap || giM(r) <= 0.0) {
     return r;
   }
   var capped = r;
-  capped.wSum = r.wSum * (cap / r.m);
-  capped.m = cap;
+  capped.sampleNormal.w = giWSum(r) * (cap / giM(r));
+  capped.samplePos.w = cap;
   return capped;
 }
 

@@ -32,10 +32,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let di = diReservoirs[index];
   let diWeight = diReservoirWeight(di);
   if (diWeight > 0.0) {
-    let contribution = directContribution(x, n, vec3f(1.0), di.lightPos, di.lightQuad);
+    let contribution = directContribution(x, n, vec3f(1.0), di.lightPos.xyz, di.lightQuad);
     // Visibility is excluded from the RIS target function, so it is applied
     // exactly once here, on the surviving sample.
-    if (maxComponent(contribution) > 0.0 && mutuallyVisible(x, n, di.lightPos)) {
+    if (maxComponent(contribution) > 0.0 && mutuallyVisible(x, n, di.lightPos.xyz)) {
       illumination += contribution * diWeight;
     }
   }

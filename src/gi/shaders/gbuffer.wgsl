@@ -18,7 +18,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let jitter = rand2() - 0.5;
   let uv = (vec2f(pixel) + 0.5 + jitter) / vec2f(uni.resolution);
   let ndc = vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
-  let hit = traceScenePrimary(uni.cam.pos, primaryRayDir(uni.cam, ndc));
+  let hit = traceScenePrimary(uni.cam.pos.xyz, primaryRayDir(uni.cam, ndc));
 
   if (!hit.hit) {
     textureStore(outPosition, pixel, vec4f(0.0));

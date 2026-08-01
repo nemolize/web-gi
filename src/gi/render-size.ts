@@ -8,12 +8,17 @@ export const MAX_RENDER_PIXELS = 1_000_000;
 
 const MIN_RENDER_SIZE: RenderSize = { width: 1, height: 1 };
 
+/**
+ * `maxPixels` is the caller's memory budget: every target scales with it, so a
+ * device that cannot allocate at the default budget renders at a smaller one.
+ */
 export const resolveRenderSize = (
   cssWidth: number,
   cssHeight: number,
   resolutionScale: number,
   devicePixelRatio: number,
   maxDimension: number,
+  maxPixels: number = MAX_RENDER_PIXELS,
 ): RenderSize => {
   if (
     !Number.isFinite(cssWidth) ||
@@ -21,14 +26,17 @@ export const resolveRenderSize = (
     !Number.isFinite(resolutionScale) ||
     !Number.isFinite(devicePixelRatio) ||
     !Number.isFinite(maxDimension) ||
+    !Number.isFinite(maxPixels) ||
     cssWidth < 0 ||
     cssHeight < 0 ||
     resolutionScale <= 0 ||
     devicePixelRatio <= 0 ||
-    maxDimension < 1
+    maxDimension < 1 ||
+    maxPixels < 1
   ) {
     return MIN_RENDER_SIZE;
   }
+  const pixelLimit = Math.floor(maxPixels);
 
   const scale = resolutionScale * devicePixelRatio;
   const targetWidth = cssWidth * scale;
@@ -47,7 +55,7 @@ export const resolveRenderSize = (
   if (
     rawWidth <= dimensionLimit &&
     rawHeight <= dimensionLimit &&
-    rawWidth * rawHeight <= MAX_RENDER_PIXELS
+    rawWidth * rawHeight <= pixelLimit
   ) {
     return { width: rawWidth, height: rawHeight };
   }
@@ -56,7 +64,7 @@ export const resolveRenderSize = (
     1,
     dimensionLimit / targetWidth,
     dimensionLimit / targetHeight,
-    Math.sqrt(MAX_RENDER_PIXELS / targetWidth / targetHeight),
+    Math.sqrt(pixelLimit / targetWidth / targetHeight),
   );
   if (!Number.isFinite(shrink) || shrink <= 0) return MIN_RENDER_SIZE;
 
@@ -68,8 +76,8 @@ export const resolveRenderSize = (
     dimensionLimit,
     Math.max(1, Math.floor(targetHeight * shrink)),
   );
-  if (width * height <= MAX_RENDER_PIXELS) return { width, height };
+  if (width * height <= pixelLimit) return { width, height };
   return width > height
-    ? { width: Math.floor(MAX_RENDER_PIXELS / height), height }
-    : { width, height: Math.floor(MAX_RENDER_PIXELS / width) };
+    ? { width: Math.max(1, Math.floor(pixelLimit / height)), height }
+    : { width, height: Math.max(1, Math.floor(pixelLimit / width)) };
 };

@@ -49,6 +49,25 @@ describe("cameraBasis", () => {
       }
     }
   });
+
+  // A phone in portrait would otherwise see a patch of the back wall: the
+  // horizontal half-extent is `tanHalfFov * aspect`, so it shrinks with the
+  // viewport unless the vertical field of view opens up to compensate.
+  it("keeps the horizontal extent fixed below a square viewport", () => {
+    const square = cameraBasis(DEFAULT_CAMERA, 1);
+    const portrait = cameraBasis(DEFAULT_CAMERA, 390 / 844);
+
+    expect(portrait.tanHalfFov * portrait.aspect).toBeCloseTo(
+      square.tanHalfFov * square.aspect,
+    );
+    expect(portrait.tanHalfFov).toBeGreaterThan(square.tanHalfFov);
+  });
+
+  it("leaves the vertical field of view alone on landscape viewports", () => {
+    expect(cameraBasis(DEFAULT_CAMERA, ASPECT).tanHalfFov).toBeCloseTo(
+      Math.tan(DEFAULT_CAMERA.fovY / 2),
+    );
+  });
 });
 
 // projectToUv is the temporal-reuse reprojection; it has to invert the primary

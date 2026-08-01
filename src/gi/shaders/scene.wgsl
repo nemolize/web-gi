@@ -21,20 +21,20 @@ struct HitInfo {
  * (see `makeQuad`), so the barycentric solve is two independent projections.
  */
 fn intersectQuad(q: Quad, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
-  let denom = dot(q.normal, rd);
+  let denom = dot(q.normal.xyz, rd);
   if (abs(denom) < 1e-9) {
     return -1.0;
   }
-  let t = dot(q.normal, q.origin - ro) / denom;
+  let t = dot(q.normal.xyz, q.origin.xyz - ro) / denom;
   if (t <= RAY_EPS || t >= tMax) {
     return -1.0;
   }
-  let p = ro + rd * t - q.origin;
-  let a = dot(p, q.u) / dot(q.u, q.u);
+  let p = ro + rd * t - q.origin.xyz;
+  let a = dot(p, q.u.xyz) / dot(q.u.xyz, q.u.xyz);
   if (a < 0.0 || a > 1.0) {
     return -1.0;
   }
-  let b = dot(p, q.v) / dot(q.v, q.v);
+  let b = dot(p, q.v.xyz) / dot(q.v.xyz, q.v.xyz);
   if (b < 0.0 || b > 1.0) {
     return -1.0;
   }
@@ -53,9 +53,9 @@ fn traceScene(ro: vec3f, rd: vec3f) -> HitInfo {
       best.hit = true;
       best.t = t;
       best.quadIndex = i;
-      best.normal = select(q.normal, -q.normal, dot(q.normal, rd) > 0.0);
-      best.albedo = q.albedo;
-      best.emission = q.emission;
+      best.normal = select(q.normal.xyz, -q.normal.xyz, dot(q.normal.xyz, rd) > 0.0);
+      best.albedo = q.albedo.xyz;
+      best.emission = q.emission.xyz;
     }
   }
   best.pos = ro + rd * best.t;
@@ -75,7 +75,7 @@ fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
   best.quadIndex = 0u;
   for (var i = 0u; i < uni.quadCount; i = i + 1u) {
     let q = quads[i];
-    if (dot(q.normal, rd) > 0.0) {
+    if (dot(q.normal.xyz, rd) > 0.0) {
       continue;
     }
     let t = intersectQuad(q, ro, rd, best.t);
@@ -83,9 +83,9 @@ fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
       best.hit = true;
       best.t = t;
       best.quadIndex = i;
-      best.normal = q.normal;
-      best.albedo = q.albedo;
-      best.emission = q.emission;
+      best.normal = q.normal.xyz;
+      best.albedo = q.albedo.xyz;
+      best.emission = q.emission.xyz;
     }
   }
   best.pos = ro + rd * best.t;
@@ -137,11 +137,11 @@ fn sampleLight(u0: f32, u1: f32, u2: f32) -> LightSample {
   var s: LightSample;
   let light = lights[pickLight(u0)];
   let q = quads[light.quadIndex];
-  s.pos = q.origin + q.u * u1 + q.v * u2;
-  s.normal = q.normal;
-  s.emission = q.emission;
+  s.pos = q.origin.xyz + q.u.xyz * u1 + q.v.xyz * u2;
+  s.normal = q.normal.xyz;
+  s.emission = q.emission.xyz;
   s.quadIndex = light.quadIndex;
-  s.pdfArea = safeDiv(light.selectPdf, q.area);
+  s.pdfArea = safeDiv(light.selectPdf, q.origin.w);
   return s;
 }
 
@@ -162,11 +162,11 @@ fn directContribution(
   let dist2 = max(dot(d, d), 1e-9);
   let wi = d * inverseSqrt(dist2);
   let cosX = dot(n, wi);
-  let cosL = dot(q.normal, -wi);
+  let cosL = dot(q.normal.xyz, -wi);
   if (cosX <= 0.0 || cosL <= 0.0) {
     return vec3f(0.0);
   }
-  return albedo * INV_PI * q.emission * (cosX * cosL / dist2);
+  return albedo * INV_PI * q.emission.xyz * (cosX * cosL / dist2);
 }
 
 /** RIS target function for direct lighting: visibility is deferred to shading. */
@@ -176,15 +176,15 @@ fn diTargetPdf(x: vec3f, n: vec3f, albedo: vec3f, lightPos: vec3f, lightQuad: u3
 
 /** Reflected radiance towards the visible point for a stored GI sample. */
 fn giContribution(x: vec3f, n: vec3f, albedo: vec3f, r: GiReservoir) -> vec3f {
-  let d = r.samplePos - x;
+  let d = r.samplePos.xyz - x;
   let dist2 = max(dot(d, d), 1e-9);
   let wi = d * inverseSqrt(dist2);
   let cosX = dot(n, wi);
-  let cosY = dot(r.sampleNormal, -wi);
+  let cosY = dot(r.sampleNormal.xyz, -wi);
   if (cosX <= 0.0 || cosY <= 0.0) {
     return vec3f(0.0);
   }
-  return albedo * INV_PI * r.radiance * cosX;
+  return albedo * INV_PI * r.radiance.xyz * cosX;
 }
 
 fn giTargetPdf(x: vec3f, n: vec3f, albedo: vec3f, r: GiReservoir) -> f32 {

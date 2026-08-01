@@ -70,10 +70,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
           TEMPORAL_M_CAP * f32(candidates),
         );
         // Re-evaluate the history sample against this pixel's shading point.
-        let targetPdf = diTargetPdf(x, n, albedo, prev.lightPos, prev.lightQuad);
+        let targetPdf = diTargetPdf(x, n, albedo, prev.lightPos.xyz, prev.lightQuad);
         diReservoirUpdate(
           &reservoir,
-          prev.lightPos,
+          prev.lightPos.xyz,
           prev.lightQuad,
           targetPdf * diReservoirWeight(prev) * prev.m,
           targetPdf,
