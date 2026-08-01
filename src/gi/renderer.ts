@@ -557,17 +557,17 @@ export class GiRenderer {
 
   private resolveSize(): { width: number; height: number } {
     const rect = this.canvas.getBoundingClientRect();
-    return resolveRenderSize(
-      rect.width,
-      rect.height,
-      this.settings.resolutionScale,
-      window.devicePixelRatio,
-      Math.min(
+    return resolveRenderSize({
+      cssWidth: rect.width,
+      cssHeight: rect.height,
+      resolutionScale: this.settings.resolutionScale,
+      devicePixelRatio: window.devicePixelRatio,
+      maxDimension: Math.min(
         this.device.limits.maxTextureDimension2D,
         this.device.limits.maxComputeWorkgroupsPerDimension * WORKGROUP_SIZE,
       ),
-      this.pixelBudget,
-    );
+      maxPixels: this.pixelBudget,
+    });
   }
 
   private createTargets(width: number, height: number): Targets {
