@@ -9,6 +9,5 @@
     "vitest.config.ts",
     "playwright.config.ts",
     "e2e-tests"
-  ],
-  "exclude": ["node_modules"]
+  ]
 }
