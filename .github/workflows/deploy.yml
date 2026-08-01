@@ -24,10 +24,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    # Manual production deploys are limited to main. Fork and Dependabot PRs cannot access this workflow's secret.
-    if: ${{ (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) }}
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     environment:
-      name: ${{ github.ref_name == 'main' && 'production' || 'preview' }}
+      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
       url: ${{ steps.deploy.outputs.deployment-url }}
     steps:
       - if: ${{ github.event_name == 'pull_request' }}
@@ -46,7 +45,7 @@ jobs:
         uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          command: ${{ github.event_name == 'pull_request' && 'versions upload' || 'deploy' }}
+          command: ${{ github.ref == 'refs/heads/main' && 'deploy' || 'versions upload' }}
 
       - if: ${{ github.event_name == 'pull_request' }}
         name: Show version preview URL in sticky comment
