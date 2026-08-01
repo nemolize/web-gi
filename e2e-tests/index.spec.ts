@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { isPreviewTarget } from "./target";
+
 test("renders the control panel and starts (or reports) the WebGPU renderer", async ({
   page,
 }) => {
@@ -62,6 +64,19 @@ test("keeps desktop sidebar keyboard navigation untrapped", async ({
 
   await page.keyboard.press("Tab");
   await expect(resetView).not.toBeFocused();
+});
+
+test("should serve the app from hashed production assets", async ({ page }) => {
+  test.skip(!isPreviewTarget, "only meaningful against the production build");
+
+  await page.goto("/");
+
+  const scriptSrc =
+    (await page.locator('script[type="module"]').getAttribute("src")) ?? "";
+  expect(scriptSrc).toMatch(/^\/assets\/index-[\w-]+\.js$/);
+
+  const response = await page.request.get(scriptSrc);
+  expect(response.status()).toBe(200);
 });
 
 test.describe("mobile controls", () => {
