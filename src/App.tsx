@@ -50,7 +50,7 @@ export const App = () => {
           aria-label="Cornell box render"
           className="block size-full cursor-grab touch-none active:cursor-grabbing"
         />
-        <StatsOverlay stats={stats} />
+        {status === "running" && <StatsOverlay stats={stats} />}
         {status === "initializing" && (
           <Overlay title="Starting WebGPU…" detail="Requesting a GPU device." />
         )}
