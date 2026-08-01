@@ -84,6 +84,7 @@ test.describe("mobile controls", () => {
     await expect(canvas).toBeVisible();
     await expect(controlsButton).toBeVisible();
     await expect(panelElement).not.toBeVisible();
+    await expect(page.getByRole("region", { name: "Stats" })).toBeVisible();
 
     await expect
       .poll(async () => {
