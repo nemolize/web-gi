@@ -1,6 +1,14 @@
 import { defineConfig, devices } from "@playwright/test";
 
+import { isPreviewTarget } from "./e2e-tests/target";
+
 const isCI = Boolean(process.env["CI"]);
+
+// Only `vite preview` goes through the Workers runtime, so only it exercises
+// wrangler.json asset serving and SPA fallback.
+const baseURL = isPreviewTarget
+  ? "http://localhost:4173"
+  : "http://localhost:5173";
 
 export default defineConfig({
   testDir: "./e2e-tests",
@@ -10,7 +18,7 @@ export default defineConfig({
   ...(isCI ? { workers: 1 } : {}),
   reporter: "list",
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL,
     trace: "on-first-retry",
   },
   projects: [
@@ -20,8 +28,13 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "pnpm dev",
-    url: "http://localhost:5173",
+    // Building here rather than in a separate step keeps `dist/` from going
+    // stale under the preview server.
+    command: isPreviewTarget
+      ? "pnpm run build && pnpm run preview"
+      : "pnpm run dev",
+    url: baseURL,
+    timeout: 180_000,
     reuseExistingServer: !isCI,
   },
 });
