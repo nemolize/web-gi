@@ -118,6 +118,29 @@ The Worker configuration lives in `wrangler.json`. The build is driven by
 `@cloudflare/vite-plugin`, which generates the deployable config under `dist/`
 during `pnpm build`.
 
+## Dependency updates
+
+Renovate opens the dependency update pull requests. `renovate.json` extends the
+shared `nemolize/renovate-config` preset, which automerges minor, patch, pin and
+digest updates and leaves majors for manual review. Dependabot stays enabled for
+security updates only.
+
+Renovate covers the npm dependencies, the tools pinned in `mise.toml`, the
+SHA-pinned actions and runner images in the workflows, and the Playwright
+container image the E2E job runs in. Two versions live outside any of those
+manifests, so `renovate.json` adds rules for them:
+
+- **`playwright`** groups `@playwright/test`, `playwright` and
+  `mcr.microsoft.com/playwright`. The E2E job asserts the container image ships
+  the same Playwright version the packages depend on, so an update that moved
+  only one of the three would fail CI.
+- **`hk`** groups the `mise.toml` pin with the version embedded in the `amends`
+  URL in `hk.pkl`, which a custom manager extracts.
+
+Renovate pull requests do run the Deploy preview, unlike fork and Dependabot
+ones. `wrangler` is itself a managed dependency, so the preview upload is what
+catches an update that breaks deployment before it automerges into `main`.
+
 ## References
 
 - Bitterli et al., _Spatiotemporal reservoir resampling for real-time ray tracing with dynamic direct lighting_, SIGGRAPH 2020

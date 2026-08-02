@@ -1,4 +1,35 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["local>nemolize/renovate-config"]
+  "extends": ["local>nemolize/renovate-config"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "hk.pkl amends a versioned Config.pkl; mise.toml is the only place Renovate sees hk otherwise",
+      "managerFilePatterns": ["hk.pkl"],
+      "matchStrings": [
+        "package://github\\.com/jdx/hk/releases/download/v(?<currentValue>[^/]+)/hk@[^#]+#"
+      ],
+      "autoReplaceStringTemplate": "package://github.com/jdx/hk/releases/download/v{{{newValue}}}/hk@{{{newValue}}}#",
+      "depNameTemplate": "hk",
+      "packageNameTemplate": "jdx/hk",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>\\S+)"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "CI fails the E2E job unless the container image tag matches both Playwright npm packages",
+      "matchDepNames": [
+        "@playwright/test",
+        "playwright",
+        "mcr.microsoft.com/playwright"
+      ],
+      "groupName": "playwright"
+    },
+    {
+      "description": "The hk pin in mise.toml and the amends URL in hk.pkl must move together",
+      "matchDepNames": ["hk"],
+      "groupName": "hk"
+    }
+  ]
 }
