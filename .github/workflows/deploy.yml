@@ -24,7 +24,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    # Dependabot security updates are enabled here, unlike in the upstream
+    # template, and a Dependabot-triggered run cannot read this workflow's secret.
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]') }}
     environment:
       name: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
       url: ${{ steps.deploy.outputs.deployment-url }}
