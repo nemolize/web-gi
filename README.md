@@ -111,8 +111,9 @@ dispatch time.
 Deployment is handled by `.github/workflows/deploy.yml`:
 
 - Push to `main` deploys to production (`wrangler deploy`).
-- A manual run from `main` redeploys production; manual runs from other refs are skipped.
+- A manual run from `main` redeploys production; manual runs from other refs upload a preview version instead.
 - Pull requests upload a preview version (`wrangler versions upload`); the preview URL is posted as a sticky PR comment.
+- Fork pull requests and Dependabot pull requests are skipped — neither can read the workflow's Cloudflare token.
 
 The Worker configuration lives in `wrangler.json`. The build is driven by
 `@cloudflare/vite-plugin`, which generates the deployable config under `dist/`
