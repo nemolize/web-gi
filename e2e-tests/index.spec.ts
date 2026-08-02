@@ -66,7 +66,16 @@ test("keeps desktop sidebar keyboard navigation untrapped", async ({
   await expect(resetView).not.toBeFocused();
 });
 
-test("should serve the app from hashed production assets", async ({ page }) => {
+test("serves the SPA shell for a deep route with no file on disk", async ({
+  page,
+}) => {
+  await page.goto("/some/deep/route");
+
+  await expect(page).toHaveTitle("web-gi — Real-time GI Cornell Box");
+  await expect(page.getByRole("heading", { name: "web-gi" })).toBeVisible();
+});
+
+test("serves the app from hashed production assets", async ({ page }) => {
   test.skip(!isPreviewTarget, "only meaningful against the production build");
 
   await page.goto("/");
