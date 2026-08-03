@@ -385,11 +385,11 @@ export class GiRenderer {
         floatTexture,
         rawTexture,
         floatTexture,
-        floatTexture,
-        storageTexture("rgba16float"),
+        rawTexture,
+        storageTexture("rgba32float"),
       ]),
       atrous: createLayout(device, "atrous", compute, [
-        floatTexture,
+        rawTexture,
         rawTexture,
         floatTexture,
         storageTexture("rgba16float"),
@@ -593,7 +593,11 @@ export class GiRenderer {
     const albedo = texture("albedo", "rgba8unorm", 1);
     const emission = texture("emission", "rgba16float", 1);
     const illumination = texture("illumination", "rgba16float", 1);
-    const history = texture("history", "rgba16float", 2);
+    // f32 because the accumulator is a running mean: at a long history length
+    // the per-frame increment falls under half precision's resolution and the
+    // average stalls below the converged value. rgba32float is unfilterable, so
+    // every layout entry that samples this texture binds it as `rawTexture`.
+    const history = texture("history", "rgba32float", 2);
     const atrous = texture("atrous", "rgba16float", 2);
     const reference = texture("reference", "rgba32float", 2);
 

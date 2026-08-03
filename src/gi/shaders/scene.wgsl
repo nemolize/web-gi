@@ -191,10 +191,16 @@ fn giTargetPdf(x: vec3f, n: vec3f, albedo: vec3f, r: GiReservoir) -> f32 {
   return luminance(giContribution(x, n, albedo, r));
 }
 
+/** Widest measure change a reused sample may carry before it is rejected. */
+const MAX_RECONNECTION_JACOBIAN: f32 = 10.0;
+
 /**
  * Reconnection Jacobian for moving a stored sample point from the visible
  * point `fromX` to `toX`: the solid-angle measure at the shading point changes
- * while the sample stays put.
+ * while the sample stays put. Returns 0 for a shift too distorted to reuse —
+ * the ratio diverges where `toX` nearly touches the sample, so clamping instead
+ * of rejecting would admit that sample at the clamp factor and blow out every
+ * concave contact region.
  */
 fn reconnectionJacobian(fromX: vec3f, toX: vec3f, samplePos: vec3f, sampleNormal: vec3f) -> f32 {
   let dFrom = fromX - samplePos;
@@ -206,7 +212,11 @@ fn reconnectionJacobian(fromX: vec3f, toX: vec3f, samplePos: vec3f, sampleNormal
   if (cosFrom <= 1e-6) {
     return 0.0;
   }
-  return clamp((cosTo * d2From) / (cosFrom * d2To), 0.01, 100.0);
+  let jacobian = (cosTo * d2From) / (cosFrom * d2To);
+  if (jacobian < 1.0 / MAX_RECONNECTION_JACOBIAN || jacobian > MAX_RECONNECTION_JACOBIAN) {
+    return 0.0;
+  }
+  return jacobian;
 }
 
 // ---------------------------------------------------------------- path tracing
