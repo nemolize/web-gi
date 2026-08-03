@@ -5,6 +5,8 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+import { devPort, previewPort } from "./e2e-tests/target";
+
 export default defineConfig({
   plugins: [react(), tailwindcss(), cloudflare()],
   resolve: {
@@ -12,13 +14,15 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  // Playwright targets both ports; without strictPort a clash would silently
+  // move the server up one and surface as a Playwright timeout.
   server: {
     allowedHosts: [".trycloudflare.com"],
+    port: devPort,
+    strictPort: true,
   },
-  // playwright.config.ts hardcodes this port; without strictPort a clash would
-  // silently move preview to 4174 and surface as a Playwright timeout.
   preview: {
-    port: 4173,
+    port: previewPort,
     strictPort: true,
   },
 });

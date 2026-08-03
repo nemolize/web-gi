@@ -97,10 +97,14 @@ pnpm install
 pnpm dev          # dev server on http://localhost:5173
 pnpm build        # type-check and build
 pnpm test         # unit tests
-pnpm test:e2e     # Playwright end-to-end tests
+pnpm test:e2e     # Playwright end-to-end tests against the dev server
 pnpm lint         # eslint, prettier and type-check
 pnpm fix          # auto-fixable lint and formatting
 ```
+
+`E2E_PREVIEW=1 pnpm run test:e2e` builds first and runs the suite against
+`vite preview`, which is what CI does — the only way to exercise `wrangler.json`
+asset serving and the hashed production bundle locally.
 
 WGSL compile errors are reported to the console with the shader name and
 `line:column`; without that they only surface as invalid-pipeline warnings at
