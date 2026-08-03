@@ -1,5 +1,7 @@
 import type { CameraBasis, OrbitCamera } from "@/gi/camera";
 import { cameraBasis } from "@/gi/camera";
+import type { LinearImage } from "@/gi/compare";
+import { installDevHooks } from "@/gi/dev-hooks";
 import { MAX_RENDER_PIXELS, resolveRenderSize } from "@/gi/render-size";
 import type { Scene } from "@/gi/scene";
 import {
@@ -13,6 +15,7 @@ import {
 } from "@/gi/scene";
 import type { RenderSettings } from "@/gi/settings";
 import { packFlags, requiresAccumulationReset } from "@/gi/settings";
+import captureWgsl from "@/gi/shaders/capture.wgsl?raw";
 import commonWgsl from "@/gi/shaders/common.wgsl?raw";
 import atrousWgsl from "@/gi/shaders/denoise-atrous.wgsl?raw";
 import temporalWgsl from "@/gi/shaders/denoise-temporal.wgsl?raw";
@@ -132,6 +135,7 @@ type Layouts = {
   readonly presentUniform: GPUBindGroupLayout;
   readonly presentRestir: GPUBindGroupLayout;
   readonly presentReference: GPUBindGroupLayout;
+  readonly capture: GPUBindGroupLayout;
 };
 
 type Pipelines = {
@@ -165,6 +169,30 @@ type Targets = {
   readonly atrous: readonly (readonly GPUBindGroup[])[];
   readonly presentRestir: GPUBindGroup;
   readonly presentReference: readonly GPUBindGroup[];
+  /** Kept for `captureLinearImage`, which binds them outside the frame graph. */
+  readonly atrousView: GPUTextureView;
+  readonly albedoView: GPUTextureView;
+  readonly emissionView: GPUTextureView;
+  readonly referenceViews: readonly GPUTextureView[];
+};
+
+/** Row pitch a `copyTextureToBuffer` destination must be a multiple of. */
+const COPY_ALIGNMENT = 256;
+
+/** Allocated only when a measurement asks for it; see `captureLinearImage`. */
+type CaptureResources = {
+  readonly width: number;
+  readonly height: number;
+  readonly bytesPerRow: number;
+  readonly texture: GPUTexture;
+  readonly staging: GPUBuffer;
+  readonly restir: GPUBindGroup;
+  readonly reference: GPUBindGroup;
+};
+
+type CapturePipelines = {
+  readonly restir: GPUComputePipeline;
+  readonly reference: GPUComputePipeline;
 };
 
 const at = <T>(items: readonly T[], index: number): T => {
@@ -237,6 +265,8 @@ export class GiRenderer {
   private readonly atrousBuffers: readonly GPUBuffer[];
   private readonly uniformData = new ArrayBuffer(UNIFORM_BYTES);
 
+  private capture: CaptureResources | null = null;
+  private capturePipelines: CapturePipelines | null = null;
   private quadBuffer: GPUBuffer;
   private lightBuffer: GPUBuffer;
   private clusterBuffer: GPUBuffer;
@@ -300,6 +330,7 @@ export class GiRenderer {
       this.deviceIsLost = true;
     });
 
+    installDevHooks(() => this.captureLinearImage());
     this.scene = buildScene(settings.scene);
     const uploaded = this.uploadScene(this.scene);
     this.quadBuffer = uploaded.quadBuffer;
@@ -410,6 +441,12 @@ export class GiRenderer {
       ]),
       presentReference: createLayout(device, "present-reference", fragment, [
         rawTexture,
+      ]),
+      capture: createLayout(device, "capture", compute, [
+        rawTexture,
+        rawTexture,
+        rawTexture,
+        storageTexture("rgba32float"),
       ]),
     };
   }
@@ -753,12 +790,17 @@ export class GiRenderer {
           view(at(reference, p)),
         ]),
       ),
+      atrousView: view(at(atrous, 0)),
+      albedoView: view(at(albedo, 0)),
+      emissionView: view(at(emission, 0)),
+      referenceViews: parities.map((p) => view(at(reference, p))),
     };
   }
 
   private releaseTargets(): void {
     const current = this.targets;
     if (current === null) return;
+    this.releaseCapture();
     this.targets = null;
     for (const t of current.textures) t.destroy();
     for (const b of current.buffers) b.destroy();
@@ -926,6 +968,139 @@ export class GiRenderer {
     this.parity = 1 - parity;
     this.frame += 1;
     this.accumFrames += 1;
+  }
+
+  /**
+   * The linear radiance behind the current frame, before tone mapping — what
+   * `compareLinear` needs to check the render against the reference path
+   * tracer. Resources are built on first use and released with the targets, so
+   * a session that never measures pays nothing for this.
+   *
+   * Returns null when there is nothing to read yet. The caller drives
+   * convergence: switch mode, wait, then capture.
+   */
+  async captureLinearImage(): Promise<LinearImage | null> {
+    const targets = this.targets;
+    if (this.destroyed || targets === null || this.deviceIsLost) return null;
+
+    const capture = this.ensureCapture(targets);
+    const pipelines = this.ensureCapturePipelines();
+    const encoder = this.device.createCommandEncoder({ label: "capture" });
+    const reference = this.settings.mode === "reference";
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(reference ? pipelines.reference : pipelines.restir);
+    pass.setBindGroup(0, this.sceneBindGroup);
+    pass.setBindGroup(1, reference ? capture.reference : capture.restir);
+    pass.dispatchWorkgroups(
+      Math.ceil(targets.width / WORKGROUP_SIZE),
+      Math.ceil(targets.height / WORKGROUP_SIZE),
+    );
+    pass.end();
+    encoder.copyTextureToBuffer(
+      { texture: capture.texture },
+      { buffer: capture.staging, bytesPerRow: capture.bytesPerRow },
+      { width: targets.width, height: targets.height },
+    );
+    this.device.queue.submit([encoder.finish()]);
+
+    await capture.staging.mapAsync(GPUMapMode.READ);
+    // The copy pads each row to the 256-byte pitch, so the rows are gathered
+    // rather than taken as one run.
+    const padded = new Float32Array(capture.staging.getMappedRange());
+    const stride = capture.bytesPerRow / 4;
+    const data = new Float32Array(targets.width * targets.height * 4);
+    for (let row = 0; row < targets.height; row++) {
+      data.set(
+        padded.subarray(row * stride, row * stride + targets.width * 4),
+        row * targets.width * 4,
+      );
+    }
+    capture.staging.unmap();
+    return { width: targets.width, height: targets.height, data };
+  }
+
+  /**
+   * Built on demand so a production bundle never compiles them: the capture
+   * shader is measurement instrumentation and no shipped path calls it.
+   */
+  private ensureCapturePipelines(): CapturePipelines {
+    const existing = this.capturePipelines;
+    if (existing !== null) return existing;
+    const module = this.device.createShaderModule({
+      label: "capture",
+      code: `${commonWgsl}\n${sceneWgsl}\n${captureWgsl}`,
+    });
+    reportShaderDiagnostics(module, "capture");
+    const build = (entryPoint: string): GPUComputePipeline =>
+      this.device.createComputePipeline({
+        label: `capture-${entryPoint}`,
+        layout: this.device.createPipelineLayout({
+          bindGroupLayouts: [this.layouts.scene, this.layouts.capture],
+        }),
+        compute: { module, entryPoint },
+      });
+    const created = { restir: build("restir"), reference: build("reference") };
+    this.capturePipelines = created;
+    return created;
+  }
+
+  private ensureCapture(targets: Targets): CaptureResources {
+    const existing = this.capture;
+    if (
+      existing !== null &&
+      existing.width === targets.width &&
+      existing.height === targets.height
+    ) {
+      return existing;
+    }
+    this.releaseCapture();
+
+    const bytesPerRow =
+      Math.ceil((targets.width * 16) / COPY_ALIGNMENT) * COPY_ALIGNMENT;
+    const texture = this.device.createTexture({
+      label: "capture-linear",
+      size: { width: targets.width, height: targets.height },
+      format: "rgba32float",
+      usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC,
+    });
+    const staging = this.device.createBuffer({
+      label: "capture-staging",
+      size: bytesPerRow * targets.height,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
+    const view = texture.createView();
+    // The reference entry point reads only binding 0; the albedo and emission
+    // slots are filled to satisfy the shared layout.
+    const referenceColour = at(targets.referenceViews, this.parity);
+    const created: CaptureResources = {
+      width: targets.width,
+      height: targets.height,
+      bytesPerRow,
+      texture,
+      staging,
+      restir: createBindGroup(this.device, this.layouts.capture, [
+        targets.atrousView,
+        targets.albedoView,
+        targets.emissionView,
+        view,
+      ]),
+      reference: createBindGroup(this.device, this.layouts.capture, [
+        referenceColour,
+        targets.albedoView,
+        targets.emissionView,
+        view,
+      ]),
+    };
+    this.capture = created;
+    return created;
+  }
+
+  private releaseCapture(): void {
+    const current = this.capture;
+    if (current === null) return;
+    this.capture = null;
+    current.texture.destroy();
+    current.staging.destroy();
   }
 
   destroy(): void {
