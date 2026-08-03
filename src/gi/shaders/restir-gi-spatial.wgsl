@@ -87,6 +87,11 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       other.samplePos.xyz,
       other.sampleNormal.xyz,
     );
+    // A rejected shift drops the neighbour outright: folding it in with a zero
+    // weight would still raise M and Z, darkening the pixel instead.
+    if (jacobian <= 0.0) {
+      continue;
+    }
     giReservoirUpdate(
       &reservoir,
       other.samplePos.xyz,

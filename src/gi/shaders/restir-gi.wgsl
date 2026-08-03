@@ -75,13 +75,13 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
           prevReservoirs[prevPixel.y * uni.resolution.x + prevPixel.x],
           TEMPORAL_M_CAP,
         );
-        if (giM(prev) > 0.0 && giTarget(prev) > 0.0) {
-          let jacobian = reconnectionJacobian(
-            prevPosition.xyz,
-            x,
-            prev.samplePos.xyz,
-            prev.sampleNormal.xyz,
-          );
+        let jacobian = reconnectionJacobian(
+          prevPosition.xyz,
+          x,
+          prev.samplePos.xyz,
+          prev.sampleNormal.xyz,
+        );
+        if (giM(prev) > 0.0 && giTarget(prev) > 0.0 && jacobian > 0.0) {
           let targetPdf = giTargetPdf(x, n, albedo, prev);
           giReservoirUpdate(
             &reservoir,
