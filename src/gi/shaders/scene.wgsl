@@ -5,6 +5,7 @@
 @group(0) @binding(0) var<uniform> uni: Uniforms;
 @group(0) @binding(1) var<storage, read> quads: array<Quad>;
 @group(0) @binding(2) var<storage, read> lights: array<Light>;
+@group(0) @binding(3) var<storage, read> clusters: array<Cluster>;
 
 struct HitInfo {
   hit: bool,
@@ -105,15 +106,50 @@ fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
 }
 
 /**
- * Segment occlusion between two points on the scene's interior surfaces. Only
- * the occluders are tested: the room is convex, so a segment with both ends
- * inside it never reaches a wall, and `buildScene` sorts the walls last.
- * Closest-hit traversal still walks every quad — bounces do land on walls.
+ * Reciprocal that stays finite: the slab test multiplies by it, and an infinity
+ * meeting a zero-length extent would produce a NaN that swallows the comparison.
+ * The substituted magnitude is far beyond any t the scene can produce.
+ */
+fn safeInverse(v: f32) -> f32 {
+  if (abs(v) < 1e-30) {
+    return select(1e30, -1e30, v < 0.0);
+  }
+  return 1.0 / v;
+}
+
+/** Whether the segment `[RAY_EPS, tMax]` along `rd` can meet the box at all. */
+fn segmentHitsBounds(lo: vec3f, hi: vec3f, ro: vec3f, invRd: vec3f, tMax: f32) -> bool {
+  let a = (lo - ro) * invRd;
+  let b = (hi - ro) * invRd;
+  let near = min(a, b);
+  let far = max(a, b);
+  let enter = max(max(near.x, near.y), max(near.z, RAY_EPS));
+  let exit = min(min(far.x, far.y), min(far.z, tMax));
+  return enter <= exit;
+}
+
+/**
+ * Segment occlusion between two points on the scene's interior surfaces. Two
+ * things narrow it. The room is convex, so a segment with both ends inside it
+ * never reaches a wall and `buildScene` sorts the walls out of range entirely.
+ * What remains is grouped into bounded clusters — one per block, one for the
+ * ceiling emitters — and a cluster whose bound the segment misses cannot
+ * contain a quad it hits, so the whole run is skipped. Both are exact.
+ * Closest-hit traversal still walks every quad: bounces do land on walls.
  */
 fn traceOccluded(ro: vec3f, rd: vec3f, tMax: f32) -> bool {
-  for (var i = 0u; i < uni.occluderCount; i = i + 1u) {
-    if (intersectQuad(quads[i], ro, rd, tMax) > 0.0) {
-      return true;
+  let invRd = vec3f(safeInverse(rd.x), safeInverse(rd.y), safeInverse(rd.z));
+  for (var c = 0u; c < uni.clusterCount; c = c + 1u) {
+    let cluster = clusters[c];
+    if (!segmentHitsBounds(cluster.lo.xyz, cluster.hi.xyz, ro, invRd, tMax)) {
+      continue;
+    }
+    let start = u32(cluster.lo.w);
+    let end = start + u32(cluster.hi.w);
+    for (var i = start; i < end; i = i + 1u) {
+      if (intersectQuad(quads[i], ro, rd, tMax) > 0.0) {
+        return true;
+      }
     }
   }
   return false;

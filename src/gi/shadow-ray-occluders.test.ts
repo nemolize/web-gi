@@ -2,7 +2,8 @@
 // between two points on the room's interior surfaces can never reach a wall.
 // That holds because the room is the convex hull of the scene — a property of
 // the scene data, not of the shader, so it is checked here rather than assumed.
-import { add, dot, normalize, scale, sub } from "@/gi/math";
+import type { Vec3 } from "@/gi/math";
+import { add, dot, normalize, scale, sub, vec3 } from "@/gi/math";
 import type { Quad } from "@/gi/scene";
 import { buildScene, SCENE_VARIANTS, sceneBounds } from "@/gi/scene";
 
@@ -11,12 +12,7 @@ const SURFACE_EPS = 1e-3;
 const SEGMENTS = 200_000;
 
 /** Mirrors `intersectQuad` in `scene.wgsl`. */
-const intersectQuad = (
-  q: Quad,
-  ro: { x: number; y: number; z: number },
-  rd: { x: number; y: number; z: number },
-  tMax: number,
-): number => {
+const intersectQuad = (q: Quad, ro: Vec3, rd: Vec3, tMax: number): number => {
   const denom = dot(q.normal, rd);
   if (Math.abs(denom) < 1e-9) return -1;
   const t = dot(q.normal, sub(q.origin, ro)) / denom;
@@ -27,6 +23,29 @@ const intersectQuad = (
   const b = dot(p, q.v) / dot(q.v, q.v);
   if (b < 0 || b > 1) return -1;
   return t;
+};
+
+/** Mirrors `safeInverse` / `segmentHitsBounds` in `scene.wgsl`. */
+const safeInverse = (v: number) =>
+  Math.abs(v) < 1e-30 ? (v < 0 ? -1e30 : 1e30) : 1 / v;
+
+const segmentHitsBounds = (
+  lo: Vec3,
+  hi: Vec3,
+  ro: Vec3,
+  invRd: Vec3,
+  tMax: number,
+): boolean => {
+  const axes = ["x", "y", "z"] as const;
+  let enter = RAY_EPS;
+  let exit = tMax;
+  for (const axis of axes) {
+    const a = (lo[axis] - ro[axis]) * invRd[axis];
+    const b = (hi[axis] - ro[axis]) * invRd[axis];
+    enter = Math.max(enter, Math.min(a, b));
+    exit = Math.min(exit, Math.max(a, b));
+  }
+  return enter <= exit;
 };
 
 /** Fixed sequence so a counter-example is reproducible from the seed. */
@@ -89,6 +108,53 @@ describe("shadow-ray wall exclusion", () => {
       }
       expect(blocked).toBeNull();
       expect(tested).toBeGreaterThan(SEGMENTS / 2);
+    },
+  );
+
+  // Skipping a cluster is only sound if it never changes the answer, so the
+  // clustered form is compared against testing every occluder outright.
+  it.each([...SCENE_VARIANTS])(
+    "answers exactly as an unclustered sweep would (%s)",
+    (variant) => {
+      const { quads, occluderCount, occluderClusters } = buildScene(variant);
+      const occluders = quads.slice(0, occluderCount);
+      const rnd = lcg(987654321);
+      const anyHit = (ro: Vec3, rd: Vec3, tMax: number) =>
+        occluders.some((q) => intersectQuad(q, ro, rd, tMax) > 0);
+      const clusteredHit = (ro: Vec3, rd: Vec3, tMax: number) => {
+        const invRd = vec3(
+          safeInverse(rd.x),
+          safeInverse(rd.y),
+          safeInverse(rd.z),
+        );
+        return occluderClusters.some((c) => {
+          if (!segmentHitsBounds(c.min, c.max, ro, invRd, tMax)) return false;
+          return quads
+            .slice(c.start, c.start + c.count)
+            .some((q) => intersectQuad(q, ro, rd, tMax) > 0);
+        });
+      };
+
+      let occluded = 0;
+      let disagreements = 0;
+      for (let i = 0; i < SEGMENTS; i++) {
+        // Free-flying segments, not just surface pairs: the bound has to be
+        // right for grazing and axis-aligned directions too.
+        const ro = vec3(rnd(), rnd(), rnd());
+        const to = vec3(rnd(), rnd(), rnd());
+        const delta = sub(to, ro);
+        const distance = Math.hypot(delta.x, delta.y, delta.z);
+        if (distance < 1e-5) continue;
+        const rd = normalize(delta);
+        if (anyHit(ro, rd, distance) !== clusteredHit(ro, rd, distance)) {
+          disagreements++;
+        } else if (anyHit(ro, rd, distance)) {
+          occluded++;
+        }
+      }
+      expect(disagreements).toBe(0);
+      // Guards against a vacuous pass where nothing was ever occluded.
+      expect(occluded).toBeGreaterThan(SEGMENTS / 100);
     },
   );
 

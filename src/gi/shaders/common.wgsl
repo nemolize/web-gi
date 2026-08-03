@@ -44,7 +44,7 @@ struct Uniforms {
   flags: u32,
   spatialRadius: f32,
   exposure: f32,
-  occluderCount: u32,
+  clusterCount: u32,
   _pad1: f32,
   _pad2: f32,
 }
@@ -64,6 +64,15 @@ struct Light {
   cdf: f32,
   selectPdf: f32,
   _pad0: f32,
+}
+
+/**
+ * Bound around a run of occluder quads. Counts ride in the w lanes for the
+ * same portability reason as `Camera`; they are small integers, so f32 is exact.
+ */
+struct Cluster {
+  lo: vec4f, // xyz = min corner, w = index of the first quad
+  hi: vec4f, // xyz = max corner, w = number of quads
 }
 
 // Direct-lighting reservoir. The chosen sample is a point on an emissive quad;

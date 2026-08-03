@@ -2,10 +2,12 @@ import { add, dot, length, scale, sub, vec3 } from "@/gi/math";
 import type { Quad } from "@/gi/scene";
 import {
   buildScene,
+  CLUSTER_STRIDE_BYTES,
   isInsideRoom,
   LIGHT_STRIDE_BYTES,
   makeBox,
   makeQuad,
+  packClusters,
   packLights,
   packQuads,
   QUAD_STRIDE_BYTES,
@@ -163,6 +165,47 @@ describe("GPU packing", () => {
         1 / dot(quad.v, quad.v),
       );
     }
+  });
+
+  // A shadow ray skips a cluster's whole run when it misses the bound, so the
+  // bound containing every corner is what keeps that skip exact.
+  it("bounds every occluder inside its cluster and covers them all", () => {
+    for (const variant of SCENE_VARIANTS) {
+      const { quads, occluderCount, occluderClusters } = buildScene(variant);
+      let expectedStart = 0;
+      for (const cluster of occluderClusters) {
+        expect(cluster.start).toBe(expectedStart);
+        expect(cluster.count).toBeGreaterThan(0);
+        for (const quad of quads.slice(
+          cluster.start,
+          cluster.start + cluster.count,
+        )) {
+          for (const corner of quadCorners(quad)) {
+            for (const axis of ["x", "y", "z"] as const) {
+              expect(corner[axis]).toBeGreaterThanOrEqual(cluster.min[axis]);
+              expect(corner[axis]).toBeLessThanOrEqual(cluster.max[axis]);
+            }
+          }
+        }
+        expectedStart += cluster.count;
+      }
+      expect(expectedStart).toBe(occluderCount);
+    }
+  });
+
+  it("packs cluster bounds and runs at the offsets the shader reads", () => {
+    const scene = buildScene("manyLights");
+    const view = new DataView(packClusters(scene));
+    expect(view.byteLength).toBe(
+      scene.occluderClusters.length * CLUSTER_STRIDE_BYTES,
+    );
+    scene.occluderClusters.forEach((cluster, i) => {
+      const base = i * CLUSTER_STRIDE_BYTES;
+      expect(view.getFloat32(base, true)).toBeCloseTo(cluster.min.x);
+      expect(view.getFloat32(base + 12, true)).toBe(cluster.start);
+      expect(view.getFloat32(base + 16, true)).toBeCloseTo(cluster.max.x);
+      expect(view.getFloat32(base + 28, true)).toBe(cluster.count);
+    });
   });
 
   it("writes the light index as an unsigned integer", () => {

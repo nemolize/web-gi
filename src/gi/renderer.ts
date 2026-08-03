@@ -4,7 +4,9 @@ import { MAX_RENDER_PIXELS, resolveRenderSize } from "@/gi/render-size";
 import type { Scene } from "@/gi/scene";
 import {
   buildScene,
+  CLUSTER_STRIDE_BYTES,
   LIGHT_STRIDE_BYTES,
+  packClusters,
   packLights,
   packQuads,
   QUAD_STRIDE_BYTES,
@@ -237,6 +239,7 @@ export class GiRenderer {
 
   private quadBuffer: GPUBuffer;
   private lightBuffer: GPUBuffer;
+  private clusterBuffer: GPUBuffer;
   private sceneBindGroup: GPUBindGroup;
   private scene: Scene;
   private targets: Targets | null = null;
@@ -301,6 +304,7 @@ export class GiRenderer {
     const uploaded = this.uploadScene(this.scene);
     this.quadBuffer = uploaded.quadBuffer;
     this.lightBuffer = uploaded.lightBuffer;
+    this.clusterBuffer = uploaded.clusterBuffer;
     this.sceneBindGroup = uploaded.bindGroup;
   }
 
@@ -343,6 +347,7 @@ export class GiRenderer {
     return {
       scene: createLayout(device, "scene", compute, [
         uniformBinding,
+        readOnlyStorage,
         readOnlyStorage,
         readOnlyStorage,
       ]),
@@ -481,6 +486,7 @@ export class GiRenderer {
   private uploadScene(scene: Scene): {
     quadBuffer: GPUBuffer;
     lightBuffer: GPUBuffer;
+    clusterBuffer: GPUBuffer;
     bindGroup: GPUBindGroup;
   } {
     const quadData = packQuads(scene);
@@ -495,14 +501,22 @@ export class GiRenderer {
       size: Math.max(lightData.byteLength, LIGHT_STRIDE_BYTES),
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
+    const clusterData = packClusters(scene);
+    const clusterBuffer = this.device.createBuffer({
+      label: "occluder-clusters",
+      size: Math.max(clusterData.byteLength, CLUSTER_STRIDE_BYTES),
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
     this.device.queue.writeBuffer(quadBuffer, 0, quadData);
     this.device.queue.writeBuffer(lightBuffer, 0, lightData);
+    this.device.queue.writeBuffer(clusterBuffer, 0, clusterData);
     const bindGroup = createBindGroup(this.device, this.layouts.scene, [
       { buffer: this.uniformBuffer },
       { buffer: quadBuffer },
       { buffer: lightBuffer },
+      { buffer: clusterBuffer },
     ]);
-    return { quadBuffer, lightBuffer, bindGroup };
+    return { quadBuffer, lightBuffer, clusterBuffer, bindGroup };
   }
 
   setSettings(next: RenderSettings): void {
@@ -511,10 +525,12 @@ export class GiRenderer {
     if (previous.scene !== next.scene) {
       this.quadBuffer.destroy();
       this.lightBuffer.destroy();
+      this.clusterBuffer.destroy();
       this.scene = buildScene(next.scene);
       const uploaded = this.uploadScene(this.scene);
       this.quadBuffer = uploaded.quadBuffer;
       this.lightBuffer = uploaded.lightBuffer;
+      this.clusterBuffer = uploaded.clusterBuffer;
       this.sceneBindGroup = uploaded.bindGroup;
     }
     if (requiresAccumulationReset(previous, next)) {
@@ -830,7 +846,7 @@ export class GiRenderer {
     view.setUint32(168, packFlags(this.settings), true);
     view.setFloat32(172, this.settings.spatialRadius, true);
     view.setFloat32(176, this.settings.exposure, true);
-    view.setUint32(180, this.scene.occluderCount, true);
+    view.setUint32(180, this.scene.occluderClusters.length, true);
     this.device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData);
   }
 
@@ -917,6 +933,7 @@ export class GiRenderer {
     this.releaseTargets();
     this.quadBuffer.destroy();
     this.lightBuffer.destroy();
+    this.clusterBuffer.destroy();
     this.uniformBuffer.destroy();
     for (const buffer of this.atrousBuffers) buffer.destroy();
     this.device.destroy();
