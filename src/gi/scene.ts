@@ -220,8 +220,10 @@ export const packQuads = (scene: Scene): ArrayBuffer => {
       f32[base + offset + 3] = w;
     };
     write(0, quad.origin, quad.area);
-    write(4, quad.u, 0);
-    write(8, quad.v, 0);
+    // Inverse squared edge lengths: `intersectQuad` needs them on every
+    // ray/quad test, and the edges never change once packed.
+    write(4, quad.u, 1 / dot(quad.u, quad.u));
+    write(8, quad.v, 1 / dot(quad.v, quad.v));
     write(12, quad.normal, 0);
     write(16, quad.material.albedo, 0);
     write(20, quad.material.emission, 0);

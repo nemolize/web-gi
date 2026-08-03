@@ -126,6 +126,22 @@ describe("GPU packing", () => {
     expect(view.getFloat32(52, true)).toBeCloseTo(first.normal.y);
   });
 
+  // `intersectQuad` multiplies by these instead of dividing by the edge lengths
+  // it would otherwise recompute per ray. Dropping them here reads as a black
+  // screen, not as a packing error.
+  it("packs the inverse squared edge lengths into the u and v w lanes", () => {
+    const view = new DataView(packQuads(scene));
+    for (const [i, quad] of scene.quads.entries()) {
+      const base = i * QUAD_STRIDE_BYTES;
+      expect(view.getFloat32(base + 28, true)).toBeCloseTo(
+        1 / dot(quad.u, quad.u),
+      );
+      expect(view.getFloat32(base + 44, true)).toBeCloseTo(
+        1 / dot(quad.v, quad.v),
+      );
+    }
+  });
+
   it("writes the light index as an unsigned integer", () => {
     const view = new DataView(packLights(scene));
     expect(view.getUint32(0, true)).toBe(requireAt(scene.lights, 0).quadIndex);

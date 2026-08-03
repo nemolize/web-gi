@@ -52,8 +52,8 @@ struct Uniforms {
 /** vec4f throughout for the same reason as `Camera`; layout is unchanged. */
 struct Quad {
   origin: vec4f,   // xyz = corner, w = area
-  u: vec4f,        // xyz = first edge
-  v: vec4f,        // xyz = second edge
+  u: vec4f,        // xyz = first edge,  w = 1/|u|^2
+  v: vec4f,        // xyz = second edge, w = 1/|v|^2
   normal: vec4f,   // xyz = unit normal
   albedo: vec4f,   // xyz = diffuse albedo
   emission: vec4f, // xyz = emitted radiance

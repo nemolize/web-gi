@@ -29,34 +29,44 @@ fn intersectQuad(q: Quad, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
   if (t <= RAY_EPS || t >= tMax) {
     return -1.0;
   }
+  // `u.w` / `v.w` carry 1/|u|^2 and 1/|v|^2 from `packQuads`: recomputing them
+  // here costs two dots and two divides on every quad of every ray.
   let p = ro + rd * t - q.origin.xyz;
-  let a = dot(p, q.u.xyz) / dot(q.u.xyz, q.u.xyz);
+  let a = dot(p, q.u.xyz) * q.u.w;
   if (a < 0.0 || a > 1.0) {
     return -1.0;
   }
-  let b = dot(p, q.v.xyz) / dot(q.v.xyz, q.v.xyz);
+  let b = dot(p, q.v.xyz) * q.v.w;
   if (b < 0.0 || b > 1.0) {
     return -1.0;
   }
   return t;
 }
 
+/**
+ * The traversal loop touches only the four intersection fields; shading data is
+ * fetched once for the winner. Reading the whole `Quad` per step instead keeps
+ * albedo and emission live across the loop, and every ray pays that bandwidth
+ * on every quad it misses.
+ */
 fn traceScene(ro: vec3f, rd: vec3f) -> HitInfo {
   var best: HitInfo;
   best.hit = false;
   best.t = T_FAR;
   best.quadIndex = 0u;
   for (var i = 0u; i < uni.quadCount; i = i + 1u) {
-    let q = quads[i];
-    let t = intersectQuad(q, ro, rd, best.t);
+    let t = intersectQuad(quads[i], ro, rd, best.t);
     if (t > 0.0) {
       best.hit = true;
       best.t = t;
       best.quadIndex = i;
-      best.normal = select(q.normal.xyz, -q.normal.xyz, dot(q.normal.xyz, rd) > 0.0);
-      best.albedo = q.albedo.xyz;
-      best.emission = q.emission.xyz;
     }
+  }
+  if (best.hit) {
+    let q = quads[best.quadIndex];
+    best.normal = select(q.normal.xyz, -q.normal.xyz, dot(q.normal.xyz, rd) > 0.0);
+    best.albedo = q.albedo.xyz;
+    best.emission = q.emission.xyz;
   }
   best.pos = ro + rd * best.t;
   return best;
@@ -74,19 +84,21 @@ fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
   best.t = T_FAR;
   best.quadIndex = 0u;
   for (var i = 0u; i < uni.quadCount; i = i + 1u) {
-    let q = quads[i];
-    if (dot(q.normal.xyz, rd) > 0.0) {
+    if (dot(quads[i].normal.xyz, rd) > 0.0) {
       continue;
     }
-    let t = intersectQuad(q, ro, rd, best.t);
+    let t = intersectQuad(quads[i], ro, rd, best.t);
     if (t > 0.0) {
       best.hit = true;
       best.t = t;
       best.quadIndex = i;
-      best.normal = q.normal.xyz;
-      best.albedo = q.albedo.xyz;
-      best.emission = q.emission.xyz;
     }
+  }
+  if (best.hit) {
+    let q = quads[best.quadIndex];
+    best.normal = q.normal.xyz;
+    best.albedo = q.albedo.xyz;
+    best.emission = q.emission.xyz;
   }
   best.pos = ro + rd * best.t;
   return best;
@@ -259,6 +271,12 @@ fn pathRadiance(startPos: vec3f, startNormal: vec3f, startAlbedo: vec3f, maxBoun
 
   for (var bounce = 0u; bounce < maxBounces; bounce = bounce + 1u) {
     radiance += throughput * nextEventEstimation(pos, normal, albedo);
+
+    // The last vertex has already contributed; extending the walk from it would
+    // trace a ray whose hit no iteration reads.
+    if (bounce + 1u >= maxBounces) {
+      break;
+    }
 
     // Cosine-weighted sampling makes the BRDF/pdf ratio exactly the albedo.
     throughput *= albedo;
