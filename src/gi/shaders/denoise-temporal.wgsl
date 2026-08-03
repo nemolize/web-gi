@@ -18,11 +18,14 @@ const NORMAL_TOLERANCE: f32 = 0.9;
 /** History length below which a sample is still checked against its neighbours. */
 const FIREFLY_HISTORY: f32 = 8.0;
 const FIREFLY_SIGMA: f32 = 3.0;
+/** Stands in for "no ceiling", above any luminance the shading pass can emit. */
+const NO_CEILING: f32 = 1e20;
 
 /**
  * Luminance ceiling drawn from the neighbours that share this pixel's surface,
- * or infinity when too few of them do. Excludes the centre so an outlier cannot
- * raise its own ceiling.
+ * or `NO_CEILING` when too few of them do, or when they agree on darkness and
+ * would otherwise zero a legitimate estimate. Excludes the centre so an outlier
+ * cannot raise its own ceiling.
  */
 fn neighbourhoodCeiling(pixel: vec2u, x: vec3f, n: vec3f) -> f32 {
   var sum = 0.0;
@@ -53,11 +56,12 @@ fn neighbourhoodCeiling(pixel: vec2u, x: vec3f, n: vec3f) -> f32 {
     }
   }
   if (count < 2.0) {
-    return T_FAR;
+    return NO_CEILING;
   }
   let mean = sum / count;
   let variance = max(sumSquares / count - mean * mean, 0.0);
-  return mean + FIREFLY_SIGMA * sqrt(variance);
+  let ceiling = mean + FIREFLY_SIGMA * sqrt(variance);
+  return select(ceiling, NO_CEILING, ceiling <= 0.0);
 }
 
 @compute @workgroup_size(8, 8)
@@ -102,8 +106,11 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   // across the edge, so an outlier survives as a firefly that tracks the
   // geometry. Bound it by the surface's own neighbours until history is deep
   // enough to have averaged it away on its own.
+  // The threshold has to follow `maxHistory` too: `historyLength` saturates
+  // there, so a window shorter than FIREFLY_HISTORY would leave the clamp on
+  // for good and bias the steady state dark.
   var sample = current;
-  if (historyLength < FIREFLY_HISTORY) {
+  if (historyLength < min(FIREFLY_HISTORY, f32(max(uni.maxHistory, 1u)))) {
     let ceiling = neighbourhoodCeiling(pixel, x, n);
     let sampleLuminance = luminance(sample);
     if (sampleLuminance > ceiling) {

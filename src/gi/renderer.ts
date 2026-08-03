@@ -392,14 +392,14 @@ export class GiRenderer {
         rawTexture,
         rawTexture,
         floatTexture,
-        storageTexture("rgba32float"),
+        storageTexture("rgba16float"),
         uniformBinding,
       ]),
       presentUniform: createLayout(device, "present-uniform", fragment, [
         uniformBinding,
       ]),
       presentRestir: createLayout(device, "present-restir", fragment, [
-        rawTexture,
+        floatTexture,
         floatTexture,
         floatTexture,
       ]),
@@ -595,10 +595,10 @@ export class GiRenderer {
     const illumination = texture("illumination", "rgba16float", 1);
     // f32 because the accumulator is a running mean: at a long history length
     // the per-frame increment falls under half precision's resolution and the
-    // average stalls below the converged value. The a-trous chain follows it so
-    // one bind group layout covers both its history and its own inputs.
+    // average stalls below the converged value. rgba32float is unfilterable, so
+    // every layout entry that samples this texture binds it as `rawTexture`.
     const history = texture("history", "rgba32float", 2);
-    const atrous = texture("atrous", "rgba32float", 2);
+    const atrous = texture("atrous", "rgba16float", 2);
     const reference = texture("reference", "rgba32float", 2);
 
     const storage = (label: string, stride: number): GPUBuffer =>
