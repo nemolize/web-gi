@@ -115,6 +115,29 @@ describe("buildScene", () => {
     expect(isInsideRoom(centreOf(light), 0)).toBe(true);
   });
 
+  // `pickLight` in scene.wgsl binary-searches this CDF instead of scanning it,
+  // which only agrees with the scan while the CDF stays non-decreasing.
+  it("picks the same light by binary search as by a front-to-back scan", () => {
+    const { lights } = buildScene("manyLights");
+    const scan = (u: number) =>
+      lights.findIndex((l) => u < l.cdf) === -1
+        ? lights.length - 1
+        : lights.findIndex((l) => u < l.cdf);
+    const search = (u: number) => {
+      let lo = 0;
+      let hi = lights.length - 1;
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (u < requireAt(lights, mid).cdf) hi = mid;
+        else lo = mid + 1;
+      }
+      return lo;
+    };
+    const probes = [0, 1, ...lights.flatMap((l) => [l.cdf, l.cdf - 1e-7])];
+    for (let i = 0; i < 2000; i++) probes.push(i / 2000);
+    for (const u of probes) expect(search(u)).toBe(scan(u));
+  });
+
   it("normalises the light selection CDF", () => {
     const scene = buildScene("manyLights");
     expect(scene.lights.length).toBeGreaterThan(1);

@@ -176,15 +176,24 @@ struct LightSample {
   quadIndex: u32,
 }
 
+/**
+ * First light whose inclusive CDF exceeds `u`, by binary search — the CDF is
+ * non-decreasing, so this picks exactly what a scan from the front would. The
+ * grid variant has thirty emitters and every next-event estimate calls this,
+ * which made the scan's average depth the cost that mattered.
+ */
 fn pickLight(u: f32) -> u32 {
-  var index = uni.lightCount - 1u;
-  for (var i = 0u; i < uni.lightCount; i = i + 1u) {
-    if (u < lights[i].cdf) {
-      index = i;
-      break;
+  var lo = 0u;
+  var hi = uni.lightCount - 1u;
+  while (lo < hi) {
+    let mid = (lo + hi) / 2u;
+    if (u < lights[mid].cdf) {
+      hi = mid;
+    } else {
+      lo = mid + 1u;
     }
   }
-  return index;
+  return lo;
 }
 
 fn sampleLight(u0: f32, u1: f32, u2: f32) -> LightSample {
