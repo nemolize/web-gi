@@ -1,14 +1,14 @@
 import { defineConfig, devices } from "@playwright/test";
 
-import { isPreviewTarget } from "./e2e-tests/target";
+import { devPort, isPreviewTarget, previewPort } from "./e2e-tests/target";
 
 const isCI = Boolean(process.env["CI"]);
 
 // Only `vite preview` goes through the Workers runtime, so only it exercises
 // wrangler.json asset serving and SPA fallback.
 const baseURL = isPreviewTarget
-  ? "http://localhost:4173"
-  : "http://localhost:5173";
+  ? `http://localhost:${previewPort}`
+  : `http://localhost:${devPort}`;
 
 export default defineConfig({
   testDir: "./e2e-tests",
@@ -34,7 +34,9 @@ export default defineConfig({
       ? "pnpm run build && pnpm run preview"
       : "pnpm run dev",
     url: baseURL,
-    timeout: 180_000,
+    // Only the preview command builds first; the dev server should surface a
+    // hang at Playwright's default instead of three minutes later.
+    ...(isPreviewTarget ? { timeout: 180_000 } : {}),
     reuseExistingServer: !isCI,
   },
 });
