@@ -11,7 +11,7 @@
 @group(1) @binding(3) var texPrevPosition: texture_2d<f32>;
 @group(1) @binding(4) var texPrevNormal: texture_2d<f32>;
 @group(1) @binding(5) var texHistory: texture_2d<f32>;
-@group(1) @binding(6) var outHistory: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(6) var outHistory: texture_storage_2d<rgba32float, write>;
 
 const PLANE_TOLERANCE: f32 = 0.02;
 const NORMAL_TOLERANCE: f32 = 0.9;

@@ -5,7 +5,7 @@
 @group(1) @binding(0) var texColor: texture_2d<f32>;
 @group(1) @binding(1) var texPosition: texture_2d<f32>;
 @group(1) @binding(2) var texNormal: texture_2d<f32>;
-@group(1) @binding(3) var outColor: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(3) var outColor: texture_storage_2d<rgba32float, write>;
 @group(1) @binding(4) var<uniform> atrous: AtrousStep;
 
 struct AtrousStep {
