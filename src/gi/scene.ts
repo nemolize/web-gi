@@ -40,8 +40,8 @@ export type LightRef = {
 };
 
 /**
- * A bounded run of occluder quads. A shadow ray that misses the bound skips
- * every quad inside it, which is exact because the bound contains them all.
+ * A bounded run of quads. A ray that misses the bound skips every quad inside
+ * it, which is exact because the bound contains them all.
  */
 export type OccluderCluster = {
   readonly min: Vec3;
@@ -60,8 +60,10 @@ export type Scene = {
    * across one — the walls sort last and `traceOccluded` stops before them.
    */
   readonly occluderCount: number;
-  /** Covers exactly `quads[0 .. occluderCount)`, one entry per group. */
-  readonly occluderClusters: readonly OccluderCluster[];
+  /** Covers every quad, one entry per group, occluder groups first. */
+  readonly clusters: readonly OccluderCluster[];
+  /** `clusters[0 .. occluderClusterCount)` are the ones a shadow ray tests. */
+  readonly occluderClusterCount: number;
 };
 
 export const SCENE_VARIANTS = ["classic", "manyLights"] as const;
@@ -150,7 +152,7 @@ const room = (): Quad[] => [
   makeQuad(vec3(1, 0, 0), vec3(0, 0, 1), vec3(0, 1, 0), GREEN),
 ];
 
-/** One group per box, so each keeps its own bound in `occluderClusters`. */
+/** One group per box, so each keeps its own bound in `clusters`. */
 const blocks = (): Quad[][] => [
   makeBox(vec3(0.33, 0.33, 0.34), vec3(0.145, 0.33, 0.145), 17, WHITE),
   makeBox(vec3(0.66, 0.165, 0.66), vec3(0.15, 0.165, 0.15), -17, WHITE),
@@ -238,16 +240,18 @@ const clusterOf = (group: readonly Quad[], start: number): OccluderCluster => {
 
 export const buildScene = (variant: SceneVariant): Scene => {
   // Emitters share one group: they are a single ceiling patch, so one bound
-  // rejects all of them for any ray that stays below it.
-  const groups: Quad[][] = [
+  // rejects all of them for any ray that stays below it. The walls trail as
+  // their own group — a shadow ray never reaches them, and a closest-hit ray
+  // almost always does, so bounding them individually would buy nothing.
+  const occluderGroups: Quad[][] = [
     ...blocks(),
     variant === "manyLights" ? manyLights() : classicLight(),
   ];
-  const occluders = groups.flat();
-  const quads = [...occluders, ...room()];
+  const groups = [...occluderGroups, room()];
+  const quads = groups.flat();
 
   let start = 0;
-  const occluderClusters = groups.map((group) => {
+  const clusters = groups.map((group) => {
     const cluster = clusterOf(group, start);
     start += group.length;
     return cluster;
@@ -256,8 +260,9 @@ export const buildScene = (variant: SceneVariant): Scene => {
   return {
     quads,
     lights: collectLights(quads),
-    occluderCount: occluders.length,
-    occluderClusters,
+    occluderCount: occluderGroups.flat().length,
+    clusters,
+    occluderClusterCount: occluderGroups.length,
   };
 };
 
@@ -286,10 +291,10 @@ export const packQuads = (scene: Scene): ArrayBuffer => {
 
 export const packClusters = (scene: Scene): ArrayBuffer => {
   const buffer = new ArrayBuffer(
-    Math.max(scene.occluderClusters.length, 1) * CLUSTER_STRIDE_BYTES,
+    Math.max(scene.clusters.length, 1) * CLUSTER_STRIDE_BYTES,
   );
   const f32 = new Float32Array(buffer);
-  scene.occluderClusters.forEach((cluster, i) => {
+  scene.clusters.forEach((cluster, i) => {
     const base = (i * CLUSTER_STRIDE_BYTES) / 4;
     // Counts ride in the w lanes as floats: small integers are exact, and the
     // vec4 layout is what every other GPU struct here uses.

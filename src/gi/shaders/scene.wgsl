@@ -45,67 +45,6 @@ fn intersectQuad(q: Quad, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
 }
 
 /**
- * The traversal loop touches only the four intersection fields; shading data is
- * fetched once for the winner. Reading the whole `Quad` per step instead keeps
- * albedo and emission live across the loop, and every ray pays that bandwidth
- * on every quad it misses.
- */
-fn traceScene(ro: vec3f, rd: vec3f) -> HitInfo {
-  var best: HitInfo;
-  best.hit = false;
-  best.t = T_FAR;
-  best.quadIndex = 0u;
-  for (var i = 0u; i < uni.quadCount; i = i + 1u) {
-    let t = intersectQuad(quads[i], ro, rd, best.t);
-    if (t > 0.0) {
-      best.hit = true;
-      best.t = t;
-      best.quadIndex = i;
-    }
-  }
-  if (best.hit) {
-    let q = quads[best.quadIndex];
-    best.normal = select(q.normal.xyz, -q.normal.xyz, dot(q.normal.xyz, rd) > 0.0);
-    best.albedo = q.albedo.xyz;
-    best.emission = q.emission.xyz;
-  }
-  best.pos = ro + rd * best.t;
-  return best;
-}
-
-/**
- * Primary-ray variant with back-face culling. The room is closed, so without
- * it the near wall would hide the interior; culling turns the eye-side wall
- * into a cutaway while secondary rays still bounce off it. Blocks are convex,
- * so culling their back faces changes nothing.
- */
-fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
-  var best: HitInfo;
-  best.hit = false;
-  best.t = T_FAR;
-  best.quadIndex = 0u;
-  for (var i = 0u; i < uni.quadCount; i = i + 1u) {
-    if (dot(quads[i].normal.xyz, rd) > 0.0) {
-      continue;
-    }
-    let t = intersectQuad(quads[i], ro, rd, best.t);
-    if (t > 0.0) {
-      best.hit = true;
-      best.t = t;
-      best.quadIndex = i;
-    }
-  }
-  if (best.hit) {
-    let q = quads[best.quadIndex];
-    best.normal = q.normal.xyz;
-    best.albedo = q.albedo.xyz;
-    best.emission = q.emission.xyz;
-  }
-  best.pos = ro + rd * best.t;
-  return best;
-}
-
-/**
  * Reciprocal that stays finite: the slab test multiplies by it, and an infinity
  * meeting a zero-length extent would produce a NaN that swallows the comparison.
  * The substituted magnitude is far beyond any t the scene can produce.
@@ -129,17 +68,96 @@ fn segmentHitsBounds(lo: vec3f, hi: vec3f, ro: vec3f, invRd: vec3f, tMax: f32) -
 }
 
 /**
- * Segment occlusion between two points on the scene's interior surfaces. Two
- * things narrow it. The room is convex, so a segment with both ends inside it
- * never reaches a wall and `buildScene` sorts the walls out of range entirely.
- * What remains is grouped into bounded clusters — one per block, one for the
- * ceiling emitters — and a cluster whose bound the segment misses cannot
- * contain a quad it hits, so the whole run is skipped. Both are exact.
- * Closest-hit traversal still walks every quad: bounces do land on walls.
+ * Closest hit, cluster by cluster. The traversal loop touches only the four
+ * intersection fields; shading data is fetched once for the winner. Reading the
+ * whole `Quad` per step instead keeps albedo and emission live across the loop,
+ * and every ray pays that bandwidth on every quad it misses.
+ */
+fn traceScene(ro: vec3f, rd: vec3f) -> HitInfo {
+  var best: HitInfo;
+  best.hit = false;
+  best.t = T_FAR;
+  best.quadIndex = 0u;
+  let invRd = vec3f(safeInverse(rd.x), safeInverse(rd.y), safeInverse(rd.z));
+  for (var c = 0u; c < uni.clusterCount; c = c + 1u) {
+    let cluster = clusters[c];
+    // `best.t` tightens as the walk proceeds, so a cluster already behind the
+    // closest hit is rejected here too, not just one the ray line misses.
+    if (!segmentHitsBounds(cluster.lo.xyz, cluster.hi.xyz, ro, invRd, best.t)) {
+      continue;
+    }
+    let start = u32(cluster.lo.w);
+    let end = start + u32(cluster.hi.w);
+    for (var i = start; i < end; i = i + 1u) {
+      let t = intersectQuad(quads[i], ro, rd, best.t);
+      if (t > 0.0) {
+        best.hit = true;
+        best.t = t;
+        best.quadIndex = i;
+      }
+    }
+  }
+  if (best.hit) {
+    let q = quads[best.quadIndex];
+    best.normal = select(q.normal.xyz, -q.normal.xyz, dot(q.normal.xyz, rd) > 0.0);
+    best.albedo = q.albedo.xyz;
+    best.emission = q.emission.xyz;
+  }
+  best.pos = ro + rd * best.t;
+  return best;
+}
+
+/**
+ * Primary-ray variant with back-face culling. The room is closed, so without
+ * it the near wall would hide the interior; culling turns the eye-side wall
+ * into a cutaway while secondary rays still bounce off it. Blocks are convex,
+ * so culling their back faces changes nothing.
+ */
+fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
+  var best: HitInfo;
+  best.hit = false;
+  best.t = T_FAR;
+  best.quadIndex = 0u;
+  let invRd = vec3f(safeInverse(rd.x), safeInverse(rd.y), safeInverse(rd.z));
+  for (var c = 0u; c < uni.clusterCount; c = c + 1u) {
+    let cluster = clusters[c];
+    if (!segmentHitsBounds(cluster.lo.xyz, cluster.hi.xyz, ro, invRd, best.t)) {
+      continue;
+    }
+    let start = u32(cluster.lo.w);
+    let end = start + u32(cluster.hi.w);
+    for (var i = start; i < end; i = i + 1u) {
+      if (dot(quads[i].normal.xyz, rd) > 0.0) {
+        continue;
+      }
+      let t = intersectQuad(quads[i], ro, rd, best.t);
+      if (t > 0.0) {
+        best.hit = true;
+        best.t = t;
+        best.quadIndex = i;
+      }
+    }
+  }
+  if (best.hit) {
+    let q = quads[best.quadIndex];
+    best.normal = q.normal.xyz;
+    best.albedo = q.albedo.xyz;
+    best.emission = q.emission.xyz;
+  }
+  best.pos = ro + rd * best.t;
+  return best;
+}
+
+/**
+ * Segment occlusion between two points on the scene's interior surfaces. The
+ * room is convex, so a segment with both ends inside it never reaches a wall —
+ * and the walls are the last cluster, so stopping at `occluderClusterCount`
+ * drops them. Closest-hit traversal walks every cluster: bounces do land on
+ * walls.
  */
 fn traceOccluded(ro: vec3f, rd: vec3f, tMax: f32) -> bool {
   let invRd = vec3f(safeInverse(rd.x), safeInverse(rd.y), safeInverse(rd.z));
-  for (var c = 0u; c < uni.clusterCount; c = c + 1u) {
+  for (var c = 0u; c < uni.occluderClusterCount; c = c + 1u) {
     let cluster = clusters[c];
     if (!segmentHitsBounds(cluster.lo.xyz, cluster.hi.xyz, ro, invRd, tMax)) {
       continue;
@@ -176,15 +194,24 @@ struct LightSample {
   quadIndex: u32,
 }
 
+/**
+ * First light whose inclusive CDF exceeds `u`, by binary search — the CDF is
+ * non-decreasing, so this picks exactly what a scan from the front would. The
+ * grid variant has thirty emitters and every next-event estimate calls this,
+ * which made the scan's average depth the cost that mattered.
+ */
 fn pickLight(u: f32) -> u32 {
-  var index = uni.lightCount - 1u;
-  for (var i = 0u; i < uni.lightCount; i = i + 1u) {
-    if (u < lights[i].cdf) {
-      index = i;
-      break;
+  var lo = 0u;
+  var hi = uni.lightCount - 1u;
+  while (lo < hi) {
+    let mid = (lo + hi) / 2u;
+    if (u < lights[mid].cdf) {
+      hi = mid;
+    } else {
+      lo = mid + 1u;
     }
   }
-  return index;
+  return lo;
 }
 
 fn sampleLight(u0: f32, u1: f32, u2: f32) -> LightSample {

@@ -115,6 +115,29 @@ describe("buildScene", () => {
     expect(isInsideRoom(centreOf(light), 0)).toBe(true);
   });
 
+  // `pickLight` in scene.wgsl binary-searches this CDF instead of scanning it,
+  // which only agrees with the scan while the CDF stays non-decreasing.
+  it("picks the same light by binary search as by a front-to-back scan", () => {
+    const { lights } = buildScene("manyLights");
+    const scan = (u: number) =>
+      lights.findIndex((l) => u < l.cdf) === -1
+        ? lights.length - 1
+        : lights.findIndex((l) => u < l.cdf);
+    const search = (u: number) => {
+      let lo = 0;
+      let hi = lights.length - 1;
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (u < requireAt(lights, mid).cdf) hi = mid;
+        else lo = mid + 1;
+      }
+      return lo;
+    };
+    const probes = [0, 1, ...lights.flatMap((l) => [l.cdf, l.cdf - 1e-7])];
+    for (let i = 0; i < 2000; i++) probes.push(i / 2000);
+    for (const u of probes) expect(search(u)).toBe(scan(u));
+  });
+
   it("normalises the light selection CDF", () => {
     const scene = buildScene("manyLights");
     expect(scene.lights.length).toBeGreaterThan(1);
@@ -167,13 +190,13 @@ describe("GPU packing", () => {
     }
   });
 
-  // A shadow ray skips a cluster's whole run when it misses the bound, so the
+  // Both traversals skip a cluster's whole run when they miss its bound, so the
   // bound containing every corner is what keeps that skip exact.
-  it("bounds every occluder inside its cluster and covers them all", () => {
+  it("bounds every quad inside its cluster and covers them all", () => {
     for (const variant of SCENE_VARIANTS) {
-      const { quads, occluderCount, occluderClusters } = buildScene(variant);
+      const { quads, clusters } = buildScene(variant);
       let expectedStart = 0;
-      for (const cluster of occluderClusters) {
+      for (const cluster of clusters) {
         expect(cluster.start).toBe(expectedStart);
         expect(cluster.count).toBeGreaterThan(0);
         for (const quad of quads.slice(
@@ -189,17 +212,15 @@ describe("GPU packing", () => {
         }
         expectedStart += cluster.count;
       }
-      expect(expectedStart).toBe(occluderCount);
+      expect(expectedStart).toBe(quads.length);
     }
   });
 
   it("packs cluster bounds and runs at the offsets the shader reads", () => {
     const scene = buildScene("manyLights");
     const view = new DataView(packClusters(scene));
-    expect(view.byteLength).toBe(
-      scene.occluderClusters.length * CLUSTER_STRIDE_BYTES,
-    );
-    scene.occluderClusters.forEach((cluster, i) => {
+    expect(view.byteLength).toBe(scene.clusters.length * CLUSTER_STRIDE_BYTES);
+    scene.clusters.forEach((cluster, i) => {
       const base = i * CLUSTER_STRIDE_BYTES;
       expect(view.getFloat32(base, true)).toBeCloseTo(cluster.min.x);
       expect(view.getFloat32(base + 12, true)).toBe(cluster.start);
