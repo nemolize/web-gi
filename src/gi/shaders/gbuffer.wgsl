@@ -11,12 +11,11 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   if (pixel.x >= uni.resolution.x || pixel.y >= uni.resolution.y) {
     return;
   }
-  rngInit(pixel, uni.frame, 1u);
-
-  // Sub-pixel jitter; reprojection keys off world position, so it costs no
-  // temporal stability and buys free anti-aliasing once history accumulates.
-  let jitter = rand2() - 0.5;
-  let uv = (vec2f(pixel) + 0.5 + jitter) / vec2f(uni.resolution);
+  // Unjittered on purpose: sub-pixel jitter flips edge pixels between two
+  // surfaces every frame, so temporal reuse rejects their history and every
+  // crease keeps a one-sample speckle line. It bought no anti-aliasing either,
+  // since the present pass remodulates albedo from the current frame.
+  let uv = (vec2f(pixel) + 0.5) / vec2f(uni.resolution);
   let ndc = vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
   let hit = traceScenePrimary(uni.cam.pos.xyz, primaryRayDir(uni.cam, ndc));
 
