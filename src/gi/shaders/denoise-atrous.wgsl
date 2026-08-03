@@ -15,9 +15,22 @@ struct AtrousStep {
   _pad2: i32,
 }
 
-const NORMAL_POWER: f32 = 64.0;
 const SIGMA_PLANE: f32 = 0.02;
 const SIGMA_LUMINANCE: f32 = 6.0;
+
+/**
+ * The normal falloff, `x^64`, as six squarings. Twenty-five taps over three
+ * iterations put this and the two edge-stopping exponentials on the pass's hot
+ * path; `pow` and `exp` are the expensive shape of that arithmetic.
+ */
+fn normalFalloff(x: f32) -> f32 {
+  let x2 = x * x;
+  let x4 = x2 * x2;
+  let x8 = x4 * x4;
+  let x16 = x8 * x8;
+  let x32 = x16 * x16;
+  return x32 * x32;
+}
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3u) {
@@ -58,13 +71,13 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       let tapNormal = textureLoad(texNormal, tap, 0).xyz;
       let tapColor = textureLoad(texColor, tap, 0).xyz;
 
-      let normalWeight = pow(max(dot(n, tapNormal), 0.0), NORMAL_POWER);
-      let planeWeight = exp(-abs(dot(n, tapPosition.xyz - x)) / SIGMA_PLANE);
-      let luminanceWeight = exp(
-        -abs(luminance(tapColor) - centerLuminance) / (sigmaLuminance + 1e-4),
-      );
+      let normalWeight = normalFalloff(max(dot(n, tapNormal), 0.0));
+      // The plane and luminance terms are both exponentials, so they multiply
+      // as one: exp(-a) * exp(-b) is exp(-(a + b)).
+      let edge = abs(dot(n, tapPosition.xyz - x)) / SIGMA_PLANE
+        + abs(luminance(tapColor) - centerLuminance) / (sigmaLuminance + 1e-4);
       let kernelWeight = kernel[dx + 2] * kernel[dy + 2];
-      let weight = kernelWeight * normalWeight * planeWeight * luminanceWeight;
+      let weight = kernelWeight * normalWeight * exp(-edge);
 
       sum += tapColor * weight;
       weightSum += weight;

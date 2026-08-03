@@ -2,14 +2,17 @@ import { add, dot, length, scale, sub, vec3 } from "@/gi/math";
 import type { Quad } from "@/gi/scene";
 import {
   buildScene,
+  CLUSTER_STRIDE_BYTES,
   isInsideRoom,
   LIGHT_STRIDE_BYTES,
   makeBox,
   makeQuad,
+  packClusters,
   packLights,
   packQuads,
   QUAD_STRIDE_BYTES,
   quadCorners,
+  SCENE_VARIANTS,
 } from "@/gi/scene";
 
 const NO_EMISSION = { albedo: vec3(1, 1, 1), emission: vec3(0, 0, 0) };
@@ -72,13 +75,35 @@ describe("makeBox", () => {
 
 describe("buildScene", () => {
   it("closes the room with inward-facing walls", () => {
-    const { quads } = buildScene("classic");
-    const walls = quads.slice(0, 6);
+    const { quads, occluderCount } = buildScene("classic");
+    const walls = quads.slice(occluderCount);
+    expect(walls).toHaveLength(6);
     const interior = vec3(0.5, 0.5, 0.5);
     for (const wall of walls) {
       expect(dot(wall.normal, sub(interior, centreOf(wall)))).toBeGreaterThan(
         0,
       );
+    }
+  });
+
+  // `traceOccluded` stops at `occluderCount`, so anything a shadow ray must be
+  // able to hit has to sort before the walls.
+  it("sorts every occluder before the walls in both variants", () => {
+    for (const variant of SCENE_VARIANTS) {
+      const { quads, occluderCount, lights } = buildScene(variant);
+      expect(occluderCount).toBe(quads.length - 6);
+      for (const light of lights) {
+        expect(light.quadIndex).toBeLessThan(occluderCount);
+      }
+      // The walls are the only unit-area quads, which is what separates them
+      // from the blocks and emitters that a shadow ray still has to test.
+      for (const wall of quads.slice(occluderCount)) {
+        expect(wall.area).toBeCloseTo(1);
+      }
+      for (const occluder of quads.slice(0, occluderCount)) {
+        expect(occluder.area).toBeLessThan(1);
+        expect(isInsideRoom(centreOf(occluder), 0)).toBe(true);
+      }
     }
   });
 
@@ -124,6 +149,63 @@ describe("GPU packing", () => {
     expect(view.getFloat32(12, true)).toBeCloseTo(first.area);
     expect(view.getFloat32(48, true)).toBeCloseTo(first.normal.x);
     expect(view.getFloat32(52, true)).toBeCloseTo(first.normal.y);
+  });
+
+  // `intersectQuad` multiplies by these instead of dividing by the edge lengths
+  // it would otherwise recompute per ray. Dropping them here reads as a black
+  // screen, not as a packing error.
+  it("packs the inverse squared edge lengths into the u and v w lanes", () => {
+    const view = new DataView(packQuads(scene));
+    for (const [i, quad] of scene.quads.entries()) {
+      const base = i * QUAD_STRIDE_BYTES;
+      expect(view.getFloat32(base + 28, true)).toBeCloseTo(
+        1 / dot(quad.u, quad.u),
+      );
+      expect(view.getFloat32(base + 44, true)).toBeCloseTo(
+        1 / dot(quad.v, quad.v),
+      );
+    }
+  });
+
+  // A shadow ray skips a cluster's whole run when it misses the bound, so the
+  // bound containing every corner is what keeps that skip exact.
+  it("bounds every occluder inside its cluster and covers them all", () => {
+    for (const variant of SCENE_VARIANTS) {
+      const { quads, occluderCount, occluderClusters } = buildScene(variant);
+      let expectedStart = 0;
+      for (const cluster of occluderClusters) {
+        expect(cluster.start).toBe(expectedStart);
+        expect(cluster.count).toBeGreaterThan(0);
+        for (const quad of quads.slice(
+          cluster.start,
+          cluster.start + cluster.count,
+        )) {
+          for (const corner of quadCorners(quad)) {
+            for (const axis of ["x", "y", "z"] as const) {
+              expect(corner[axis]).toBeGreaterThanOrEqual(cluster.min[axis]);
+              expect(corner[axis]).toBeLessThanOrEqual(cluster.max[axis]);
+            }
+          }
+        }
+        expectedStart += cluster.count;
+      }
+      expect(expectedStart).toBe(occluderCount);
+    }
+  });
+
+  it("packs cluster bounds and runs at the offsets the shader reads", () => {
+    const scene = buildScene("manyLights");
+    const view = new DataView(packClusters(scene));
+    expect(view.byteLength).toBe(
+      scene.occluderClusters.length * CLUSTER_STRIDE_BYTES,
+    );
+    scene.occluderClusters.forEach((cluster, i) => {
+      const base = i * CLUSTER_STRIDE_BYTES;
+      expect(view.getFloat32(base, true)).toBeCloseTo(cluster.min.x);
+      expect(view.getFloat32(base + 12, true)).toBe(cluster.start);
+      expect(view.getFloat32(base + 16, true)).toBeCloseTo(cluster.max.x);
+      expect(view.getFloat32(base + 28, true)).toBe(cluster.count);
+    });
   });
 
   it("writes the light index as an unsigned integer", () => {

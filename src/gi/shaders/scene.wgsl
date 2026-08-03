@@ -5,6 +5,7 @@
 @group(0) @binding(0) var<uniform> uni: Uniforms;
 @group(0) @binding(1) var<storage, read> quads: array<Quad>;
 @group(0) @binding(2) var<storage, read> lights: array<Light>;
+@group(0) @binding(3) var<storage, read> clusters: array<Cluster>;
 
 struct HitInfo {
   hit: bool,
@@ -29,34 +30,44 @@ fn intersectQuad(q: Quad, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
   if (t <= RAY_EPS || t >= tMax) {
     return -1.0;
   }
+  // `u.w` / `v.w` carry 1/|u|^2 and 1/|v|^2 from `packQuads`: recomputing them
+  // here costs two dots and two divides on every quad of every ray.
   let p = ro + rd * t - q.origin.xyz;
-  let a = dot(p, q.u.xyz) / dot(q.u.xyz, q.u.xyz);
+  let a = dot(p, q.u.xyz) * q.u.w;
   if (a < 0.0 || a > 1.0) {
     return -1.0;
   }
-  let b = dot(p, q.v.xyz) / dot(q.v.xyz, q.v.xyz);
+  let b = dot(p, q.v.xyz) * q.v.w;
   if (b < 0.0 || b > 1.0) {
     return -1.0;
   }
   return t;
 }
 
+/**
+ * The traversal loop touches only the four intersection fields; shading data is
+ * fetched once for the winner. Reading the whole `Quad` per step instead keeps
+ * albedo and emission live across the loop, and every ray pays that bandwidth
+ * on every quad it misses.
+ */
 fn traceScene(ro: vec3f, rd: vec3f) -> HitInfo {
   var best: HitInfo;
   best.hit = false;
   best.t = T_FAR;
   best.quadIndex = 0u;
   for (var i = 0u; i < uni.quadCount; i = i + 1u) {
-    let q = quads[i];
-    let t = intersectQuad(q, ro, rd, best.t);
+    let t = intersectQuad(quads[i], ro, rd, best.t);
     if (t > 0.0) {
       best.hit = true;
       best.t = t;
       best.quadIndex = i;
-      best.normal = select(q.normal.xyz, -q.normal.xyz, dot(q.normal.xyz, rd) > 0.0);
-      best.albedo = q.albedo.xyz;
-      best.emission = q.emission.xyz;
     }
+  }
+  if (best.hit) {
+    let q = quads[best.quadIndex];
+    best.normal = select(q.normal.xyz, -q.normal.xyz, dot(q.normal.xyz, rd) > 0.0);
+    best.albedo = q.albedo.xyz;
+    best.emission = q.emission.xyz;
   }
   best.pos = ro + rd * best.t;
   return best;
@@ -74,28 +85,71 @@ fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
   best.t = T_FAR;
   best.quadIndex = 0u;
   for (var i = 0u; i < uni.quadCount; i = i + 1u) {
-    let q = quads[i];
-    if (dot(q.normal.xyz, rd) > 0.0) {
+    if (dot(quads[i].normal.xyz, rd) > 0.0) {
       continue;
     }
-    let t = intersectQuad(q, ro, rd, best.t);
+    let t = intersectQuad(quads[i], ro, rd, best.t);
     if (t > 0.0) {
       best.hit = true;
       best.t = t;
       best.quadIndex = i;
-      best.normal = q.normal.xyz;
-      best.albedo = q.albedo.xyz;
-      best.emission = q.emission.xyz;
     }
+  }
+  if (best.hit) {
+    let q = quads[best.quadIndex];
+    best.normal = q.normal.xyz;
+    best.albedo = q.albedo.xyz;
+    best.emission = q.emission.xyz;
   }
   best.pos = ro + rd * best.t;
   return best;
 }
 
+/**
+ * Reciprocal that stays finite: the slab test multiplies by it, and an infinity
+ * meeting a zero-length extent would produce a NaN that swallows the comparison.
+ * The substituted magnitude is far beyond any t the scene can produce.
+ */
+fn safeInverse(v: f32) -> f32 {
+  if (abs(v) < 1e-30) {
+    return select(1e30, -1e30, v < 0.0);
+  }
+  return 1.0 / v;
+}
+
+/** Whether the segment `[RAY_EPS, tMax]` along `rd` can meet the box at all. */
+fn segmentHitsBounds(lo: vec3f, hi: vec3f, ro: vec3f, invRd: vec3f, tMax: f32) -> bool {
+  let a = (lo - ro) * invRd;
+  let b = (hi - ro) * invRd;
+  let near = min(a, b);
+  let far = max(a, b);
+  let enter = max(max(near.x, near.y), max(near.z, RAY_EPS));
+  let exit = min(min(far.x, far.y), min(far.z, tMax));
+  return enter <= exit;
+}
+
+/**
+ * Segment occlusion between two points on the scene's interior surfaces. Two
+ * things narrow it. The room is convex, so a segment with both ends inside it
+ * never reaches a wall and `buildScene` sorts the walls out of range entirely.
+ * What remains is grouped into bounded clusters — one per block, one for the
+ * ceiling emitters — and a cluster whose bound the segment misses cannot
+ * contain a quad it hits, so the whole run is skipped. Both are exact.
+ * Closest-hit traversal still walks every quad: bounces do land on walls.
+ */
 fn traceOccluded(ro: vec3f, rd: vec3f, tMax: f32) -> bool {
-  for (var i = 0u; i < uni.quadCount; i = i + 1u) {
-    if (intersectQuad(quads[i], ro, rd, tMax) > 0.0) {
-      return true;
+  let invRd = vec3f(safeInverse(rd.x), safeInverse(rd.y), safeInverse(rd.z));
+  for (var c = 0u; c < uni.clusterCount; c = c + 1u) {
+    let cluster = clusters[c];
+    if (!segmentHitsBounds(cluster.lo.xyz, cluster.hi.xyz, ro, invRd, tMax)) {
+      continue;
+    }
+    let start = u32(cluster.lo.w);
+    let end = start + u32(cluster.hi.w);
+    for (var i = start; i < end; i = i + 1u) {
+      if (intersectQuad(quads[i], ro, rd, tMax) > 0.0) {
+        return true;
+      }
     }
   }
   return false;
@@ -174,6 +228,21 @@ fn diTargetPdf(x: vec3f, n: vec3f, albedo: vec3f, lightPos: vec3f, lightQuad: u3
   return luminance(directContribution(x, n, albedo, lightPos, lightQuad));
 }
 
+/**
+ * Whether `diTargetPdf` would be positive, without evaluating it. The 1/Z loops
+ * only ask which contributors could have produced the surviving sample, and
+ * everything the full form adds on top of the two cosines — the inverse square
+ * root, the distance, `INV_PI` — is a strictly positive factor that cannot
+ * change the answer. The unnormalised `d` therefore settles both signs.
+ */
+fn diSupported(x: vec3f, n: vec3f, albedo: vec3f, lightPos: vec3f, lightQuad: u32) -> bool {
+  let q = quads[lightQuad];
+  let d = lightPos - x;
+  return dot(n, d) > 0.0
+    && dot(q.normal.xyz, -d) > 0.0
+    && luminance(albedo * q.emission.xyz) > 0.0;
+}
+
 /** Reflected radiance towards the visible point for a stored GI sample. */
 fn giContribution(x: vec3f, n: vec3f, albedo: vec3f, r: GiReservoir) -> vec3f {
   let d = r.samplePos.xyz - x;
@@ -189,6 +258,14 @@ fn giContribution(x: vec3f, n: vec3f, albedo: vec3f, r: GiReservoir) -> vec3f {
 
 fn giTargetPdf(x: vec3f, n: vec3f, albedo: vec3f, r: GiReservoir) -> f32 {
   return luminance(giContribution(x, n, albedo, r));
+}
+
+/** See `diSupported`; the same reduction, for a stored GI sample. */
+fn giSupported(x: vec3f, n: vec3f, albedo: vec3f, r: GiReservoir) -> bool {
+  let d = r.samplePos.xyz - x;
+  return dot(n, d) > 0.0
+    && dot(r.sampleNormal.xyz, -d) > 0.0
+    && luminance(albedo * r.radiance.xyz) > 0.0;
 }
 
 /** Widest measure change a reused sample may carry before it is rejected. */
@@ -259,6 +336,12 @@ fn pathRadiance(startPos: vec3f, startNormal: vec3f, startAlbedo: vec3f, maxBoun
 
   for (var bounce = 0u; bounce < maxBounces; bounce = bounce + 1u) {
     radiance += throughput * nextEventEstimation(pos, normal, albedo);
+
+    // The last vertex has already contributed; extending the walk from it would
+    // trace a ray whose hit no iteration reads.
+    if (bounce + 1u >= maxBounces) {
+      break;
+    }
 
     // Cosine-weighted sampling makes the BRDF/pdf ratio exactly the albedo.
     throughput *= albedo;

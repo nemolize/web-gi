@@ -9,7 +9,7 @@
 @group(1) @binding(3) var<storage, read> srcReservoirs: array<GiReservoir>;
 @group(1) @binding(4) var<storage, read_write> dstReservoirs: array<GiReservoir>;
 
-const MAX_CONTRIBUTORS: u32 = 9u;
+const MAX_NEIGHBORS: u32 = 8u;
 const PLANE_TOLERANCE: f32 = 0.05;
 const NORMAL_TOLERANCE: f32 = 0.9;
 
@@ -33,8 +33,11 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let albedo = textureLoad(texAlbedo, pixel, 0).xyz;
   rngInit(pixel, uni.frame, 5u);
 
-  var contributors: array<vec2u, MAX_CONTRIBUTORS>;
-  var contributorM: array<f32, MAX_CONTRIBUTORS>;
+  // See `restir-di-spatial.wgsl`: neighbours only, coordinates packed, because
+  // a dynamically-indexed array lands in per-thread scratch.
+  var neighbors: array<u32, MAX_NEIGHBORS>;
+  var neighborM: array<f32, MAX_NEIGHBORS>;
+  var neighborCount = 0u;
 
   let center = srcReservoirs[index];
   var reservoir = giReservoirEmpty();
@@ -48,14 +51,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     giM(center),
     rand(),
   );
-  contributors[0] = pixel;
-  contributorM[0] = giM(center);
-  var contributorCount = 1u;
-
   // Always dispatched so the final reservoir lands in the same buffer either
   // way; disabling spatial reuse simply degenerates it to a 1/Z pass-through.
   let spatial = (uni.flags & FLAG_GI_SPATIAL) != 0u;
-  let wanted = select(0u, min(uni.spatialSamples, MAX_CONTRIBUTORS - 1u), spatial);
+  let wanted = select(0u, min(uni.spatialSamples, MAX_NEIGHBORS), spatial);
   for (var i = 0u; i < wanted; i = i + 1u) {
     let angle = rand() * 2.0 * PI;
     let radius = uni.spatialRadius * sqrt(rand());
@@ -102,29 +101,32 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       giM(other),
       rand(),
     );
-    contributors[contributorCount] = neighbor;
-    contributorM[contributorCount] = giM(other);
-    contributorCount = contributorCount + 1u;
+    neighbors[neighborCount] = packPixel(neighbor);
+    neighborM[neighborCount] = giM(other);
+    neighborCount = neighborCount + 1u;
   }
 
   // The support test deliberately does NOT apply the Jacobian gate: the gate is
   // this pass's own conservatism about transferring a sample, not a statement
   // that the contributor's domain excludes it. Gating here shrinks Z and
   // measured 6% brighter than the reference path tracer, against 1% without.
+  // This pixel is the first contributor and its surface never left registers.
   var z = 0.0;
-  for (var i = 0u; i < contributorCount; i = i + 1u) {
-    let coord = contributors[i];
+  if (giSupported(x, n, albedo, reservoir)) {
+    z += giM(center);
+  }
+  for (var i = 0u; i < neighborCount; i = i + 1u) {
+    let coord = unpackPixel(neighbors[i]);
     let contributorPosition = textureLoad(texPosition, coord, 0);
     let contributorNormal = textureLoad(texNormal, coord, 0).xyz;
     let contributorAlbedo = textureLoad(texAlbedo, coord, 0).xyz;
-    let pdf = giTargetPdf(
+    if (giSupported(
       contributorPosition.xyz,
       contributorNormal,
       contributorAlbedo,
       reservoir,
-    );
-    if (pdf > 0.0) {
-      z += contributorM[i];
+    )) {
+      z += neighborM[i];
     }
   }
   giSetM(&reservoir, z);

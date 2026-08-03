@@ -44,7 +44,7 @@ struct Uniforms {
   flags: u32,
   spatialRadius: f32,
   exposure: f32,
-  _pad0: f32,
+  clusterCount: u32,
   _pad1: f32,
   _pad2: f32,
 }
@@ -52,8 +52,8 @@ struct Uniforms {
 /** vec4f throughout for the same reason as `Camera`; layout is unchanged. */
 struct Quad {
   origin: vec4f,   // xyz = corner, w = area
-  u: vec4f,        // xyz = first edge
-  v: vec4f,        // xyz = second edge
+  u: vec4f,        // xyz = first edge,  w = 1/|u|^2
+  v: vec4f,        // xyz = second edge, w = 1/|v|^2
   normal: vec4f,   // xyz = unit normal
   albedo: vec4f,   // xyz = diffuse albedo
   emission: vec4f, // xyz = emitted radiance
@@ -64,6 +64,15 @@ struct Light {
   cdf: f32,
   selectPdf: f32,
   _pad0: f32,
+}
+
+/**
+ * Bound around a run of occluder quads. Counts ride in the w lanes for the
+ * same portability reason as `Camera`; they are small integers, so f32 is exact.
+ */
+struct Cluster {
+  lo: vec4f, // xyz = min corner, w = index of the first quad
+  hi: vec4f, // xyz = max corner, w = number of quads
 }
 
 // Direct-lighting reservoir. The chosen sample is a point on an emissive quad;
@@ -228,6 +237,19 @@ fn projectToUv(cam: Camera, p: vec3f) -> vec3f {
   let y = dot(d, cam.up.xyz) / (z * camTanHalfFov(cam));
   let onScreen = select(0.0, 1.0, abs(x) <= 1.0 && abs(y) <= 1.0);
   return vec3f(x * 0.5 + 0.5, 0.5 - y * 0.5, onScreen);
+}
+
+/**
+ * Pixel coordinates as one u32, for the spatial passes' dynamically-indexed
+ * neighbour lists. 16 bits per axis covers any resolution the renderer can
+ * allocate, and halves an array that lives in per-thread scratch.
+ */
+fn packPixel(pixel: vec2u) -> u32 {
+  return (pixel.y << 16u) | (pixel.x & 0xffffu);
+}
+
+fn unpackPixel(packed: u32) -> vec2u {
+  return vec2u(packed & 0xffffu, packed >> 16u);
 }
 
 // ---------------------------------------------------------------- reservoirs

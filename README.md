@@ -71,7 +71,12 @@ so it does restart when the camera moves.
 
 The scene is a small set of parallelograms with perpendicular edges, which lets
 the shader invert the barycentric solve with two dot products and skips the need
-for any acceleration structure. `src/gi/scene.ts` builds it and packs it for the
+for any acceleration structure. It also stands in for one: the room is the
+convex hull of everything in it, so a shadow ray — always a segment between two
+points on its interior surfaces — can never reach a wall. `buildScene` sorts the
+walls last and occlusion queries stop before them. Adding geometry outside the
+room, or making the room concave, breaks that and is what
+`shadow-ray-occluders.test.ts` guards. `src/gi/scene.ts` builds it and packs it for the
 GPU; the unit tests check the packing offsets against the WGSL struct layout and
 the camera maths against its shader counterpart.
 
