@@ -33,10 +33,11 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
   // Only the neighbours are recorded: this pixel is always a contributor, and
   // its surface is already in registers. Coordinates pack into one u32 because
-  // the arrays are dynamically indexed, which puts them in per-thread scratch
-  // rather than registers — half the footprint is half the traffic.
+  // the array is dynamically indexed, which puts it in per-thread scratch
+  // rather than registers, and scratch bounds how many waves stay resident.
+  // `M` is not kept either — the 1/Z loop re-reads it from the reservoir,
+  // whose line the acceptance loop has already touched.
   var neighbors: array<u32, MAX_NEIGHBORS>;
-  var neighborM: array<f32, MAX_NEIGHBORS>;
   var neighborCount = 0u;
 
   let center = srcReservoirs[index];
@@ -89,7 +90,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       rand(),
     );
     neighbors[neighborCount] = packPixel(neighbor);
-    neighborM[neighborCount] = other.m;
     neighborCount = neighborCount + 1u;
   }
 
@@ -113,7 +113,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       reservoir.lightPos.xyz,
       reservoir.lightQuad,
     )) {
-      z += neighborM[i];
+      z += srcReservoirs[coord.y * uni.resolution.x + coord.x].m;
     }
   }
   reservoir.m = z;

@@ -35,9 +35,11 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   rngInit(pixel, uni.frame, 5u);
 
   // See `restir-di-spatial.wgsl`: neighbours only, coordinates packed, because
-  // a dynamically-indexed array lands in per-thread scratch.
+  // a dynamically-indexed array lands in per-thread scratch — and scratch is
+  // carved from the pool that bounds how many waves stay resident, so its size
+  // is an occupancy lever. `M` is not kept: the 1/Z loop re-reads it from the
+  // reservoir, whose line the acceptance loop has already touched.
   var neighbors: array<u32, MAX_NEIGHBORS>;
-  var neighborM: array<f32, MAX_NEIGHBORS>;
   var neighborCount = 0u;
 
   let center = srcReservoirs[index];
@@ -110,7 +112,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       rand(),
     );
     neighbors[neighborCount] = packPixel(neighbor);
-    neighborM[neighborCount] = giM(other);
     neighborCount = neighborCount + 1u;
   }
 
@@ -159,7 +160,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       contributorAlbedo,
       reservoir,
     )) {
-      z += neighborM[i];
+      z += giM(srcReservoirs[coord.y * uni.resolution.x + coord.x]);
     }
   }
   giSetM(&reservoir, z);

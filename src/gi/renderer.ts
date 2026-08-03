@@ -1045,20 +1045,32 @@ export class GiRenderer {
       };
     };
 
+    // One pass for the whole chain: a compute pass's usage scope is the single
+    // dispatch, so the boundaries only cost a flush on a tiler. Timestamps
+    // bracket a pass, so capturing puts them back to get a per-pass breakdown.
+    const computePass = timing ? null : encoder.beginComputePass();
     const dispatch = (
       pipeline: GPUComputePipeline,
       passBindGroup: GPUBindGroup,
       label: string,
       workgroupSize = WORKGROUP_SIZE,
     ): void => {
+      const groups: [number, number] = [
+        Math.ceil(targets.width / workgroupSize),
+        Math.ceil(targets.height / workgroupSize),
+      ];
+      if (computePass !== null) {
+        computePass.setPipeline(pipeline);
+        computePass.setBindGroup(0, this.sceneBindGroup);
+        computePass.setBindGroup(1, passBindGroup);
+        computePass.dispatchWorkgroups(...groups);
+        return;
+      }
       const pass = encoder.beginComputePass(timestampWrites(label));
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, this.sceneBindGroup);
       pass.setBindGroup(1, passBindGroup);
-      pass.dispatchWorkgroups(
-        Math.ceil(targets.width / workgroupSize),
-        Math.ceil(targets.height / workgroupSize),
-      );
+      pass.dispatchWorkgroups(...groups);
       pass.end();
     };
 
@@ -1099,6 +1111,7 @@ export class GiRenderer {
         );
       }
     }
+    computePass?.end();
 
     // Timed too: without it the per-pass total is not the frame's GPU time.
     const presentTimestamps = timestampWrites("present");
