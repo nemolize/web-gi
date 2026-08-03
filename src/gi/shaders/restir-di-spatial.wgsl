@@ -7,7 +7,7 @@
 @group(1) @binding(3) var<storage, read> srcReservoirs: array<DiReservoir>;
 @group(1) @binding(4) var<storage, read_write> dstReservoirs: array<DiReservoir>;
 
-const MAX_CONTRIBUTORS: u32 = 9u;
+const MAX_NEIGHBORS: u32 = 8u;
 const PLANE_TOLERANCE: f32 = 0.05;
 const NORMAL_TOLERANCE: f32 = 0.9;
 
@@ -31,9 +31,13 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let albedo = textureLoad(texAlbedo, pixel, 0).xyz;
   rngInit(pixel, uni.frame, 3u);
 
-  var contributors: array<vec2u, MAX_CONTRIBUTORS>;
-  var contributorM: array<f32, MAX_CONTRIBUTORS>;
-  var contributorCount = 0u;
+  // Only the neighbours are recorded: this pixel is always a contributor, and
+  // its surface is already in registers. Coordinates pack into one u32 because
+  // the arrays are dynamically indexed, which puts them in per-thread scratch
+  // rather than registers — half the footprint is half the traffic.
+  var neighbors: array<u32, MAX_NEIGHBORS>;
+  var neighborM: array<f32, MAX_NEIGHBORS>;
+  var neighborCount = 0u;
 
   let center = srcReservoirs[index];
   var reservoir = diReservoirEmpty();
@@ -46,14 +50,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     center.m,
     rand(),
   );
-  contributors[0] = pixel;
-  contributorM[0] = center.m;
-  contributorCount = 1u;
-
   // Always dispatched so the final reservoir lands in the same buffer either
   // way; disabling spatial reuse simply degenerates it to a 1/Z pass-through.
   let spatial = (uni.flags & FLAG_DI_SPATIAL) != 0u;
-  let wanted = select(0u, min(uni.spatialSamples, MAX_CONTRIBUTORS - 1u), spatial);
+  let wanted = select(0u, min(uni.spatialSamples, MAX_NEIGHBORS), spatial);
   for (var i = 0u; i < wanted; i = i + 1u) {
     let angle = rand() * 2.0 * PI;
     let radius = uni.spatialRadius * sqrt(rand());
@@ -87,16 +87,20 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       other.m,
       rand(),
     );
-    contributors[contributorCount] = neighbor;
-    contributorM[contributorCount] = other.m;
-    contributorCount = contributorCount + 1u;
+    neighbors[neighborCount] = packPixel(neighbor);
+    neighborM[neighborCount] = other.m;
+    neighborCount = neighborCount + 1u;
   }
 
   // 1/Z correction: only contributors that could have produced the surviving
-  // sample are allowed to count towards its normalisation.
+  // sample are allowed to count towards its normalisation. This pixel is the
+  // first contributor and its surface never left registers.
   var z = 0.0;
-  for (var i = 0u; i < contributorCount; i = i + 1u) {
-    let coord = contributors[i];
+  if (diTargetPdf(x, n, albedo, reservoir.lightPos.xyz, reservoir.lightQuad) > 0.0) {
+    z += center.m;
+  }
+  for (var i = 0u; i < neighborCount; i = i + 1u) {
+    let coord = unpackPixel(neighbors[i]);
     let contributorPosition = textureLoad(texPosition, coord, 0);
     let contributorNormal = textureLoad(texNormal, coord, 0).xyz;
     let contributorAlbedo = textureLoad(texAlbedo, coord, 0).xyz;
@@ -108,7 +112,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       reservoir.lightQuad,
     );
     if (pdf > 0.0) {
-      z += contributorM[i];
+      z += neighborM[i];
     }
   }
   reservoir.m = z;

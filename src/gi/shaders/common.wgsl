@@ -230,6 +230,19 @@ fn projectToUv(cam: Camera, p: vec3f) -> vec3f {
   return vec3f(x * 0.5 + 0.5, 0.5 - y * 0.5, onScreen);
 }
 
+/**
+ * Pixel coordinates as one u32, for the spatial passes' dynamically-indexed
+ * neighbour lists. 16 bits per axis covers any resolution the renderer can
+ * allocate, and halves an array that lives in per-thread scratch.
+ */
+fn packPixel(pixel: vec2u) -> u32 {
+  return (pixel.y << 16u) | (pixel.x & 0xffffu);
+}
+
+fn unpackPixel(packed: u32) -> vec2u {
+  return vec2u(packed & 0xffffu, packed >> 16u);
+}
+
 // ---------------------------------------------------------------- reservoirs
 
 fn diReservoirEmpty() -> DiReservoir {
