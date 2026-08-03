@@ -1,7 +1,8 @@
 // ReSTIR GI, stage 2: spatial reuse. Each reused sample point is re-weighted
-// through the reconnection Jacobian and rejected when it is not visible from
-// this pixel's shading point, which is what keeps light from leaking through
-// the block geometry.
+// through the reconnection Jacobian, and the neighbours resample among
+// themselves before one visibility ray decides whether their winner may join
+// this pixel — which is what keeps light from leaking through the block
+// geometry.
 
 @group(1) @binding(0) var texPosition: texture_2d<f32>;
 @group(1) @binding(1) var texNormal: texture_2d<f32>;
@@ -51,6 +52,12 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     giM(center),
     rand(),
   );
+  // The neighbours resample into their own reservoir first, so one visibility
+  // ray settles the whole group instead of one per candidate. Reservoir merging
+  // is associative, so folding the group in with its own `wSum` and `M`
+  // reproduces what folding each neighbour directly would have produced.
+  var group = giReservoirEmpty();
+
   // Always dispatched so the final reservoir lands in the same buffer either
   // way; disabling spatial reuse simply degenerates it to a 1/Z pass-through.
   let spatial = (uni.flags & FLAG_GI_SPATIAL) != 0u;
@@ -77,7 +84,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       continue;
     }
     let targetPdf = giTargetPdf(x, n, albedo, other);
-    if (targetPdf <= 0.0 || !mutuallyVisible(x, n, other.samplePos.xyz)) {
+    if (targetPdf <= 0.0) {
       continue;
     }
     let jacobian = reconnectionJacobian(
@@ -92,7 +99,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       continue;
     }
     giReservoirUpdate(
-      &reservoir,
+      &group,
       other.samplePos.xyz,
       other.sampleNormal.xyz,
       other.radiance.xyz,
@@ -104,6 +111,30 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     neighbors[neighborCount] = packPixel(neighbor);
     neighborM[neighborCount] = giM(other);
     neighborCount = neighborCount + 1u;
+  }
+
+  // One ray, on the sample that actually survived the group's resampling. An
+  // occluded winner drops the group rather than the pixel: the centre sample
+  // was folded in before this and is never at risk, so there is no path that
+  // zeroes a pixel outright.
+  // A group that carries no weight has no sample to test: folding it in still
+  // passes on the `M` its neighbours contributed, which is what they did
+  // one by one before.
+  let groupVisible =
+    giWSum(group) <= 0.0 || mutuallyVisible(x, n, group.samplePos.xyz);
+  if (groupVisible) {
+    giReservoirUpdate(
+      &reservoir,
+      group.samplePos.xyz,
+      group.sampleNormal.xyz,
+      group.radiance.xyz,
+      giWSum(group),
+      giTarget(group),
+      giM(group),
+      rand(),
+    );
+  } else {
+    neighborCount = 0u;
   }
 
   // The support test deliberately does NOT apply the Jacobian gate: the gate is
