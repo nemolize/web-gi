@@ -10,6 +10,13 @@ import { buildScene, SCENE_VARIANTS, sceneBounds } from "@/gi/scene";
 const RAY_EPS = 1e-4;
 const SURFACE_EPS = 1e-3;
 const SEGMENTS = 200_000;
+const T_FAR = 1e20;
+
+const requireQuad = (quads: readonly Quad[], index: number): Quad => {
+  const quad = quads[index];
+  if (quad === undefined) throw new Error(`missing quad at ${String(index)}`);
+  return quad;
+};
 
 /** Mirrors `intersectQuad` in `scene.wgsl`. */
 const intersectQuad = (q: Quad, ro: Vec3, rd: Vec3, tMax: number): number => {
@@ -54,7 +61,7 @@ const lcg = (state: number) => () => {
   return state / 0x7fffffff;
 };
 
-describe("shadow-ray wall exclusion", () => {
+describe("clustered traversal", () => {
   it.each([...SCENE_VARIANTS])(
     "never lets a wall block a surface-to-surface segment (%s)",
     (variant) => {
@@ -116,8 +123,10 @@ describe("shadow-ray wall exclusion", () => {
   it.each([...SCENE_VARIANTS])(
     "answers exactly as an unclustered sweep would (%s)",
     (variant) => {
-      const { quads, occluderCount, occluderClusters } = buildScene(variant);
+      const { quads, occluderCount, clusters, occluderClusterCount } =
+        buildScene(variant);
       const occluders = quads.slice(0, occluderCount);
+      const occluderClusters = clusters.slice(0, occluderClusterCount);
       const rnd = lcg(987654321);
       const anyHit = (ro: Vec3, rd: Vec3, tMax: number) =>
         occluders.some((q) => intersectQuad(q, ro, rd, tMax) > 0);
@@ -155,6 +164,63 @@ describe("shadow-ray wall exclusion", () => {
       expect(disagreements).toBe(0);
       // Guards against a vacuous pass where nothing was ever occluded.
       expect(occluded).toBeGreaterThan(SEGMENTS / 100);
+    },
+  );
+
+  // Closest hit rejects a cluster against the running best `t`, not just the
+  // ray line, so the comparison has to be against a flat nearest-hit sweep.
+  it.each([...SCENE_VARIANTS])(
+    "finds the same nearest hit as an unclustered sweep would (%s)",
+    (variant) => {
+      const { quads, clusters } = buildScene(variant);
+      const rnd = lcg(24681357);
+      const flatNearest = (ro: Vec3, rd: Vec3) => {
+        let best = -1;
+        let bestT = T_FAR;
+        quads.forEach((q, i) => {
+          const t = intersectQuad(q, ro, rd, bestT);
+          if (t > 0) {
+            bestT = t;
+            best = i;
+          }
+        });
+        return best;
+      };
+      const clusteredNearest = (ro: Vec3, rd: Vec3) => {
+        const invRd = vec3(
+          safeInverse(rd.x),
+          safeInverse(rd.y),
+          safeInverse(rd.z),
+        );
+        let best = -1;
+        let bestT = T_FAR;
+        for (const c of clusters) {
+          if (!segmentHitsBounds(c.min, c.max, ro, invRd, bestT)) continue;
+          for (let i = c.start; i < c.start + c.count; i++) {
+            const t = intersectQuad(requireQuad(quads, i), ro, rd, bestT);
+            if (t > 0) {
+              bestT = t;
+              best = i;
+            }
+          }
+        }
+        return best;
+      };
+
+      let hits = 0;
+      let disagreements = 0;
+      for (let i = 0; i < SEGMENTS; i++) {
+        const ro = vec3(rnd(), rnd(), rnd());
+        const delta = vec3(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5);
+        const distance = Math.hypot(delta.x, delta.y, delta.z);
+        if (distance < 1e-5) continue;
+        const rd = normalize(delta);
+        const flat = flatNearest(ro, rd);
+        if (flat !== clusteredNearest(ro, rd)) disagreements++;
+        else if (flat >= 0) hits++;
+      }
+      expect(disagreements).toBe(0);
+      expect(hits).toBeGreaterThan(SEGMENTS / 2);
     },
   );
 

@@ -45,7 +45,7 @@ struct Uniforms {
   spatialRadius: f32,
   exposure: f32,
   clusterCount: u32,
-  _pad1: f32,
+  occluderClusterCount: u32,
   _pad2: f32,
 }
 

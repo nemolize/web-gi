@@ -190,13 +190,13 @@ describe("GPU packing", () => {
     }
   });
 
-  // A shadow ray skips a cluster's whole run when it misses the bound, so the
+  // Both traversals skip a cluster's whole run when they miss its bound, so the
   // bound containing every corner is what keeps that skip exact.
-  it("bounds every occluder inside its cluster and covers them all", () => {
+  it("bounds every quad inside its cluster and covers them all", () => {
     for (const variant of SCENE_VARIANTS) {
-      const { quads, occluderCount, occluderClusters } = buildScene(variant);
+      const { quads, clusters } = buildScene(variant);
       let expectedStart = 0;
-      for (const cluster of occluderClusters) {
+      for (const cluster of clusters) {
         expect(cluster.start).toBe(expectedStart);
         expect(cluster.count).toBeGreaterThan(0);
         for (const quad of quads.slice(
@@ -212,17 +212,15 @@ describe("GPU packing", () => {
         }
         expectedStart += cluster.count;
       }
-      expect(expectedStart).toBe(occluderCount);
+      expect(expectedStart).toBe(quads.length);
     }
   });
 
   it("packs cluster bounds and runs at the offsets the shader reads", () => {
     const scene = buildScene("manyLights");
     const view = new DataView(packClusters(scene));
-    expect(view.byteLength).toBe(
-      scene.occluderClusters.length * CLUSTER_STRIDE_BYTES,
-    );
-    scene.occluderClusters.forEach((cluster, i) => {
+    expect(view.byteLength).toBe(scene.clusters.length * CLUSTER_STRIDE_BYTES);
+    scene.clusters.forEach((cluster, i) => {
       const base = i * CLUSTER_STRIDE_BYTES;
       expect(view.getFloat32(base, true)).toBeCloseTo(cluster.min.x);
       expect(view.getFloat32(base + 12, true)).toBe(cluster.start);
