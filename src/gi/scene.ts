@@ -40,8 +40,15 @@ export type LightRef = {
 };
 
 export type Scene = {
+  /** Occluders first, then the room walls; see `occluderCount`. */
   readonly quads: readonly Quad[];
   readonly lights: readonly LightRef[];
+  /**
+   * Quads a shadow ray has to test. The room is convex and every shadow ray is
+   * a segment between two points on its interior surfaces, so no wall can lie
+   * across one — the walls sort last and `traceOccluded` stops before them.
+   */
+  readonly occluderCount: number;
 };
 
 export const SCENE_VARIANTS = ["classic", "manyLights"] as const;
@@ -200,12 +207,16 @@ const collectLights = (quads: readonly Quad[]): LightRef[] => {
 };
 
 export const buildScene = (variant: SceneVariant): Scene => {
-  const quads = [
-    ...room(),
+  const occluders = [
     ...blocks(),
     ...(variant === "manyLights" ? manyLights() : classicLight()),
   ];
-  return { quads, lights: collectLights(quads) };
+  const quads = [...occluders, ...room()];
+  return {
+    quads,
+    lights: collectLights(quads),
+    occluderCount: occluders.length,
+  };
 };
 
 export const packQuads = (scene: Scene): ArrayBuffer => {

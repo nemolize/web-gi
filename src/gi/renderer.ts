@@ -830,6 +830,7 @@ export class GiRenderer {
     view.setUint32(168, packFlags(this.settings), true);
     view.setFloat32(172, this.settings.spatialRadius, true);
     view.setFloat32(176, this.settings.exposure, true);
+    view.setUint32(180, this.scene.occluderCount, true);
     this.device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData);
   }
 

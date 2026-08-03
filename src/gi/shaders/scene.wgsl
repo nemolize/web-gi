@@ -104,8 +104,14 @@ fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
   return best;
 }
 
+/**
+ * Segment occlusion between two points on the scene's interior surfaces. Only
+ * the occluders are tested: the room is convex, so a segment with both ends
+ * inside it never reaches a wall, and `buildScene` sorts the walls last.
+ * Closest-hit traversal still walks every quad — bounces do land on walls.
+ */
 fn traceOccluded(ro: vec3f, rd: vec3f, tMax: f32) -> bool {
-  for (var i = 0u; i < uni.quadCount; i = i + 1u) {
+  for (var i = 0u; i < uni.occluderCount; i = i + 1u) {
     if (intersectQuad(quads[i], ro, rd, tMax) > 0.0) {
       return true;
     }

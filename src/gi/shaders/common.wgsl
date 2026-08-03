@@ -44,7 +44,7 @@ struct Uniforms {
   flags: u32,
   spatialRadius: f32,
   exposure: f32,
-  _pad0: f32,
+  occluderCount: u32,
   _pad1: f32,
   _pad2: f32,
 }

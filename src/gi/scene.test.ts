@@ -10,6 +10,7 @@ import {
   packQuads,
   QUAD_STRIDE_BYTES,
   quadCorners,
+  SCENE_VARIANTS,
 } from "@/gi/scene";
 
 const NO_EMISSION = { albedo: vec3(1, 1, 1), emission: vec3(0, 0, 0) };
@@ -72,13 +73,35 @@ describe("makeBox", () => {
 
 describe("buildScene", () => {
   it("closes the room with inward-facing walls", () => {
-    const { quads } = buildScene("classic");
-    const walls = quads.slice(0, 6);
+    const { quads, occluderCount } = buildScene("classic");
+    const walls = quads.slice(occluderCount);
+    expect(walls).toHaveLength(6);
     const interior = vec3(0.5, 0.5, 0.5);
     for (const wall of walls) {
       expect(dot(wall.normal, sub(interior, centreOf(wall)))).toBeGreaterThan(
         0,
       );
+    }
+  });
+
+  // `traceOccluded` stops at `occluderCount`, so anything a shadow ray must be
+  // able to hit has to sort before the walls.
+  it("sorts every occluder before the walls in both variants", () => {
+    for (const variant of SCENE_VARIANTS) {
+      const { quads, occluderCount, lights } = buildScene(variant);
+      expect(occluderCount).toBe(quads.length - 6);
+      for (const light of lights) {
+        expect(light.quadIndex).toBeLessThan(occluderCount);
+      }
+      // The walls are the only unit-area quads, which is what separates them
+      // from the blocks and emitters that a shadow ray still has to test.
+      for (const wall of quads.slice(occluderCount)) {
+        expect(wall.area).toBeCloseTo(1);
+      }
+      for (const occluder of quads.slice(0, occluderCount)) {
+        expect(occluder.area).toBeLessThan(1);
+        expect(isInsideRoom(centreOf(occluder), 0)).toBe(true);
+      }
     }
   });
 
