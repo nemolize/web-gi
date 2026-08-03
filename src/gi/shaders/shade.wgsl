@@ -2,7 +2,7 @@
 // Demodulation keeps texture detail out of the denoiser's edge-stopping terms;
 // the present pass multiplies the albedo back in.
 
-@group(1) @binding(0) var texPosition: texture_2d<f32>;
+@group(1) @binding(0) var texDepth: texture_2d<f32>;
 @group(1) @binding(1) var texNormal: texture_2d<f32>;
 @group(1) @binding(2) var<storage, read> diReservoirs: array<DiReservoir>;
 @group(1) @binding(3) var<storage, read> giReservoirs: array<GiReservoir>;
@@ -19,12 +19,12 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   }
   let index = pixel.y * uni.resolution.x + pixel.x;
 
-  let position = textureLoad(texPosition, pixel, 0);
-  if (position.w < 0.5) {
+  let depth = textureLoad(texDepth, pixel, 0).x;
+  if (!surfaceHit(depth)) {
     textureStore(outIllumination, pixel, vec4f(0.0));
     return;
   }
-  let x = position.xyz;
+  let x = surfacePosition(uni.cam, pixel, depth);
   let n = textureLoad(texNormal, pixel, 0).xyz;
 
   var illumination = vec3f(0.0);

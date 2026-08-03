@@ -383,7 +383,7 @@ export class GiRenderer {
         readOnlyStorage,
       ]),
       gbuffer: createLayout(device, "gbuffer", compute, [
-        storageTexture("rgba32float"),
+        storageTexture("r32float"),
         storageTexture("rgba16float"),
         storageTexture("rgba8unorm"),
         storageTexture("rgba16float"),
@@ -641,7 +641,9 @@ export class GiRenderer {
         }),
       );
 
-    const position = texture("position", "rgba32float", 2);
+    // View-space depth, not a world position: the fourth channel only ever
+    // carried a hit flag, and this is the most-read target in the pipeline.
+    const depth = texture("depth", "r32float", 2);
     const normal = texture("normal", "rgba16float", 2);
     const albedo = texture("albedo", "rgba8unorm", 1);
     const emission = texture("emission", "rgba16float", 1);
@@ -678,7 +680,7 @@ export class GiRenderer {
       width,
       height,
       textures: [
-        ...position,
+        ...depth,
         ...normal,
         ...albedo,
         ...emission,
@@ -690,7 +692,7 @@ export class GiRenderer {
       buffers: [diScratch, ...diFinal, giScratch, ...giFinal],
       gbuffer: parities.map((p) =>
         createBindGroup(device, this.layouts.gbuffer, [
-          view(at(position, p)),
+          view(at(depth, p)),
           view(at(normal, p)),
           view(at(albedo, 0)),
           view(at(emission, 0)),
@@ -698,10 +700,10 @@ export class GiRenderer {
       ),
       di: parities.map((p) =>
         createBindGroup(device, this.layouts.resample, [
-          view(at(position, p)),
+          view(at(depth, p)),
           view(at(normal, p)),
           view(at(albedo, 0)),
-          view(at(position, 1 - p)),
+          view(at(depth, 1 - p)),
           view(at(normal, 1 - p)),
           { buffer: at(diFinal, 1 - p) },
           { buffer: diScratch },
@@ -709,7 +711,7 @@ export class GiRenderer {
       ),
       diSpatial: parities.map((p) =>
         createBindGroup(device, this.layouts.spatial, [
-          view(at(position, p)),
+          view(at(depth, p)),
           view(at(normal, p)),
           view(at(albedo, 0)),
           { buffer: diScratch },
@@ -718,10 +720,10 @@ export class GiRenderer {
       ),
       gi: parities.map((p) =>
         createBindGroup(device, this.layouts.resample, [
-          view(at(position, p)),
+          view(at(depth, p)),
           view(at(normal, p)),
           view(at(albedo, 0)),
-          view(at(position, 1 - p)),
+          view(at(depth, 1 - p)),
           view(at(normal, 1 - p)),
           { buffer: at(giFinal, 1 - p) },
           { buffer: giScratch },
@@ -729,7 +731,7 @@ export class GiRenderer {
       ),
       giSpatial: parities.map((p) =>
         createBindGroup(device, this.layouts.spatial, [
-          view(at(position, p)),
+          view(at(depth, p)),
           view(at(normal, p)),
           view(at(albedo, 0)),
           { buffer: giScratch },
@@ -738,7 +740,7 @@ export class GiRenderer {
       ),
       shade: parities.map((p) =>
         createBindGroup(device, this.layouts.shade, [
-          view(at(position, p)),
+          view(at(depth, p)),
           view(at(normal, p)),
           { buffer: at(diFinal, p) },
           { buffer: at(giFinal, p) },
@@ -754,9 +756,9 @@ export class GiRenderer {
       temporal: parities.map((p) =>
         createBindGroup(device, this.layouts.temporal, [
           view(at(illumination, 0)),
-          view(at(position, p)),
+          view(at(depth, p)),
           view(at(normal, p)),
-          view(at(position, 1 - p)),
+          view(at(depth, 1 - p)),
           view(at(normal, 1 - p)),
           view(at(history, 1 - p)),
           view(at(history, p)),
@@ -773,7 +775,7 @@ export class GiRenderer {
         return chain.map(([source, destination], iteration) =>
           createBindGroup(device, this.layouts.atrous, [
             view(source),
-            view(at(position, p)),
+            view(at(depth, p)),
             view(at(normal, p)),
             view(destination),
             { buffer: at(this.atrousBuffers, iteration) },

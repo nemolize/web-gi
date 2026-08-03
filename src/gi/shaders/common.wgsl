@@ -217,13 +217,45 @@ fn cosineSampleHemisphere(n: vec3f, u1: f32, u2: f32) -> vec3f {
   return normalize(onbFromNormal(n) * local);
 }
 
+/**
+ * View ray through `ndc`, unnormalised so its forward component is exactly 1.
+ * That is what makes the G-buffer's stored depth a plain view-space distance:
+ * `pos = cam.pos + viewRay * depth`, with no renormalisation on either side.
+ */
+fn viewRay(cam: Camera, ndc: vec2f) -> vec3f {
+  return cam.forward.xyz
+    + cam.right.xyz * (ndc.x * camTanHalfFov(cam) * camAspect(cam))
+    + cam.up.xyz * (ndc.y * camTanHalfFov(cam));
+}
+
 /** `ndc` is y-up in [-1, 1]. Mirrored by `primaryRayDirection` in camera.ts. */
 fn primaryRayDir(cam: Camera, ndc: vec2f) -> vec3f {
-  return normalize(
-    cam.forward.xyz
-      + cam.right.xyz * (ndc.x * camTanHalfFov(cam) * camAspect(cam))
-      + cam.up.xyz * (ndc.y * camTanHalfFov(cam)),
-  );
+  return normalize(viewRay(cam, ndc));
+}
+
+/** Centre of `pixel` in y-up normalised device coordinates. */
+fn pixelNdc(pixel: vec2u) -> vec2f {
+  let uv = (vec2f(pixel) + 0.5) / vec2f(uni.resolution);
+  return vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+}
+
+/**
+ * The G-buffer stores view-space depth rather than a world position: the `.w`
+ * lane of an rgba32float only ever carried a hit flag, so three quarters of the
+ * widest and most-read target were reconstructible all along. Depth is
+ * `dot(pos - eye, forward)`, which the unit-forward `viewRay` inverts directly.
+ */
+fn surfaceDepth(cam: Camera, pos: vec3f) -> f32 {
+  return dot(pos - cam.pos.xyz, cam.forward.xyz);
+}
+
+fn surfacePosition(cam: Camera, pixel: vec2u, depth: f32) -> vec3f {
+  return cam.pos.xyz + viewRay(cam, pixelNdc(pixel)) * depth;
+}
+
+/** Zero means the primary ray escaped; every real hit is in front of the eye. */
+fn surfaceHit(depth: f32) -> bool {
+  return depth > 0.0;
 }
 
 /** Returns top-left-origin screen UV in xy; z is 1 when the point is on screen. */

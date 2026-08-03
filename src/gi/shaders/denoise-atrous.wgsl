@@ -3,7 +3,7 @@
 // The alpha channel carries history length through the iteration chain.
 
 @group(1) @binding(0) var texColor: texture_2d<f32>;
-@group(1) @binding(1) var texPosition: texture_2d<f32>;
+@group(1) @binding(1) var texDepth: texture_2d<f32>;
 @group(1) @binding(2) var texNormal: texture_2d<f32>;
 @group(1) @binding(3) var outColor: texture_storage_2d<rgba16float, write>;
 @group(1) @binding(4) var<uniform> atrous: AtrousStep;
@@ -40,13 +40,13 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   }
 
   let center = textureLoad(texColor, pixel, 0);
-  let position = textureLoad(texPosition, pixel, 0);
-  if (position.w < 0.5 || (uni.flags & FLAG_DENOISE) == 0u) {
+  let depth = textureLoad(texDepth, pixel, 0).x;
+  if (!surfaceHit(depth) || (uni.flags & FLAG_DENOISE) == 0u) {
     textureStore(outColor, pixel, center);
     return;
   }
 
-  let x = position.xyz;
+  let x = surfacePosition(uni.cam, pixel, depth);
   let n = textureLoad(texNormal, pixel, 0).xyz;
   let historyLength = max(center.w, 1.0);
   let centerLuminance = luminance(center.xyz);
@@ -64,17 +64,18 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         continue;
       }
       let tap = vec2u(coord);
-      let tapPosition = textureLoad(texPosition, tap, 0);
-      if (tapPosition.w < 0.5) {
+      let tapDepth = textureLoad(texDepth, tap, 0).x;
+      if (!surfaceHit(tapDepth)) {
         continue;
       }
+      let tapPosition = surfacePosition(uni.cam, tap, tapDepth);
       let tapNormal = textureLoad(texNormal, tap, 0).xyz;
       let tapColor = textureLoad(texColor, tap, 0).xyz;
 
       let normalWeight = normalFalloff(max(dot(n, tapNormal), 0.0));
       // The plane and luminance terms are both exponentials, so they multiply
       // as one: exp(-a) * exp(-b) is exp(-(a + b)).
-      let edge = abs(dot(n, tapPosition.xyz - x)) / SIGMA_PLANE
+      let edge = abs(dot(n, tapPosition - x)) / SIGMA_PLANE
         + abs(luminance(tapColor) - centerLuminance) / (sigmaLuminance + 1e-4);
       let kernelWeight = kernel[dx + 2] * kernel[dy + 2];
       let weight = kernelWeight * normalWeight * exp(-edge);
