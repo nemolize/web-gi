@@ -96,7 +96,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   // sample are allowed to count towards its normalisation. This pixel is the
   // first contributor and its surface never left registers.
   var z = 0.0;
-  if (diTargetPdf(x, n, albedo, reservoir.lightPos.xyz, reservoir.lightQuad) > 0.0) {
+  if (diSupported(x, n, albedo, reservoir.lightPos.xyz, reservoir.lightQuad)) {
     z += center.m;
   }
   for (var i = 0u; i < neighborCount; i = i + 1u) {
@@ -104,14 +104,13 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let contributorPosition = textureLoad(texPosition, coord, 0);
     let contributorNormal = textureLoad(texNormal, coord, 0).xyz;
     let contributorAlbedo = textureLoad(texAlbedo, coord, 0).xyz;
-    let pdf = diTargetPdf(
+    if (diSupported(
       contributorPosition.xyz,
       contributorNormal,
       contributorAlbedo,
       reservoir.lightPos.xyz,
       reservoir.lightQuad,
-    );
-    if (pdf > 0.0) {
+    )) {
       z += neighborM[i];
     }
   }

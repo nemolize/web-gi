@@ -228,6 +228,21 @@ fn diTargetPdf(x: vec3f, n: vec3f, albedo: vec3f, lightPos: vec3f, lightQuad: u3
   return luminance(directContribution(x, n, albedo, lightPos, lightQuad));
 }
 
+/**
+ * Whether `diTargetPdf` would be positive, without evaluating it. The 1/Z loops
+ * only ask which contributors could have produced the surviving sample, and
+ * everything the full form adds on top of the two cosines — the inverse square
+ * root, the distance, `INV_PI` — is a strictly positive factor that cannot
+ * change the answer. The unnormalised `d` therefore settles both signs.
+ */
+fn diSupported(x: vec3f, n: vec3f, albedo: vec3f, lightPos: vec3f, lightQuad: u32) -> bool {
+  let q = quads[lightQuad];
+  let d = lightPos - x;
+  return dot(n, d) > 0.0
+    && dot(q.normal.xyz, -d) > 0.0
+    && luminance(albedo * q.emission.xyz) > 0.0;
+}
+
 /** Reflected radiance towards the visible point for a stored GI sample. */
 fn giContribution(x: vec3f, n: vec3f, albedo: vec3f, r: GiReservoir) -> vec3f {
   let d = r.samplePos.xyz - x;
@@ -243,6 +258,14 @@ fn giContribution(x: vec3f, n: vec3f, albedo: vec3f, r: GiReservoir) -> vec3f {
 
 fn giTargetPdf(x: vec3f, n: vec3f, albedo: vec3f, r: GiReservoir) -> f32 {
   return luminance(giContribution(x, n, albedo, r));
+}
+
+/** See `diSupported`; the same reduction, for a stored GI sample. */
+fn giSupported(x: vec3f, n: vec3f, albedo: vec3f, r: GiReservoir) -> bool {
+  let d = r.samplePos.xyz - x;
+  return dot(n, d) > 0.0
+    && dot(r.sampleNormal.xyz, -d) > 0.0
+    && luminance(albedo * r.radiance.xyz) > 0.0;
 }
 
 /** Widest measure change a reused sample may carry before it is rejected. */

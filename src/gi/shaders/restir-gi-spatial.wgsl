@@ -112,7 +112,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   // measured 6% brighter than the reference path tracer, against 1% without.
   // This pixel is the first contributor and its surface never left registers.
   var z = 0.0;
-  if (giTargetPdf(x, n, albedo, reservoir) > 0.0) {
+  if (giSupported(x, n, albedo, reservoir)) {
     z += giM(center);
   }
   for (var i = 0u; i < neighborCount; i = i + 1u) {
@@ -120,13 +120,12 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let contributorPosition = textureLoad(texPosition, coord, 0);
     let contributorNormal = textureLoad(texNormal, coord, 0).xyz;
     let contributorAlbedo = textureLoad(texAlbedo, coord, 0).xyz;
-    let pdf = giTargetPdf(
+    if (giSupported(
       contributorPosition.xyz,
       contributorNormal,
       contributorAlbedo,
       reservoir,
-    );
-    if (pdf > 0.0) {
+    )) {
       z += neighborM[i];
     }
   }
