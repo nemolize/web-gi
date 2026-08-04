@@ -6,9 +6,9 @@
 // accumulator.
 
 @group(1) @binding(0) var texIllumination: texture_2d<f32>;
-@group(1) @binding(1) var texPosition: texture_2d<f32>;
+@group(1) @binding(1) var texDepth: texture_2d<f32>;
 @group(1) @binding(2) var texNormal: texture_2d<f32>;
-@group(1) @binding(3) var texPrevPosition: texture_2d<f32>;
+@group(1) @binding(3) var texPrevDepth: texture_2d<f32>;
 @group(1) @binding(4) var texPrevNormal: texture_2d<f32>;
 @group(1) @binding(5) var texHistory: texture_2d<f32>;
 @group(1) @binding(6) var outHistory: texture_storage_2d<rgba32float, write>;
@@ -42,11 +42,12 @@ fn neighbourhoodCeiling(pixel: vec2u, x: vec3f, n: vec3f) -> f32 {
         continue;
       }
       let tap = vec2u(coord);
-      let tapPosition = textureLoad(texPosition, tap, 0);
+      let tapDepth = textureLoad(texDepth, tap, 0).x;
       let tapNormal = textureLoad(texNormal, tap, 0).xyz;
-      if (tapPosition.w < 0.5
+      let tapPosition = surfacePosition(uni.cam, tap, tapDepth);
+      if (!surfaceHit(tapDepth)
         || dot(tapNormal, n) < NORMAL_TOLERANCE
-        || abs(dot(tapPosition.xyz - x, n)) > PLANE_TOLERANCE) {
+        || abs(dot(tapPosition - x, n)) > PLANE_TOLERANCE) {
         continue;
       }
       let tapLuminance = luminance(textureLoad(texIllumination, tap, 0).xyz);
@@ -71,12 +72,12 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     return;
   }
 
-  let position = textureLoad(texPosition, pixel, 0);
-  if (position.w < 0.5) {
+  let depth = textureLoad(texDepth, pixel, 0).x;
+  if (!surfaceHit(depth)) {
     textureStore(outHistory, pixel, vec4f(0.0, 0.0, 0.0, 1.0));
     return;
   }
-  let x = position.xyz;
+  let x = surfacePosition(uni.cam, pixel, depth);
   let n = textureLoad(texNormal, pixel, 0).xyz;
   let current = textureLoad(texIllumination, pixel, 0).xyz;
 
@@ -90,10 +91,11 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         vec2u(uv.xy * vec2f(uni.resolution)),
         uni.resolution - vec2u(1u, 1u),
       );
-      let prevPosition = textureLoad(texPrevPosition, prevPixel, 0);
+      let prevDepth = textureLoad(texPrevDepth, prevPixel, 0).x;
       let prevNormal = textureLoad(texPrevNormal, prevPixel, 0).xyz;
-      let samePlane = abs(dot(prevPosition.xyz - x, n)) < PLANE_TOLERANCE;
-      if (prevPosition.w > 0.5 && samePlane && dot(prevNormal, n) > NORMAL_TOLERANCE) {
+      let prevPosition = surfacePosition(uni.prevCam, prevPixel, prevDepth);
+      let samePlane = abs(dot(prevPosition - x, n)) < PLANE_TOLERANCE;
+      if (surfaceHit(prevDepth) && samePlane && dot(prevNormal, n) > NORMAL_TOLERANCE) {
         let stored = textureLoad(texHistory, prevPixel, 0);
         history = stored.xyz;
         historyLength = stored.w;

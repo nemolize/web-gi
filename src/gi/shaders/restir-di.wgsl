@@ -1,10 +1,10 @@
 // ReSTIR DI, stage 1: streaming RIS over fresh light candidates, then temporal
 // reuse of the previous frame's reservoir found by reprojection.
 
-@group(1) @binding(0) var texPosition: texture_2d<f32>;
+@group(1) @binding(0) var texDepth: texture_2d<f32>;
 @group(1) @binding(1) var texNormal: texture_2d<f32>;
 @group(1) @binding(2) var texAlbedo: texture_2d<f32>;
-@group(1) @binding(3) var texPrevPosition: texture_2d<f32>;
+@group(1) @binding(3) var texPrevDepth: texture_2d<f32>;
 @group(1) @binding(4) var texPrevNormal: texture_2d<f32>;
 @group(1) @binding(5) var<storage, read> prevReservoirs: array<DiReservoir>;
 @group(1) @binding(6) var<storage, read_write> outReservoirs: array<DiReservoir>;
@@ -22,14 +22,14 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   }
   let index = pixel.y * uni.resolution.x + pixel.x;
 
-  let position = textureLoad(texPosition, pixel, 0);
+  let depth = textureLoad(texDepth, pixel, 0).x;
   let enabled = (uni.flags & FLAG_DI_ENABLED) != 0u;
-  if (position.w < 0.5 || uni.lightCount == 0u || !enabled) {
+  if (!surfaceHit(depth) || uni.lightCount == 0u || !enabled) {
     outReservoirs[index] = diReservoirEmpty();
     return;
   }
 
-  let x = position.xyz;
+  let x = surfacePosition(uni.cam, pixel, depth);
   let n = textureLoad(texNormal, pixel, 0).xyz;
   let albedo = textureLoad(texAlbedo, pixel, 0).xyz;
   rngInit(pixel, uni.frame, 2u);
@@ -61,10 +61,11 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         vec2u(uv.xy * vec2f(uni.resolution)),
         uni.resolution - vec2u(1u, 1u),
       );
-      let prevPosition = textureLoad(texPrevPosition, prevPixel, 0);
+      let prevDepth = textureLoad(texPrevDepth, prevPixel, 0).x;
       let prevNormal = textureLoad(texPrevNormal, prevPixel, 0).xyz;
-      let samePlane = abs(dot(prevPosition.xyz - x, n)) < PLANE_TOLERANCE;
-      if (prevPosition.w > 0.5 && samePlane && dot(prevNormal, n) > NORMAL_TOLERANCE) {
+      let prevPosition = surfacePosition(uni.prevCam, prevPixel, prevDepth);
+      let samePlane = abs(dot(prevPosition - x, n)) < PLANE_TOLERANCE;
+      if (surfaceHit(prevDepth) && samePlane && dot(prevNormal, n) > NORMAL_TOLERANCE) {
         let prev = diReservoirCapM(
           prevReservoirs[prevPixel.y * uni.resolution.x + prevPixel.x],
           TEMPORAL_M_CAP * f32(candidates),

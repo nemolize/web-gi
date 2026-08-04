@@ -4,7 +4,7 @@
 // this pixel — which is what keeps light from leaking through the block
 // geometry.
 
-@group(1) @binding(0) var texPosition: texture_2d<f32>;
+@group(1) @binding(0) var texDepth: texture_2d<f32>;
 @group(1) @binding(1) var texNormal: texture_2d<f32>;
 @group(1) @binding(2) var texAlbedo: texture_2d<f32>;
 @group(1) @binding(3) var<storage, read> srcReservoirs: array<GiReservoir>;
@@ -22,14 +22,14 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   }
   let index = pixel.y * uni.resolution.x + pixel.x;
 
-  let position = textureLoad(texPosition, pixel, 0);
+  let depth = textureLoad(texDepth, pixel, 0).x;
   let enabled = (uni.flags & FLAG_GI_ENABLED) != 0u;
-  if (position.w < 0.5 || !enabled) {
+  if (!surfaceHit(depth) || !enabled) {
     dstReservoirs[index] = giReservoirEmpty();
     return;
   }
 
-  let x = position.xyz;
+  let x = surfacePosition(uni.cam, pixel, depth);
   let n = textureLoad(texNormal, pixel, 0).xyz;
   let albedo = textureLoad(texAlbedo, pixel, 0).xyz;
   rngInit(pixel, uni.frame, 5u);
@@ -71,11 +71,12 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       continue;
     }
     let neighbor = vec2u(coord);
-    let neighborPosition = textureLoad(texPosition, neighbor, 0);
+    let neighborDepth = textureLoad(texDepth, neighbor, 0).x;
     let neighborNormal = textureLoad(texNormal, neighbor, 0).xyz;
-    if (neighborPosition.w < 0.5
+    let neighborPosition = surfacePosition(uni.cam, neighbor, neighborDepth);
+    if (!surfaceHit(neighborDepth)
       || dot(neighborNormal, n) < NORMAL_TOLERANCE
-      || abs(dot(neighborPosition.xyz - x, n)) > PLANE_TOLERANCE) {
+      || abs(dot(neighborPosition - x, n)) > PLANE_TOLERANCE) {
       continue;
     }
 
@@ -88,7 +89,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       continue;
     }
     let jacobian = reconnectionJacobian(
-      neighborPosition.xyz,
+      neighborPosition,
       x,
       other.samplePos.xyz,
       other.sampleNormal.xyz,
@@ -148,11 +149,12 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   }
   for (var i = 0u; i < neighborCount; i = i + 1u) {
     let coord = unpackPixel(neighbors[i]);
-    let contributorPosition = textureLoad(texPosition, coord, 0);
+    let contributorDepth = textureLoad(texDepth, coord, 0).x;
     let contributorNormal = textureLoad(texNormal, coord, 0).xyz;
     let contributorAlbedo = textureLoad(texAlbedo, coord, 0).xyz;
+    let contributorPosition = surfacePosition(uni.cam, coord, contributorDepth);
     if (giSupported(
-      contributorPosition.xyz,
+      contributorPosition,
       contributorNormal,
       contributorAlbedo,
       reservoir,
