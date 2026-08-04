@@ -1,3 +1,10 @@
+import {
+  ATROUS_ITERATIONS,
+  DEFAULT_WORKGROUP_SIZE,
+  selectTiledAtrous,
+  TILED_ATROUS_STORAGE_BYTES,
+  TILED_ATROUS_WORKGROUP_SIZE,
+} from "@/gi/atrous";
 import type { CameraBasis, OrbitCamera } from "@/gi/camera";
 import { cameraBasis } from "@/gi/camera";
 import type { LinearImage } from "@/gi/compare";
@@ -18,6 +25,8 @@ import { packFlags, requiresAccumulationReset } from "@/gi/settings";
 import captureWgsl from "@/gi/shaders/capture.wgsl?raw";
 import commonWgsl from "@/gi/shaders/common.wgsl?raw";
 import atrousWgsl from "@/gi/shaders/denoise-atrous.wgsl?raw";
+import atrousCommonWgsl from "@/gi/shaders/denoise-atrous-common.wgsl?raw";
+import atrousFallbackWgsl from "@/gi/shaders/denoise-atrous-fallback.wgsl?raw";
 import temporalWgsl from "@/gi/shaders/denoise-temporal.wgsl?raw";
 import gbufferWgsl from "@/gi/shaders/gbuffer.wgsl?raw";
 import presentWgsl from "@/gi/shaders/present.wgsl?raw";
@@ -45,11 +54,10 @@ export type RendererStats = {
 
 export type DeviceLossInfo = Pick<GPUDeviceLostInfo, "message" | "reason">;
 
-const WORKGROUP_SIZE = 8;
+const WORKGROUP_SIZE = DEFAULT_WORKGROUP_SIZE;
 const UNIFORM_BYTES = 192;
 const DI_RESERVOIR_BYTES = 32;
 const GI_RESERVOIR_BYTES = 48;
-const ATROUS_ITERATIONS = 3;
 
 /** Widest per-pixel reservoir stride; bounds the storage-buffer allocations. */
 const MAX_RESERVOIR_BYTES = Math.max(DI_RESERVOIR_BYTES, GI_RESERVOIR_BYTES);
@@ -260,6 +268,7 @@ export class GiRenderer {
   private readonly canvas: HTMLCanvasElement;
   private readonly layouts: Layouts;
   private readonly pipelines: Pipelines;
+  private readonly atrousWorkgroupSize: number;
   private readonly uniformBuffer: GPUBuffer;
   private readonly presentUniformBindGroup: GPUBindGroup;
   private readonly atrousBuffers: readonly GPUBuffer[];
@@ -292,6 +301,7 @@ export class GiRenderer {
     canvas: HTMLCanvasElement,
     format: GPUTextureFormat,
     settings: RenderSettings,
+    tiledAtrous: boolean,
   ) {
     this.device = device;
     this.context = context;
@@ -305,7 +315,15 @@ export class GiRenderer {
       Math.floor(device.limits.maxBufferSize / MAX_RESERVOIR_BYTES),
     );
     this.layouts = GiRenderer.createLayouts(device);
-    this.pipelines = GiRenderer.createPipelines(device, this.layouts, format);
+    this.pipelines = GiRenderer.createPipelines(
+      device,
+      this.layouts,
+      format,
+      tiledAtrous,
+    );
+    this.atrousWorkgroupSize = tiledAtrous
+      ? TILED_ATROUS_WORKGROUP_SIZE
+      : WORKGROUP_SIZE;
     this.uniformBuffer = device.createBuffer({
       label: "uniforms",
       size: UNIFORM_BYTES,
@@ -355,7 +373,19 @@ export class GiRenderer {
     if (adapter === null) {
       throw new WebGpuUnsupportedError("No suitable GPU adapter was found.");
     }
-    const device = await adapter.requestDevice();
+    const tiledAtrous = selectTiledAtrous(
+      adapter.limits,
+      window.location.search,
+    );
+    const device = await adapter.requestDevice(
+      tiledAtrous
+        ? {
+            requiredLimits: {
+              maxComputeWorkgroupStorageSize: TILED_ATROUS_STORAGE_BYTES,
+            },
+          }
+        : undefined,
+    );
     // Errors outside an error scope are invisible on browsers that don't log
     // them, and a silent GPU error renders as a black canvas.
     device.addEventListener("uncapturederror", (event) => {
@@ -369,7 +399,17 @@ export class GiRenderer {
     }
     const format = gpu.getPreferredCanvasFormat();
     context.configure({ device, format, alphaMode: "opaque" });
-    return new GiRenderer(device, context, canvas, format, settings);
+    console.info(
+      `[web-gi] a-trous: ${tiledAtrous ? "16x16 tiled (24 KiB workgroup storage)" : "8x8 texture fallback"}`,
+    );
+    return new GiRenderer(
+      device,
+      context,
+      canvas,
+      format,
+      settings,
+      tiledAtrous,
+    );
   }
 
   private static createLayouts(device: GPUDevice): Layouts {
@@ -455,6 +495,7 @@ export class GiRenderer {
     device: GPUDevice,
     layouts: Layouts,
     format: GPUTextureFormat,
+    tiledAtrous: boolean,
   ): Pipelines {
     const traced = (label: string, body: string): GPUShaderModule => {
       const module = device.createShaderModule({
@@ -510,7 +551,11 @@ export class GiRenderer {
       shade: compute("shade", shadeWgsl, layouts.shade),
       reference: compute("reference", referenceWgsl, layouts.reference),
       temporal: compute("denoise-temporal", temporalWgsl, layouts.temporal),
-      atrous: compute("denoise-atrous", atrousWgsl, layouts.atrous),
+      atrous: compute(
+        `denoise-atrous-${tiledAtrous ? "tiled" : "fallback"}`,
+        `${atrousCommonWgsl}\n${tiledAtrous ? atrousWgsl : atrousFallbackWgsl}`,
+        layouts.atrous,
+      ),
       presentRestir: present("present", "fsRestir", layouts.presentRestir),
       presentReference: present(
         "present-reference",
@@ -908,19 +953,21 @@ export class GiRenderer {
     this.writeUniforms(basis, targets);
 
     const parity = this.parity;
-    const groupsX = Math.ceil(targets.width / WORKGROUP_SIZE);
-    const groupsY = Math.ceil(targets.height / WORKGROUP_SIZE);
     const encoder = this.device.createCommandEncoder();
 
     const dispatch = (
       pipeline: GPUComputePipeline,
       passBindGroup: GPUBindGroup,
+      workgroupSize = WORKGROUP_SIZE,
     ): void => {
       const pass = encoder.beginComputePass();
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, this.sceneBindGroup);
       pass.setBindGroup(1, passBindGroup);
-      pass.dispatchWorkgroups(groupsX, groupsY);
+      pass.dispatchWorkgroups(
+        Math.ceil(targets.width / workgroupSize),
+        Math.ceil(targets.height / workgroupSize),
+      );
       pass.end();
     };
 
@@ -937,7 +984,7 @@ export class GiRenderer {
       dispatch(this.pipelines.temporal, at(targets.temporal, parity));
       const chain = at(targets.atrous, parity);
       for (let i = 0; i < ATROUS_ITERATIONS; i++) {
-        dispatch(this.pipelines.atrous, at(chain, i));
+        dispatch(this.pipelines.atrous, at(chain, i), this.atrousWorkgroupSize);
       }
     }
 
