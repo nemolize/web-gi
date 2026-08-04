@@ -1,10 +1,9 @@
 /**
  * Error of a render against the reference path tracer, in linear radiance.
  *
- * The renderer's own claim — "within roughly 10% of the reference, slightly on
- * the dark side" — is about converged linear values, so it cannot be checked on
- * what reaches the canvas: ACES compresses the highlights that carry the error,
- * and the 8-bit sRGB encode quantises what is left.
+ * The renderer's bias claim is about converged linear values, so it cannot be
+ * checked on what reaches the canvas: ACES compresses the highlights that carry
+ * the error, and the 8-bit sRGB encode quantises what is left.
  */
 
 /** Linear RGB, one RGBA quad per pixel, row-major. Alpha is ignored. */

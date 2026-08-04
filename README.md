@@ -85,9 +85,15 @@ the camera maths against its shader counterpart.
 The reuse passes use the `M`-weighted combination (Bitterli et al. 2020,
 Algorithm 4) with the 1/Z correction for spatial reuse, and clamp the temporal
 history length. That combination is biased, and the visibility test used to
-reject GI candidates is not reflected in the 1/Z normalisation. In practice
-ReSTIR lands within roughly 10% of the reference here, slightly on the dark
-side; switching to Reference PT shows the gap directly.
+reject GI candidates is not reflected in the 1/Z normalisation.
+
+A `compareLinear` sweep at 480×450 over three camera positions, both scenes and
+all combinations of spatial-neighbour counts 0/4/8 and bounce depths 1/3/6
+measured luminance ratios of 0.9947–1.0041 after at least 2,048 reference frames
+and 1,024 ReSTIR frames. Relative L2 ranged from 0.0014–0.0043 and mean absolute
+error from 0.0026–0.0085 in linear radiance. The residual is not consistently
+dark; its observed luminance shortfall or excess stayed within 0.53% across this
+sweep.
 
 Only diffuse BRDFs are implemented. Adding specular surfaces would need
 reconnection to be skipped at near-delta vertices.

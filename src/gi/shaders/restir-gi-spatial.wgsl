@@ -141,7 +141,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   // The support test deliberately does NOT apply the Jacobian gate: the gate is
   // this pass's own conservatism about transferring a sample, not a statement
   // that the contributor's domain excludes it. Gating here shrinks Z and
-  // measured 6% brighter than the reference path tracer, against 1% without.
+  // incorrectly raises the normalised result.
   // This pixel is the first contributor and its surface never left registers.
   var z = 0.0;
   if (giSupported(x, n, albedo, reservoir)) {
