@@ -119,9 +119,15 @@ describe("a-trous WGSL contracts", () => {
       ["dy", ATROUS_KERNEL_RADIUS, ATROUS_KERNEL_RADIUS],
       ["dx", ATROUS_KERNEL_RADIUS, ATROUS_KERNEL_RADIUS],
     ]);
-    const kernel = /array<f32,\s*(\d+)>\(([^)]*)\)/.exec(atrousCommonWgsl);
+    const kernel = /const\s+KERNEL\s*=\s*array<f32,\s*(\d+)>\(([^)]*)\)/.exec(
+      atrousCommonWgsl,
+    );
     expect(Number(kernel?.[1])).toBe(ATROUS_KERNEL_RADIUS * 2 + 1);
     expect(kernel?.[2]?.split(",")).toHaveLength(ATROUS_KERNEL_RADIUS * 2 + 1);
+    expect(atrousCommonWgsl).toMatch(
+      /KERNEL\s*\[\s*dx\s*\+\s*2\s*\]\s*\*\s*KERNEL\s*\[\s*dy\s*\+\s*2\s*\]/,
+    );
+    expect(atrousCommonWgsl).not.toMatch(/\bvar\s+\w*kernel\w*\b/i);
   });
 
   it("keeps one filter entry point across both loader variants", () => {
@@ -129,7 +135,6 @@ describe("a-trous WGSL contracts", () => {
       DEFAULT_WORKGROUP_SIZE,
     );
     expect(atrousCommonWgsl).toContain("fn main(");
-    expect(atrousCommonWgsl).toContain("var kernel = array<f32, 5>");
     expect(tiledWgsl).not.toContain("fn main(");
     expect(fallbackWgsl).not.toContain("fn main(");
     expect(tiledWgsl).not.toContain("var kernel");

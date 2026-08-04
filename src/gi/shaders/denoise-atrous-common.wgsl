@@ -16,6 +16,9 @@ struct AtrousStep {
 
 const SIGMA_PLANE: f32 = 0.02;
 const SIGMA_LUMINANCE: f32 = 6.0;
+// Module scope avoids rebuilding a mutable, dynamically indexed private array
+// for every invocation and keeps the filter weights immutable.
+const KERNEL = array<f32, 5>(0.0625, 0.25, 0.375, 0.25, 0.0625);
 
 fn normalFalloff(x: f32) -> f32 {
   let x2 = x * x;
@@ -62,7 +65,6 @@ fn main(
   let centerLuminance = luminance(center.xyz);
   let sigmaLuminance = SIGMA_LUMINANCE / sqrt(historyLength);
 
-  var kernel = array<f32, 5>(0.0625, 0.25, 0.375, 0.25, 0.0625);
   var sum = vec3f(0.0);
   var weightSum = 0.0;
   for (var dy = -2; dy <= 2; dy = dy + 1) {
@@ -85,7 +87,7 @@ fn main(
       let normalWeight = normalFalloff(max(dot(n, tapNormal), 0.0));
       let edge = abs(dot(n, tapPosition - x)) / SIGMA_PLANE
         + abs(luminance(tapColor) - centerLuminance) / (sigmaLuminance + 1e-4);
-      let kernelWeight = kernel[dx + 2] * kernel[dy + 2];
+      let kernelWeight = KERNEL[dx + 2] * KERNEL[dy + 2];
       let weight = kernelWeight * normalWeight * exp(-edge);
 
       sum += tapColor * weight;
