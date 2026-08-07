@@ -25,6 +25,15 @@ export interface PerformanceMeasurement extends FrameTimeMeasurement {
     readonly width: number;
     readonly height: number;
   };
+  /** Per-pass GPU time, when the device exposes `timestamp-query`. */
+  readonly passTimings?: PassTimings | null;
+}
+
+/** Temporary instrumentation; mirrors the renderer's `PassTimings`. */
+export interface PassTimings {
+  readonly frames: number;
+  readonly totalMs: number;
+  readonly passMs: Readonly<Record<string, number>>;
 }
 
 export interface PerformanceCaptureAggregate {
@@ -78,7 +87,10 @@ interface PerformanceReportV2 {
   readonly atrousVariant: AtrousVariant;
   readonly runCount: number;
   readonly aggregate: PerformanceCaptureAggregate;
-  readonly runs: readonly (FrameTimeMeasurement & { readonly run: number })[];
+  readonly runs: readonly (FrameTimeMeasurement & {
+    readonly run: number;
+    readonly passTimings?: PassTimings | null;
+  })[];
   readonly renderResolution: PerformanceMeasurement["renderResolution"];
   readonly viewport: PerformanceReportContext["viewport"];
   readonly devicePixelRatio: number;
@@ -251,6 +263,7 @@ export const formatPerformanceReport = (
       sampleCount: run.sampleCount,
       fps: round(run.fps),
       frameTimeMs: roundFrameTimeSummary(run.frameTimeMs),
+      passTimings: run.passTimings ?? null,
     })),
     renderResolution: capture.renderResolution,
     viewport: context.viewport,

@@ -37,6 +37,7 @@ export type RendererHandle = Pick<
   | "renderFrame"
   | "setSettings"
   | "stats"
+  | "readPassTimings"
 >;
 
 export type RendererFactory = (
@@ -218,7 +219,11 @@ export const useGiRenderer = (
               if (result !== null) {
                 measurementRef.current = null;
                 window.clearTimeout(measurement.timeoutId);
-                measurement.resolve({ ...result, ...currentContext });
+                measurement.resolve({
+                  ...result,
+                  ...currentContext,
+                  passTimings: active.readPassTimings(),
+                });
               }
             }
           }
@@ -360,6 +365,10 @@ export const useGiRenderer = (
           new Error("A performance capture is already running."),
         );
       }
+
+      // Drop whatever accumulated before this run so the pass timings describe
+      // the capture window and not the idle frames leading up to it.
+      rendererRef.current.readPassTimings();
 
       return new Promise((resolve, reject) => {
         const timeoutId = window.setTimeout(() => {

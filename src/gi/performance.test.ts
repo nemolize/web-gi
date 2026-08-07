@@ -205,6 +205,7 @@ describe("performance capture", () => {
         min: 16.67,
         max: 17.33,
       },
+      passTimings: null,
     });
     expect(Object.keys(report)).toEqual([
       "schemaVersion",

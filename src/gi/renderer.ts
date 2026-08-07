@@ -67,6 +67,28 @@ const MAX_RESERVOIR_BYTES = Math.max(DI_RESERVOIR_BYTES, GI_RESERVOIR_BYTES);
 /** Below this, shrinking further buys nothing worth looking at. */
 const MIN_PIXEL_BUDGET = 256 * 256;
 
+/**
+ * Per-pass GPU timing. Temporary instrumentation: it exists to compare two
+ * builds on one device, where wall-clock FPS cannot separate a slower pass from
+ * a frame the browser skipped.
+ */
+const PASS_PROBE_CAPACITY = 16;
+
+type PassProbe = {
+  readonly querySet: GPUQuerySet;
+  readonly resolve: GPUBuffer;
+  readonly staging: GPUBuffer;
+  readonly labels: string[];
+  pending: string[] | null;
+  readonly samples: Record<string, number>[];
+};
+
+export type PassTimings = {
+  readonly frames: number;
+  readonly totalMs: number;
+  readonly passMs: Readonly<Record<string, number>>;
+};
+
 type Binding =
   | { readonly kind: "uniform" }
   | { readonly kind: "readOnlyStorage" }
@@ -297,6 +319,7 @@ export class GiRenderer {
   private lastFrameAt = 0;
   private lastFrameMs = 0;
   private destroyed = false;
+  private passProbe: PassProbe | null = null;
 
   private constructor(
     device: GPUDevice,
@@ -352,6 +375,28 @@ export class GiRenderer {
       this.deviceIsLost = true;
     });
 
+    if (device.features.has("timestamp-query")) {
+      this.passProbe = {
+        querySet: device.createQuerySet({
+          type: "timestamp",
+          count: PASS_PROBE_CAPACITY * 2,
+        }),
+        resolve: device.createBuffer({
+          label: "pass-probe-resolve",
+          size: PASS_PROBE_CAPACITY * 2 * 8,
+          usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+        }),
+        staging: device.createBuffer({
+          label: "pass-probe-staging",
+          size: PASS_PROBE_CAPACITY * 2 * 8,
+          usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        }),
+        labels: [],
+        pending: null,
+        samples: [],
+      };
+    }
+
     installDevHooks(() => this.captureLinearImage());
     this.scene = buildScene(settings.scene);
     const uploaded = this.uploadScene(this.scene);
@@ -381,15 +426,19 @@ export class GiRenderer {
       adapter.limits,
       window.location.search,
     );
-    const device = await adapter.requestDevice(
-      tiledAtrous
+    const timestampFeature: GPUFeatureName = "timestamp-query";
+    const device = await adapter.requestDevice({
+      ...(tiledAtrous
         ? {
             requiredLimits: {
               maxComputeWorkgroupStorageSize: TILED_ATROUS_STORAGE_BYTES,
             },
           }
-        : undefined,
-    );
+        : {}),
+      ...(adapter.features.has(timestampFeature)
+        ? { requiredFeatures: [timestampFeature] }
+        : {}),
+    });
     // Errors outside an error scope are invisible on browsers that don't log
     // them, and a silent GPU error renders as a black canvas.
     device.addEventListener("uncapturederror", (event) => {
@@ -959,13 +1008,28 @@ export class GiRenderer {
 
     const parity = this.parity;
     const encoder = this.device.createCommandEncoder();
+    const probe = this.passProbe;
+    if (probe !== null) probe.labels.length = 0;
 
     const dispatch = (
       pipeline: GPUComputePipeline,
       passBindGroup: GPUBindGroup,
       workgroupSize = WORKGROUP_SIZE,
+      label = "",
     ): void => {
-      const pass = encoder.beginComputePass();
+      const timed = probe !== null && probe.labels.length < PASS_PROBE_CAPACITY;
+      const pass = encoder.beginComputePass(
+        timed && probe !== null
+          ? {
+              timestampWrites: {
+                querySet: probe.querySet,
+                beginningOfPassWriteIndex: probe.labels.length * 2,
+                endOfPassWriteIndex: probe.labels.length * 2 + 1,
+              },
+            }
+          : undefined,
+      );
+      if (timed && probe !== null) probe.labels.push(label);
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, this.sceneBindGroup);
       pass.setBindGroup(1, passBindGroup);
@@ -977,19 +1041,50 @@ export class GiRenderer {
     };
 
     const reference = this.settings.mode === "reference";
+    const size = WORKGROUP_SIZE;
     if (reference) {
-      dispatch(this.pipelines.reference, at(targets.reference, parity));
+      dispatch(
+        this.pipelines.reference,
+        at(targets.reference, parity),
+        size,
+        "reference",
+      );
     } else {
-      dispatch(this.pipelines.gbuffer, at(targets.gbuffer, parity));
-      dispatch(this.pipelines.di, at(targets.di, parity));
-      dispatch(this.pipelines.diSpatial, at(targets.diSpatial, parity));
-      dispatch(this.pipelines.gi, at(targets.gi, parity));
-      dispatch(this.pipelines.giSpatial, at(targets.giSpatial, parity));
-      dispatch(this.pipelines.shade, at(targets.shade, parity));
-      dispatch(this.pipelines.temporal, at(targets.temporal, parity));
+      dispatch(
+        this.pipelines.gbuffer,
+        at(targets.gbuffer, parity),
+        size,
+        "gbuffer",
+      );
+      dispatch(this.pipelines.di, at(targets.di, parity), size, "di");
+      dispatch(
+        this.pipelines.diSpatial,
+        at(targets.diSpatial, parity),
+        size,
+        "diSpatial",
+      );
+      dispatch(this.pipelines.gi, at(targets.gi, parity), size, "gi");
+      dispatch(
+        this.pipelines.giSpatial,
+        at(targets.giSpatial, parity),
+        size,
+        "giSpatial",
+      );
+      dispatch(this.pipelines.shade, at(targets.shade, parity), size, "shade");
+      dispatch(
+        this.pipelines.temporal,
+        at(targets.temporal, parity),
+        size,
+        "temporal",
+      );
       const chain = at(targets.atrous, parity);
       for (let i = 0; i < ATROUS_ITERATIONS; i++) {
-        dispatch(this.pipelines.atrous, at(chain, i), this.atrousWorkgroupSize);
+        dispatch(
+          this.pipelines.atrous,
+          at(chain, i),
+          this.atrousWorkgroupSize,
+          `atrous${String(i)}`,
+        );
       }
     }
 
@@ -1016,12 +1111,86 @@ export class GiRenderer {
     renderPass.draw(3);
     renderPass.end();
 
+    // Only one frame is in flight at a time: while the staging buffer is mapped
+    // (or waiting to be), later frames go unsampled rather than queueing up.
+    const sampling =
+      probe !== null &&
+      probe.pending === null &&
+      probe.staging.mapState === "unmapped" &&
+      probe.labels.length > 0;
+    if (sampling && probe !== null) {
+      const count = probe.labels.length * 2;
+      encoder.resolveQuerySet(probe.querySet, 0, count, probe.resolve, 0);
+      encoder.copyBufferToBuffer(probe.resolve, 0, probe.staging, 0, count * 8);
+      probe.pending = probe.labels.slice();
+    }
+
     this.device.queue.submit([encoder.finish()]);
+
+    if (sampling && probe !== null) {
+      const labels = probe.pending ?? [];
+      void probe.staging
+        .mapAsync(GPUMapMode.READ)
+        .then(() => {
+          const times = new BigUint64Array(
+            probe.staging.getMappedRange().slice(0),
+          );
+          probe.staging.unmap();
+          const frame: Record<string, number> = {};
+          labels.forEach((label, i) => {
+            const begin = times[i * 2];
+            const end = times[i * 2 + 1];
+            if (begin === undefined || end === undefined) return;
+            frame[label] = (frame[label] ?? 0) + Number(end - begin) / 1e6;
+          });
+          probe.samples.push(frame);
+        })
+        .catch(() => {
+          // Device lost or buffer destroyed mid-flight; drop the sample.
+        })
+        .finally(() => {
+          probe.pending = null;
+        });
+    }
 
     this.previousBasis = basis;
     this.parity = 1 - parity;
     this.frame += 1;
     this.accumFrames += 1;
+  }
+
+  /**
+   * Median GPU milliseconds per pass over the frames sampled since the last
+   * read, and the total those medians sum to. Null when the device has no
+   * `timestamp-query` or nothing has been sampled yet.
+   */
+  readPassTimings(): PassTimings | null {
+    const probe = this.passProbe;
+    if (probe === null || probe.samples.length === 0) return null;
+    const samples = probe.samples.splice(0, probe.samples.length);
+
+    const byLabel = new Map<string, number[]>();
+    for (const sample of samples) {
+      for (const [label, ms] of Object.entries(sample)) {
+        const list = byLabel.get(label) ?? [];
+        list.push(ms);
+        byLabel.set(label, list);
+      }
+    }
+
+    const passMs: Record<string, number> = {};
+    let totalMs = 0;
+    for (const [label, values] of byLabel) {
+      const sorted = [...values].sort((left, right) => left - right);
+      const middle = sorted[Math.floor(sorted.length / 2)] ?? 0;
+      passMs[label] = Number(middle.toFixed(3));
+      totalMs += middle;
+    }
+    return {
+      frames: samples.length,
+      totalMs: Number(totalMs.toFixed(3)),
+      passMs,
+    };
   }
 
   /**

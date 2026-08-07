@@ -50,6 +50,7 @@ const createFakeRenderer = (): FakeRenderer => {
     renderFrame: vi.fn(),
     setSettings: vi.fn(),
     notifyCameraChanged: vi.fn(),
+    readPassTimings: vi.fn(() => null),
     get stats() {
       statsReads += 1;
       return stats;
