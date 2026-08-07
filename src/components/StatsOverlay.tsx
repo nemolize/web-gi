@@ -1,8 +1,11 @@
 import { useRef, useState } from "react";
 
 import {
+  aggregatePerformanceMeasurements,
   formatPerformanceReport,
   PERFORMANCE_CAPTURE_DURATION_MS,
+  PERFORMANCE_CAPTURE_RUN_COUNT,
+  type PerformanceCapture,
   type PerformanceMeasurement,
   type PerformanceReportContext,
   sanitizePerformanceReportUrl,
@@ -37,26 +40,32 @@ export const StatsOverlay = ({
 }: StatsOverlayProps) => {
   const fps = stats.frameMs > 0 ? 1000 / stats.frameMs : 0;
   const [captureStatus, setCaptureStatus] = useState<CaptureStatus>("idle");
-  const [measurement, setMeasurement] = useState<PerformanceMeasurement | null>(
-    null,
-  );
+  const [capture, setCapture] = useState<PerformanceCapture | null>(null);
+  const [activeRun, setActiveRun] = useState(0);
   const [report, setReport] = useState<string | null>(null);
   const [captureError, setCaptureError] = useState<string | null>(null);
   const primaryButtonRef = useRef<HTMLButtonElement>(null);
 
   const startCapture = async (): Promise<void> => {
     setCaptureStatus("measuring");
-    setMeasurement(null);
+    setCapture(null);
     setReport(null);
     setCaptureError(null);
     const context = createReportContext(settings);
 
     try {
-      const result = await measurePerformance();
-      setMeasurement(result);
+      const runs: PerformanceMeasurement[] = [];
+      for (let index = 0; index < PERFORMANCE_CAPTURE_RUN_COUNT; index++) {
+        setActiveRun(index + 1);
+        runs.push(await measurePerformance());
+      }
+      const result = aggregatePerformanceMeasurements(runs);
+      setActiveRun(0);
+      setCapture(result);
       setReport(formatPerformanceReport(result, context));
       setCaptureStatus("ready");
     } catch (error) {
+      setActiveRun(0);
       setCaptureError(error instanceof Error ? error.message : String(error));
       setCaptureStatus("capture-error");
     }
@@ -90,9 +99,9 @@ export const StatsOverlay = ({
 
   const primaryLabel =
     captureStatus === "measuring"
-      ? `Measuring ${String(PERFORMANCE_CAPTURE_DURATION_MS / 1_000)} s…`
+      ? `Measuring ${String(activeRun)}/${String(PERFORMANCE_CAPTURE_RUN_COUNT)}…`
       : report === null
-        ? `Measure ${String(PERFORMANCE_CAPTURE_DURATION_MS / 1_000)} s`
+        ? `Measure ${String(PERFORMANCE_CAPTURE_RUN_COUNT)}×${String(PERFORMANCE_CAPTURE_DURATION_MS / 1_000)} s`
         : captureStatus === "copied"
           ? "Copied"
           : "Copy result";
@@ -127,11 +136,11 @@ export const StatsOverlay = ({
         </dd>
       </dl>
       <div className="mt-2 border-t border-neutral-700 pt-2">
-        {measurement !== null && (
+        {capture !== null && (
           <p className="mb-2 font-mono text-xs text-neutral-200">
-            {measurement.fps.toFixed(1)} fps · p50{" "}
-            {measurement.frameTimeMs.median.toFixed(1)} ms · p95{" "}
-            {measurement.frameTimeMs.p95.toFixed(1)} ms
+            {capture.aggregate.fps.medianRun.toFixed(1)} fps median run ·{" "}
+            {capture.aggregate.fps.minRun.toFixed(1)}–
+            {capture.aggregate.fps.maxRun.toFixed(1)} fps run range
           </p>
         )}
         <div className="flex gap-2">
@@ -164,7 +173,7 @@ export const StatsOverlay = ({
         </div>
         <p aria-live="polite" className="mt-1 text-xs text-neutral-400">
           {captureStatus === "measuring"
-            ? "Measuring performance for 5 seconds."
+            ? `Measuring run ${String(activeRun)} of ${String(PERFORMANCE_CAPTURE_RUN_COUNT)} for ${String(PERFORMANCE_CAPTURE_DURATION_MS / 1_000)} seconds.`
             : captureStatus === "ready"
               ? "Measurement complete. Copy result is ready."
               : captureStatus === "copied"

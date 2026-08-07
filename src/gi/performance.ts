@@ -2,6 +2,7 @@ import type { AtrousVariant } from "@/gi/atrous";
 import type { RenderSettings } from "@/gi/settings";
 
 export const PERFORMANCE_CAPTURE_DURATION_MS = 5_000;
+export const PERFORMANCE_CAPTURE_RUN_COUNT = 3;
 
 export interface FrameTimeSummary {
   readonly mean: number;
@@ -26,6 +27,31 @@ export interface PerformanceMeasurement extends FrameTimeMeasurement {
   };
 }
 
+export interface PerformanceCaptureAggregate {
+  readonly totalDurationMs: number;
+  readonly totalSampleCount: number;
+  readonly fps: {
+    readonly weighted: number;
+    readonly medianRun: number;
+    readonly minRun: number;
+    readonly maxRun: number;
+  };
+  readonly frameTimeMs: {
+    readonly weightedMean: number;
+    readonly medianRunMedian: number;
+    readonly medianRunP95: number;
+    readonly min: number;
+    readonly max: number;
+  };
+}
+
+export interface PerformanceCapture {
+  readonly atrousVariant: AtrousVariant;
+  readonly renderResolution: PerformanceMeasurement["renderResolution"];
+  readonly runs: readonly PerformanceMeasurement[];
+  readonly aggregate: PerformanceCaptureAggregate;
+}
+
 export interface PerformanceReportContext {
   readonly capturedAt: string;
   readonly url: string;
@@ -45,15 +71,14 @@ export interface PerformanceRecorder {
   ) => FrameTimeMeasurement | null;
 }
 
-interface PerformanceReportV1 {
-  readonly schemaVersion: 1;
+interface PerformanceReportV2 {
+  readonly schemaVersion: 2;
   readonly capturedAt: string;
   readonly url: string;
   readonly atrousVariant: AtrousVariant;
-  readonly durationMs: number;
-  readonly sampleCount: number;
-  readonly fps: number;
-  readonly frameTimeMs: FrameTimeSummary;
+  readonly runCount: number;
+  readonly aggregate: PerformanceCaptureAggregate;
+  readonly runs: readonly (FrameTimeMeasurement & { readonly run: number })[];
   readonly renderResolution: PerformanceMeasurement["renderResolution"];
   readonly viewport: PerformanceReportContext["viewport"];
   readonly devicePixelRatio: number;
@@ -64,6 +89,15 @@ interface PerformanceReportV1 {
 const percentile = (sorted: readonly number[], fraction: number): number => {
   const index = Math.max(0, Math.ceil(sorted.length * fraction) - 1);
   return sorted[index] ?? 0;
+};
+
+const median = (values: readonly number[]): number => {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  const upper = sorted[middle] ?? 0;
+  return sorted.length % 2 === 0
+    ? ((sorted[middle - 1] ?? 0) + upper) / 2
+    : upper;
 };
 
 export const summarizeFrameTimes = (
@@ -112,26 +146,113 @@ export const createPerformanceRecorder = (
   };
 };
 
+export const aggregatePerformanceMeasurements = (
+  runs: readonly PerformanceMeasurement[],
+): PerformanceCapture => {
+  const first = runs[0];
+  if (first === undefined) {
+    throw new Error("At least one performance measurement is required.");
+  }
+  const incompatible = runs.some(
+    (run) =>
+      run.atrousVariant !== first.atrousVariant ||
+      run.renderResolution.width !== first.renderResolution.width ||
+      run.renderResolution.height !== first.renderResolution.height,
+  );
+  if (incompatible) {
+    throw new Error("Performance runs used different render configurations.");
+  }
+
+  const totalDurationMs = runs.reduce(
+    (total, run) => total + run.durationMs,
+    0,
+  );
+  const totalSampleCount = runs.reduce(
+    (total, run) => total + run.sampleCount,
+    0,
+  );
+  const fpsValues = runs.map((run) => run.fps);
+
+  return {
+    atrousVariant: first.atrousVariant,
+    renderResolution: first.renderResolution,
+    runs,
+    aggregate: {
+      totalDurationMs,
+      totalSampleCount,
+      fps: {
+        weighted:
+          totalDurationMs > 0
+            ? (totalSampleCount * 1_000) / totalDurationMs
+            : 0,
+        medianRun: median(fpsValues),
+        minRun: Math.min(...fpsValues),
+        maxRun: Math.max(...fpsValues),
+      },
+      frameTimeMs: {
+        weightedMean:
+          totalSampleCount > 0
+            ? runs.reduce(
+                (total, run) => total + run.frameTimeMs.mean * run.sampleCount,
+                0,
+              ) / totalSampleCount
+            : 0,
+        medianRunMedian: median(runs.map((run) => run.frameTimeMs.median)),
+        medianRunP95: median(runs.map((run) => run.frameTimeMs.p95)),
+        min: Math.min(...runs.map((run) => run.frameTimeMs.min)),
+        max: Math.max(...runs.map((run) => run.frameTimeMs.max)),
+      },
+    },
+  };
+};
+
+const round = (value: number): number => Number(value.toFixed(2));
+
+const roundFrameTimeSummary = (
+  summary: FrameTimeSummary,
+): FrameTimeSummary => ({
+  mean: round(summary.mean),
+  median: round(summary.median),
+  p95: round(summary.p95),
+  min: round(summary.min),
+  max: round(summary.max),
+});
+
 export const formatPerformanceReport = (
-  measurement: PerformanceMeasurement,
+  capture: PerformanceCapture,
   context: PerformanceReportContext,
 ): string => {
-  const report: PerformanceReportV1 = {
-    schemaVersion: 1,
+  const report: PerformanceReportV2 = {
+    schemaVersion: 2,
     capturedAt: context.capturedAt,
     url: context.url,
-    atrousVariant: measurement.atrousVariant,
-    durationMs: Math.round(measurement.durationMs),
-    sampleCount: measurement.sampleCount,
-    fps: Number(measurement.fps.toFixed(2)),
-    frameTimeMs: {
-      mean: Number(measurement.frameTimeMs.mean.toFixed(2)),
-      median: Number(measurement.frameTimeMs.median.toFixed(2)),
-      p95: Number(measurement.frameTimeMs.p95.toFixed(2)),
-      min: Number(measurement.frameTimeMs.min.toFixed(2)),
-      max: Number(measurement.frameTimeMs.max.toFixed(2)),
+    atrousVariant: capture.atrousVariant,
+    runCount: capture.runs.length,
+    aggregate: {
+      totalDurationMs: Math.round(capture.aggregate.totalDurationMs),
+      totalSampleCount: capture.aggregate.totalSampleCount,
+      fps: {
+        weighted: round(capture.aggregate.fps.weighted),
+        medianRun: round(capture.aggregate.fps.medianRun),
+        minRun: round(capture.aggregate.fps.minRun),
+        maxRun: round(capture.aggregate.fps.maxRun),
+      },
+      frameTimeMs: {
+        weightedMean: round(capture.aggregate.frameTimeMs.weightedMean),
+        medianRunMedian: round(capture.aggregate.frameTimeMs.medianRunMedian),
+        medianRunP95: round(capture.aggregate.frameTimeMs.medianRunP95),
+        min: round(capture.aggregate.frameTimeMs.min),
+        max: round(capture.aggregate.frameTimeMs.max),
+      },
     },
-    renderResolution: measurement.renderResolution,
+    runs: capture.runs.map((run, index) => ({
+      run: index + 1,
+      durationMs: Math.round(run.durationMs),
+      sampleCount: run.sampleCount,
+      fps: round(run.fps),
+      frameTimeMs: roundFrameTimeSummary(run.frameTimeMs),
+    })),
+    renderResolution: capture.renderResolution,
     viewport: context.viewport,
     devicePixelRatio: context.devicePixelRatio,
     settings: context.settings,
