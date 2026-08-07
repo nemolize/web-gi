@@ -20,24 +20,31 @@ struct HitInfo {
 /**
  * Ray/parallelogram intersection. Quad edges are perpendicular by construction
  * (see `makeQuad`), so the barycentric solve is two independent projections.
+ *
+ * Takes the index rather than the quad so each field is read only once the
+ * preceding test has passed: a miss never touches `albedo` or `emission`.
  */
-fn intersectQuad(q: Quad, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
-  let denom = dot(q.normal.xyz, rd);
+fn intersectQuad(index: u32, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
+  let normal = quads[index].normal.xyz;
+  let denom = dot(normal, rd);
   if (abs(denom) < 1e-9) {
     return -1.0;
   }
-  let t = dot(q.normal.xyz, q.origin.xyz - ro) / denom;
+  let origin = quads[index].origin.xyz;
+  let t = dot(normal, origin - ro) / denom;
   if (t <= RAY_EPS || t >= tMax) {
     return -1.0;
   }
   // `u.w` / `v.w` carry 1/|u|^2 and 1/|v|^2 from `packQuads`: recomputing them
   // here costs two dots and two divides on every quad of every ray.
-  let p = ro + rd * t - q.origin.xyz;
-  let a = dot(p, q.u.xyz) * q.u.w;
+  let p = ro + rd * t - origin;
+  let u = quads[index].u;
+  let a = dot(p, u.xyz) * u.w;
   if (a < 0.0 || a > 1.0) {
     return -1.0;
   }
-  let b = dot(p, q.v.xyz) * q.v.w;
+  let v = quads[index].v;
+  let b = dot(p, v.xyz) * v.w;
   if (b < 0.0 || b > 1.0) {
     return -1.0;
   }
@@ -79,8 +86,12 @@ fn traceScene(ro: vec3f, rd: vec3f) -> HitInfo {
   best.t = T_FAR;
   best.quadIndex = 0u;
   let invRd = vec3f(safeInverse(rd.x), safeInverse(rd.y), safeInverse(rd.z));
-  for (var c = 0u; c < uni.clusterCount; c = c + 1u) {
-    let cluster = clusters[c];
+  // Walked back to front: the walls are the last cluster and a closest-hit ray
+  // almost always reaches one, so taking them first gives `best.t` a real bound
+  // immediately, and the block clusters ahead of them are then rejected by the
+  // slab test instead of being intersected quad by quad.
+  for (var c = uni.clusterCount; c > 0u; c = c - 1u) {
+    let cluster = clusters[c - 1u];
     // `best.t` tightens as the walk proceeds, so a cluster already behind the
     // closest hit is rejected here too, not just one the ray line misses.
     if (!segmentHitsBounds(cluster.lo.xyz, cluster.hi.xyz, ro, invRd, best.t)) {
@@ -89,7 +100,7 @@ fn traceScene(ro: vec3f, rd: vec3f) -> HitInfo {
     let start = u32(cluster.lo.w);
     let end = start + u32(cluster.hi.w);
     for (var i = start; i < end; i = i + 1u) {
-      let t = intersectQuad(quads[i], ro, rd, best.t);
+      let t = intersectQuad(i, ro, rd, best.t);
       if (t > 0.0) {
         best.hit = true;
         best.t = t;
@@ -119,8 +130,9 @@ fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
   best.t = T_FAR;
   best.quadIndex = 0u;
   let invRd = vec3f(safeInverse(rd.x), safeInverse(rd.y), safeInverse(rd.z));
-  for (var c = 0u; c < uni.clusterCount; c = c + 1u) {
-    let cluster = clusters[c];
+  // Back to front, for the same reason as `traceScene`.
+  for (var c = uni.clusterCount; c > 0u; c = c - 1u) {
+    let cluster = clusters[c - 1u];
     if (!segmentHitsBounds(cluster.lo.xyz, cluster.hi.xyz, ro, invRd, best.t)) {
       continue;
     }
@@ -130,7 +142,7 @@ fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
       if (dot(quads[i].normal.xyz, rd) > 0.0) {
         continue;
       }
-      let t = intersectQuad(quads[i], ro, rd, best.t);
+      let t = intersectQuad(i, ro, rd, best.t);
       if (t > 0.0) {
         best.hit = true;
         best.t = t;
@@ -165,7 +177,7 @@ fn traceOccluded(ro: vec3f, rd: vec3f, tMax: f32) -> bool {
     let start = u32(cluster.lo.w);
     let end = start + u32(cluster.hi.w);
     for (var i = start; i < end; i = i + 1u) {
-      if (intersectQuad(quads[i], ro, rd, tMax) > 0.0) {
+      if (intersectQuad(i, ro, rd, tMax) > 0.0) {
         return true;
       }
     }
