@@ -19,9 +19,16 @@ const renderApp = (status: RendererStatus): void => {
     canvasRef: createRef<HTMLCanvasElement>(),
     settings: DEFAULT_SETTINGS,
     updateSettings: vi.fn(),
-    stats: { width: 640, height: 480, accumFrames: 7, frameMs: 16 },
+    stats: {
+      width: 640,
+      height: 480,
+      accumFrames: 7,
+      frameMs: 16,
+      atrousVariant: "tiled-16",
+    },
     status,
     errorMessage: status === "error" ? "boom" : null,
+    measurePerformance: vi.fn(),
     resetView: vi.fn(),
     retryRenderer: vi.fn(),
   });

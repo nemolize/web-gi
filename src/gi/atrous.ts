@@ -13,6 +13,8 @@ export const TILED_ATROUS_TILE_WIDTH =
 export const TILED_ATROUS_STORAGE_BYTES =
   TILED_ATROUS_TILE_WIDTH * TILED_ATROUS_TILE_WIDTH * (4 + 8 + 12);
 
+export type AtrousVariant = "tiled-16" | "fallback";
+
 export type AtrousLimits = Pick<
   GPUSupportedLimits,
   | "maxComputeInvocationsPerWorkgroup"

@@ -1,3 +1,4 @@
+import type { AtrousVariant } from "@/gi/atrous";
 import {
   ATROUS_ITERATIONS,
   DEFAULT_WORKGROUP_SIZE,
@@ -50,6 +51,7 @@ export type RendererStats = {
   readonly height: number;
   readonly accumFrames: number;
   readonly frameMs: number;
+  readonly atrousVariant: AtrousVariant | null;
 };
 
 export type DeviceLossInfo = Pick<GPUDeviceLostInfo, "message" | "reason">;
@@ -268,6 +270,7 @@ export class GiRenderer {
   private readonly canvas: HTMLCanvasElement;
   private readonly layouts: Layouts;
   private readonly pipelines: Pipelines;
+  private readonly atrousVariant: AtrousVariant;
   private readonly atrousWorkgroupSize: number;
   private readonly uniformBuffer: GPUBuffer;
   private readonly presentUniformBindGroup: GPUBindGroup;
@@ -307,6 +310,7 @@ export class GiRenderer {
     this.context = context;
     this.canvas = canvas;
     this.settings = settings;
+    this.atrousVariant = tiledAtrous ? "tiled-16" : "fallback";
     this.pixelBudget = Math.min(
       GiRenderer.learnedPixelBudget,
       Math.floor(
@@ -650,6 +654,7 @@ export class GiRenderer {
       height: this.targets?.height ?? 0,
       accumFrames: this.accumFrames,
       frameMs: this.lastFrameMs,
+      atrousVariant: this.atrousVariant,
     };
   }
 

@@ -38,6 +38,7 @@ export const App = () => {
     stats,
     status,
     errorMessage,
+    measurePerformance,
     resetView,
     retryRenderer,
   } = useGiRenderer();
@@ -50,7 +51,13 @@ export const App = () => {
           aria-label="Cornell box render"
           className="block size-full cursor-grab touch-none active:cursor-grabbing"
         />
-        {status === "running" && <StatsOverlay stats={stats} />}
+        {status === "running" && (
+          <StatsOverlay
+            stats={stats}
+            settings={settings}
+            measurePerformance={measurePerformance}
+          />
+        )}
         {status === "initializing" && (
           <Overlay title="Starting WebGPU…" detail="Requesting a GPU device." />
         )}
