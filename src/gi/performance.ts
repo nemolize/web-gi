@@ -266,7 +266,7 @@ export const sanitizePerformanceReportUrl = (url: string): string => {
   const source = new URL(url);
   const sanitized = new URL(source.pathname, source.origin);
   const atrous = source.searchParams.get("atrous");
-  if (atrous === "8" || atrous === "fallback") {
+  if (atrous === "fallback") {
     sanitized.searchParams.set("atrous", atrous);
   }
   return sanitized.toString();

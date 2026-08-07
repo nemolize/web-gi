@@ -86,6 +86,7 @@ describe("StatsOverlay performance capture", () => {
     });
     expect(copied.runs).toHaveLength(3);
     expect(screen.getByText("Result copied to clipboard.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Copy again" })).toBeVisible();
 
     const againButton = screen.getByRole("button", { name: "Measure again" });
     againButton.focus();
@@ -105,7 +106,7 @@ describe("StatsOverlay performance capture", () => {
           height: 480,
           accumFrames: 1,
           frameMs: 16,
-          atrousVariant: "tiled-8",
+          atrousVariant: "tiled-16",
         }}
         settings={DEFAULT_SETTINGS}
         measurePerformance={measurePerformance}

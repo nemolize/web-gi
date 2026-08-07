@@ -24,7 +24,7 @@ const renderApp = (status: RendererStatus): void => {
       height: 480,
       accumFrames: 7,
       frameMs: 16,
-      atrousVariant: "tiled-8",
+      atrousVariant: "tiled-16",
     },
     status,
     errorMessage: status === "error" ? "boom" : null,

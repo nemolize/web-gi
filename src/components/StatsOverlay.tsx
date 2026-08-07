@@ -103,7 +103,7 @@ export const StatsOverlay = ({
       : report === null
         ? `Measure ${String(PERFORMANCE_CAPTURE_RUN_COUNT)}×${String(PERFORMANCE_CAPTURE_DURATION_MS / 1_000)} s`
         : captureStatus === "copied"
-          ? "Copied"
+          ? "Copy again"
           : "Copy result";
 
   return (

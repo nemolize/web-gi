@@ -18,6 +18,7 @@ type FakeRenderer = {
   readonly destroy: ReturnType<typeof vi.fn>;
   readonly lose: (reason: GPUDeviceLostReason, message?: string) => void;
   readonly setStats: (patch: Partial<RendererStats>) => void;
+  readonly statsReadCount: () => number;
 };
 
 const createFakeRenderer = (): FakeRenderer => {
@@ -41,6 +42,7 @@ const createFakeRenderer = (): FakeRenderer => {
     frameMs: 16,
     atrousVariant: "fallback",
   };
+  let statsReads = 0;
   const renderer = {
     deviceLost,
     destroy,
@@ -49,6 +51,7 @@ const createFakeRenderer = (): FakeRenderer => {
     setSettings: vi.fn(),
     notifyCameraChanged: vi.fn(),
     get stats() {
+      statsReads += 1;
       return stats;
     },
   } satisfies RendererHandle;
@@ -60,6 +63,7 @@ const createFakeRenderer = (): FakeRenderer => {
     setStats: (patch) => {
       stats = { ...stats, ...patch };
     },
+    statsReadCount: () => statsReads,
   };
 };
 
@@ -256,6 +260,35 @@ describe("useGiRenderer", () => {
       expect(screen.getByTestId("captured-fps")).toHaveTextContent("25"),
     );
     expect(fake.renderer.renderFrame).toHaveBeenCalledTimes(126);
+  });
+
+  it("keeps stats snapshots on the throttled cadence while idle", async () => {
+    const fake = createFakeRenderer();
+    const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+    let nextFrame: FrameRequestCallback | null = null;
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        nextFrame = callback;
+        return 1;
+      }),
+    );
+
+    render(<RendererHarness rendererFactory={create} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+
+    act(() => {
+      for (let now = 0; now <= 256; now += 16) {
+        const frame = nextFrame;
+        nextFrame = null;
+        frame?.(now);
+      }
+    });
+
+    expect(fake.renderer.renderFrame).toHaveBeenCalledTimes(17);
+    expect(fake.statsReadCount()).toBe(1);
   });
 
   it("cancels a capture when render settings change", async () => {

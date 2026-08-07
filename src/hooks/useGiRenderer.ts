@@ -155,7 +155,6 @@ export const useGiRenderer = (
           const active = rendererRef.current;
           if (active === null) return;
           active.renderFrame(cameraRef.current);
-          const currentStats = active.stats;
           // A renderer that cannot allocate its targets keeps running and keeps
           // drawing black, so the failure has to be pulled out of it explicitly.
           const failure = active.allocationError;
@@ -171,8 +170,12 @@ export const useGiRenderer = (
             return;
           }
           const measurement = measurementRef.current;
+          const shouldUpdateStats = now - lastStatsAt > STATS_INTERVAL_MS;
+          const currentStats =
+            measurement !== null || shouldUpdateStats ? active.stats : null;
           if (
             measurement !== null &&
+            currentStats !== null &&
             currentStats.atrousVariant !== null &&
             currentStats.width > 0 &&
             currentStats.height > 0
@@ -219,7 +222,7 @@ export const useGiRenderer = (
               }
             }
           }
-          if (now - lastStatsAt > STATS_INTERVAL_MS) {
+          if (shouldUpdateStats && currentStats !== null) {
             lastStatsAt = now;
             setStats(currentStats);
           }

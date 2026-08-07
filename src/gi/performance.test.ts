@@ -151,7 +151,7 @@ describe("performance capture", () => {
   it("formats a pasteable multi-run report with the render context", () => {
     const run: PerformanceMeasurement = {
       ...summarizeFrameTimes([16.666, 17.333], 34),
-      atrousVariant: "tiled-8",
+      atrousVariant: "tiled-16",
       renderResolution: { width: 1080, height: 2208 },
     };
     const report = JSON.parse(
@@ -159,7 +159,7 @@ describe("performance capture", () => {
         aggregatePerformanceMeasurements([run, run, run]),
         {
           capturedAt: "2026-08-06T00:00:00.000Z",
-          url: "https://example.com/?atrous=8",
+          url: "https://example.com/",
           viewport: { width: 412, height: 842 },
           devicePixelRatio: 2.625,
           settings: DEFAULT_SETTINGS,
@@ -170,7 +170,7 @@ describe("performance capture", () => {
 
     expect(report).toMatchObject({
       schemaVersion: 2,
-      atrousVariant: "tiled-8",
+      atrousVariant: "tiled-16",
       runCount: 3,
       aggregate: {
         totalDurationMs: 102,
@@ -232,9 +232,14 @@ describe("performance capture", () => {
   it("keeps only the supported a-trous selector in the report URL", () => {
     expect(
       sanitizePerformanceReportUrl(
+        "https://example.com/demo?atrous=fallback&token=secret#private",
+      ),
+    ).toBe("https://example.com/demo?atrous=fallback");
+    expect(
+      sanitizePerformanceReportUrl(
         "https://example.com/demo?atrous=8&token=secret#private",
       ),
-    ).toBe("https://example.com/demo?atrous=8");
+    ).toBe("https://example.com/demo");
     expect(
       sanitizePerformanceReportUrl(
         "https://example.com/demo?atrous=unknown&user=42",

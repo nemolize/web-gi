@@ -1,10 +1,10 @@
+import type { AtrousVariant } from "@/gi/atrous";
 import {
   ATROUS_ITERATIONS,
-  type AtrousVariant,
-  atrousWorkgroupSize,
   DEFAULT_WORKGROUP_SIZE,
-  LARGE_TILED_ATROUS_STORAGE_BYTES,
-  selectAtrousVariant,
+  selectTiledAtrous,
+  TILED_ATROUS_STORAGE_BYTES,
+  TILED_ATROUS_WORKGROUP_SIZE,
 } from "@/gi/atrous";
 import type { CameraBasis, OrbitCamera } from "@/gi/camera";
 import { cameraBasis } from "@/gi/camera";
@@ -26,10 +26,8 @@ import { packFlags, requiresAccumulationReset } from "@/gi/settings";
 import captureWgsl from "@/gi/shaders/capture.wgsl?raw";
 import commonWgsl from "@/gi/shaders/common.wgsl?raw";
 import atrousWgsl from "@/gi/shaders/denoise-atrous.wgsl?raw";
-import atrousBaselineWgsl from "@/gi/shaders/denoise-atrous-baseline.wgsl?raw";
 import atrousCommonWgsl from "@/gi/shaders/denoise-atrous-common.wgsl?raw";
 import atrousFallbackWgsl from "@/gi/shaders/denoise-atrous-fallback.wgsl?raw";
-import atrousTiledCommonWgsl from "@/gi/shaders/denoise-atrous-tiled-common.wgsl?raw";
 import temporalWgsl from "@/gi/shaders/denoise-temporal.wgsl?raw";
 import gbufferWgsl from "@/gi/shaders/gbuffer.wgsl?raw";
 import presentWgsl from "@/gi/shaders/present.wgsl?raw";
@@ -306,13 +304,13 @@ export class GiRenderer {
     canvas: HTMLCanvasElement,
     format: GPUTextureFormat,
     settings: RenderSettings,
-    atrousVariant: AtrousVariant,
+    tiledAtrous: boolean,
   ) {
     this.device = device;
     this.context = context;
     this.canvas = canvas;
     this.settings = settings;
-    this.atrousVariant = atrousVariant;
+    this.atrousVariant = tiledAtrous ? "tiled-16" : "fallback";
     this.pixelBudget = Math.min(
       GiRenderer.learnedPixelBudget,
       Math.floor(
@@ -325,9 +323,11 @@ export class GiRenderer {
       device,
       this.layouts,
       format,
-      atrousVariant,
+      tiledAtrous,
     );
-    this.atrousWorkgroupSize = atrousWorkgroupSize(atrousVariant);
+    this.atrousWorkgroupSize = tiledAtrous
+      ? TILED_ATROUS_WORKGROUP_SIZE
+      : WORKGROUP_SIZE;
     this.uniformBuffer = device.createBuffer({
       label: "uniforms",
       size: UNIFORM_BYTES,
@@ -377,15 +377,15 @@ export class GiRenderer {
     if (adapter === null) {
       throw new WebGpuUnsupportedError("No suitable GPU adapter was found.");
     }
-    const atrousVariant = selectAtrousVariant(
+    const tiledAtrous = selectTiledAtrous(
       adapter.limits,
       window.location.search,
     );
     const device = await adapter.requestDevice(
-      atrousVariant === "tiled-16"
+      tiledAtrous
         ? {
             requiredLimits: {
-              maxComputeWorkgroupStorageSize: LARGE_TILED_ATROUS_STORAGE_BYTES,
+              maxComputeWorkgroupStorageSize: TILED_ATROUS_STORAGE_BYTES,
             },
           }
         : undefined,
@@ -403,14 +403,16 @@ export class GiRenderer {
     }
     const format = gpu.getPreferredCanvasFormat();
     context.configure({ device, format, alphaMode: "opaque" });
-    console.info(`[web-gi] a-trous: ${atrousVariant}`);
+    console.info(
+      `[web-gi] a-trous: ${tiledAtrous ? "16x16 tiled (24 KiB workgroup storage)" : "8x8 texture fallback"}`,
+    );
     return new GiRenderer(
       device,
       context,
       canvas,
       format,
       settings,
-      atrousVariant,
+      tiledAtrous,
     );
   }
 
@@ -497,7 +499,7 @@ export class GiRenderer {
     device: GPUDevice,
     layouts: Layouts,
     format: GPUTextureFormat,
-    atrousVariant: AtrousVariant,
+    tiledAtrous: boolean,
   ): Pipelines {
     const traced = (label: string, body: string): GPUShaderModule => {
       const module = device.createShaderModule({
@@ -544,12 +546,6 @@ export class GiRenderer {
         primitive: { topology: "triangle-list" },
       });
 
-    const atrousLoaders = {
-      "tiled-16": `${atrousWgsl}\n${atrousTiledCommonWgsl}`,
-      "tiled-8": `${atrousBaselineWgsl}\n${atrousTiledCommonWgsl}`,
-      fallback: atrousFallbackWgsl,
-    } as const satisfies Record<AtrousVariant, string>;
-
     return {
       gbuffer: compute("gbuffer", gbufferWgsl, layouts.gbuffer),
       di: compute("restir-di", diWgsl, layouts.resample),
@@ -560,8 +556,8 @@ export class GiRenderer {
       reference: compute("reference", referenceWgsl, layouts.reference),
       temporal: compute("denoise-temporal", temporalWgsl, layouts.temporal),
       atrous: compute(
-        `denoise-atrous-${atrousVariant}`,
-        `${atrousCommonWgsl}\n${atrousLoaders[atrousVariant]}`,
+        `denoise-atrous-${tiledAtrous ? "tiled" : "fallback"}`,
+        `${atrousCommonWgsl}\n${tiledAtrous ? atrousWgsl : atrousFallbackWgsl}`,
         layouts.atrous,
       ),
       presentRestir: present("present", "fsRestir", layouts.presentRestir),
