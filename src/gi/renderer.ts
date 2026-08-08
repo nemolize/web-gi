@@ -72,11 +72,11 @@ const MIN_PIXEL_BUDGET = 256 * 256;
 const MAX_TIMED_PASSES = 16;
 
 /**
- * Frames whose timings can be in flight at once. One buffer means every frame
- * between submit and map resolution goes unsampled — about four in five at
- * pipeline depth.
+ * Frames whose timings can be in flight at once. Depth grows with how far the
+ * GPU trails the callback rate — four covered 96% on a desktop but under half
+ * on a phone rendering at five times its display period.
  */
-const PROBE_RING_SIZE = 4;
+const PROBE_RING_SIZE = 12;
 
 type ProbeSlot = {
   readonly resolve: GPUBuffer;

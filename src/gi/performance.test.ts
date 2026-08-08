@@ -127,6 +127,54 @@ describe("performance capture", () => {
     ).toContain("does not expose timestamp-query");
   });
 
+  it("reads the display period from the intervals the loop kept up on", () => {
+    // Real jitter puts the fastest callbacks below the period, so `min` names
+    // no display at all; the quarter mark is where the refresh rate sits.
+    const recorder = createPerformanceRecorder(400, 0);
+    const intervals = [6.4, 8.3, 8.3, 8.3, 8.3, 9.9, 10.3];
+    intervals.forEach((interval, index) => {
+      recorder.observe({
+        at: index * 50,
+        callbackIntervalMs: interval,
+        accepted: true,
+        gpu: gpuSample(5.2),
+      });
+    });
+    const result = recorder.observe({
+      at: 500,
+      callbackIntervalMs: 8.3,
+      accepted: true,
+      gpu: gpuSample(5.2),
+    });
+
+    expect(result?.presentation.displayPeriodMs).toBeCloseTo(8.33, 1);
+    expect(result?.presentation.vsyncBound).toBe(true);
+  });
+
+  it("does not call a frame vsync-bound when the GPU overruns the display", () => {
+    // The shape an Android capture produced: the loop touches the 8.33ms
+    // refresh on the frames it makes while the GPU needs 42ms. Reading the
+    // interval alone once reported that display as the binding constraint.
+    const recorder = createPerformanceRecorder(400, 0);
+    [8.3, 8.3, 8.3, 34, 122, 130].forEach((interval, index) => {
+      recorder.observe({
+        at: index * 50,
+        callbackIntervalMs: interval,
+        accepted: true,
+        gpu: gpuSample(42),
+      });
+    });
+    const result = recorder.observe({
+      at: 500,
+      callbackIntervalMs: 130,
+      accepted: true,
+      gpu: gpuSample(42),
+    });
+
+    expect(result?.presentation.displayPeriodMs).toBeCloseTo(8.33, 1);
+    expect(result?.presentation.vsyncBound).toBe(false);
+  });
+
   it("rejects runs captured with different render configurations", () => {
     const base = measurement(6);
 

@@ -57,6 +57,7 @@ export interface SamplingSummary {
  */
 export interface PresentationSummary {
   readonly callbackIntervalMs: DurationSummary;
+  /** True only when the GPU finishes inside the display period it landed on. */
   readonly vsyncBound: boolean;
   readonly displayPeriodMs: number | null;
 }
@@ -169,6 +170,16 @@ const median = (values: readonly number[]): number => {
     : upper;
 };
 
+/**
+ * The interval the loop hits when it keeps up. A dropped frame only ever makes
+ * the gap longer, so the fast end of the distribution carries the period —
+ * while `min` alone is jitter, landing below it.
+ */
+export const typicalShortInterval = (samples: readonly number[]): number => {
+  const sorted = [...samples].sort((left, right) => left - right);
+  return percentile(sorted, 0.25);
+};
+
 export const summarizeDurations = (
   samples: readonly number[],
 ): DurationSummary => {
@@ -187,10 +198,32 @@ export const summarizeDurations = (
 const DISPLAY_PERIODS_MS = [1_000 / 120, 1_000 / 90, 1_000 / 60];
 const VSYNC_TOLERANCE_MS = 0.8;
 
-const matchDisplayPeriod = (medianIntervalMs: number): number | null =>
-  DISPLAY_PERIODS_MS.find(
-    (period) => Math.abs(medianIntervalMs - period) < VSYNC_TOLERANCE_MS,
-  ) ?? null;
+/**
+ * Read from the fast end rather than the median: a loop that misses most
+ * frames still hits the refresh rate on the ones it makes.
+ */
+const matchDisplayPeriod = (intervals: readonly number[]): number | null => {
+  if (intervals.length === 0) return null;
+  const typical = typicalShortInterval(intervals);
+  return (
+    DISPLAY_PERIODS_MS.find(
+      (period) => Math.abs(typical - period) < VSYNC_TOLERANCE_MS,
+    ) ?? null
+  );
+};
+
+/**
+ * Settled by the GPU, not the callback interval: a loop dropping most of its
+ * frames still touches the refresh rate on the ones it makes, which is how a
+ * device spending 42ms per frame once claimed an 8.3ms display bound it.
+ */
+const isVsyncBound = (
+  displayPeriodMs: number | null,
+  gpuFrameMs: DurationSummary | null,
+): boolean =>
+  displayPeriodMs !== null &&
+  gpuFrameMs !== null &&
+  gpuFrameMs.median < displayPeriodMs;
 
 /**
  * Collects one run. The window and the sample set are advanced by the same
@@ -219,14 +252,19 @@ export const createPerformanceRecorder = (
       coverage: callbacks > 0 ? gpuSamples.length / callbacks : 0,
       warmupFrames,
     };
+    const callbackIntervalMs = summarizeDurations(intervals);
+    const displayPeriodMs = matchDisplayPeriod(intervals);
+    const gpuFrameMs =
+      gpuSamples.length > 0
+        ? summarizeDurations(gpuSamples.map((sample) => sample.frameMs))
+        : null;
     const presentation: PresentationSummary = {
-      callbackIntervalMs: summarizeDurations(intervals),
-      vsyncBound:
-        matchDisplayPeriod(summarizeDurations(intervals).median) !== null,
-      displayPeriodMs: matchDisplayPeriod(summarizeDurations(intervals).median),
+      callbackIntervalMs,
+      vsyncBound: isVsyncBound(displayPeriodMs, gpuFrameMs),
+      displayPeriodMs,
     };
 
-    if (gpuSamples.length === 0) {
+    if (gpuFrameMs === null) {
       return {
         measurement: {
           kind: "wallFallback",
@@ -254,7 +292,7 @@ export const createPerformanceRecorder = (
     return {
       measurement: {
         kind: "gpuTimestamp",
-        frameMs: summarizeDurations(gpuSamples.map((sample) => sample.frameMs)),
+        frameMs: gpuFrameMs,
         passMs,
         sampling,
       },
