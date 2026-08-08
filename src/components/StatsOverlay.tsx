@@ -117,7 +117,7 @@ export const StatsOverlay = ({
         <dd className="text-right text-neutral-200">
           {stats.width}×{stats.height}
         </dd>
-        <dt>frame</dt>
+        <dt>presented</dt>
         <dd className="text-right text-neutral-200">
           {stats.frameMs.toFixed(1)} ms
         </dd>
@@ -137,11 +137,18 @@ export const StatsOverlay = ({
       </dl>
       <div className="mt-2 border-t border-neutral-700 pt-2">
         {capture !== null && (
-          <p className="mb-2 font-mono text-xs text-neutral-200">
-            {capture.aggregate.fps.medianRun.toFixed(1)} fps median run ·{" "}
-            {capture.aggregate.fps.minRun.toFixed(1)}–
-            {capture.aggregate.fps.maxRun.toFixed(1)} fps run range
-          </p>
+          <div className="mb-2 font-mono text-xs">
+            <p className="text-neutral-200">
+              {capture.aggregate.gpuFrameMs === null
+                ? "no GPU timing on this device"
+                : `${capture.aggregate.gpuFrameMs.medianRun.toFixed(2)} ms GPU median run · p95 ${capture.aggregate.gpuFrameMs.medianRunP95.toFixed(2)} ms`}
+            </p>
+            {capture.aggregate.warnings.map((warning) => (
+              <p key={warning.kind} className="mt-1 text-amber-300">
+                ⚠ {warning.detail}
+              </p>
+            ))}
+          </div>
         )}
         <div className="flex gap-2">
           <button

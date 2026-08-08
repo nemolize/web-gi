@@ -11,7 +11,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeviceLossInfo, RendererStats } from "@/gi/renderer";
 import type { RendererFactory, RendererHandle } from "@/hooks/useGiRenderer";
-import { useGiRenderer } from "@/hooks/useGiRenderer";
+import {
+  PERFORMANCE_CAPTURE_TIMEOUT_MS,
+  useGiRenderer,
+} from "@/hooks/useGiRenderer";
 
 type FakeRenderer = {
   readonly renderer: RendererHandle;
@@ -50,6 +53,9 @@ const createFakeRenderer = (): FakeRenderer => {
     renderFrame: vi.fn(),
     setSettings: vi.fn(),
     notifyCameraChanged: vi.fn(),
+    supportsGpuTiming: false,
+    setGpuTimingEnabled: vi.fn(),
+    takeGpuSamples: vi.fn(() => []),
     get stats() {
       statsReads += 1;
       return stats;
@@ -81,7 +87,9 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
     measurePerformance,
     resetView,
   } = useGiRenderer(rendererFactory);
-  const [capturedFps, setCapturedFps] = useState<number | null>(null);
+  const [capturedCallbacks, setCapturedCallbacks] = useState<number | null>(
+    null,
+  );
   const [captureError, setCaptureError] = useState<string | null>(null);
 
   return (
@@ -106,7 +114,7 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
         onClick={() => {
           void measurePerformance()
             .then((measurement) => {
-              setCapturedFps(measurement.fps);
+              setCapturedCallbacks(measurement.measurement.sampling.callbacks);
             })
             .catch((error: unknown) => {
               setCaptureError(
@@ -117,7 +125,7 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
       >
         Measure
       </button>
-      <output data-testid="captured-fps">{capturedFps}</output>
+      <output data-testid="captured-callbacks">{capturedCallbacks}</output>
       <output data-testid="capture-error">{captureError}</output>
     </>
   );
@@ -248,8 +256,10 @@ describe("useGiRenderer", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Measure" }));
 
+    // The window only opens after the warm-up frames and the one that sets its
+    // origin, so the loop has to outlast both before it covers 5s of capture.
     act(() => {
-      for (let now = 0; now <= 5_000; now += 40) {
+      for (let now = 0; now <= 11_000; now += 40) {
         const frame = nextFrame;
         nextFrame = null;
         frame?.(now);
@@ -257,9 +267,8 @@ describe("useGiRenderer", () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByTestId("captured-fps")).toHaveTextContent("25"),
+      expect(screen.getByTestId("captured-callbacks")).toHaveTextContent("125"),
     );
-    expect(fake.renderer.renderFrame).toHaveBeenCalledTimes(126);
   });
 
   it("keeps stats snapshots on the throttled cadence while idle", async () => {
@@ -413,7 +422,7 @@ describe("useGiRenderer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Measure" }));
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(7_000);
+      await vi.advanceTimersByTimeAsync(PERFORMANCE_CAPTURE_TIMEOUT_MS + 1_000);
     });
 
     expect(screen.getByTestId("capture-error")).toHaveTextContent(

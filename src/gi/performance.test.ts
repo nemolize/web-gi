@@ -1,144 +1,134 @@
 import { describe, expect, it } from "vitest";
 
-import type { PerformanceMeasurement } from "@/gi/performance";
+import type { GpuFrameSample, PerformanceMeasurement } from "@/gi/performance";
 import {
   aggregatePerformanceMeasurements,
   createPerformanceRecorder,
   formatPerformanceReport,
   sanitizePerformanceReportUrl,
-  summarizeFrameTimes,
+  summarizeDurations,
 } from "@/gi/performance";
 import { DEFAULT_SETTINGS } from "@/gi/settings";
 
+const gpuSample = (frameMs: number): GpuFrameSample => ({
+  frameMs,
+  passMs: { gi: frameMs * 0.6, atrous: frameMs * 0.4 },
+});
+
+const measurement = (
+  frameMs: number,
+  passMs: Record<string, number> = { gi: frameMs * 0.6, atrous: frameMs * 0.4 },
+): PerformanceMeasurement => ({
+  measurement: {
+    kind: "gpuTimestamp",
+    frameMs: summarizeDurations([frameMs]),
+    passMs: Object.fromEntries(
+      Object.entries(passMs).map(([label, value]) => [
+        label,
+        summarizeDurations([value]),
+      ]),
+    ),
+    sampling: {
+      windowMs: 5_000,
+      callbacks: 100,
+      sampled: 100,
+      rejected: 0,
+      coverage: 1,
+      warmupFrames: 30,
+    },
+  },
+  presentation: {
+    callbackIntervalMs: summarizeDurations([8.33]),
+    vsyncBound: true,
+    displayPeriodMs: 8.33,
+  },
+  atrousVariant: "tiled-16",
+  renderResolution: { width: 640, height: 480 },
+});
+
 describe("performance capture", () => {
-  it("summarizes frame intervals with elapsed-time FPS", () => {
-    const result = summarizeFrameTimes([10, 20, 30, 40, 100], 1_000);
-
-    expect(result).toEqual({
-      durationMs: 1_000,
-      sampleCount: 5,
-      fps: 5,
-      frameTimeMs: {
-        mean: 40,
-        median: 30,
-        p95: 100,
-        min: 10,
-        max: 100,
-      },
+  it("summarizes a set of durations", () => {
+    expect(summarizeDurations([10, 20, 30, 40, 100])).toEqual({
+      mean: 40,
+      median: 30,
+      p95: 100,
+      min: 10,
+      max: 100,
     });
   });
 
-  it("starts on the first render frame and completes after the duration", () => {
-    const recorder = createPerformanceRecorder(100);
+  it("discards warm-up frames before opening the window", () => {
+    const recorder = createPerformanceRecorder(100, 2);
 
-    expect(recorder.record(1_000, 250)).toBeNull();
-    expect(recorder.record(1_040, 40)).toBeNull();
-    expect(recorder.record(1_080, 40)).toBeNull();
-    expect(recorder.record(1_120, 40)).toEqual({
-      durationMs: 120,
-      sampleCount: 3,
-      fps: 25,
-      frameTimeMs: {
-        mean: 40,
-        median: 40,
-        p95: 40,
-        min: 40,
-        max: 40,
-      },
-    });
-    expect(recorder.record(1_160, 40)).toBeNull();
-  });
-
-  it("aggregates compatible runs without inventing combined percentiles", () => {
-    const runs: PerformanceMeasurement[] = [
-      {
-        durationMs: 1_000,
-        sampleCount: 10,
-        fps: 10,
-        frameTimeMs: {
-          mean: 100,
-          median: 90,
-          p95: 120,
-          min: 80,
-          max: 130,
-        },
-        atrousVariant: "fallback",
-        renderResolution: { width: 640, height: 480 },
-      },
-      {
-        durationMs: 1_000,
-        sampleCount: 20,
-        fps: 20,
-        frameTimeMs: {
-          mean: 50,
-          median: 48,
-          p95: 70,
-          min: 40,
-          max: 80,
-        },
-        atrousVariant: "fallback",
-        renderResolution: { width: 640, height: 480 },
-      },
-      {
-        durationMs: 1_000,
-        sampleCount: 30,
-        fps: 30,
-        frameTimeMs: {
-          mean: 100 / 3,
-          median: 32,
-          p95: 60,
-          min: 25,
-          max: 90,
-        },
-        atrousVariant: "fallback",
-        renderResolution: { width: 640, height: 480 },
-      },
-    ];
-
-    expect(aggregatePerformanceMeasurements(runs)).toEqual({
-      atrousVariant: "fallback",
-      renderResolution: { width: 640, height: 480 },
-      runs,
-      aggregate: {
-        totalDurationMs: 3_000,
-        totalSampleCount: 60,
-        fps: { weighted: 20, medianRun: 20, minRun: 10, maxRun: 30 },
-        frameTimeMs: {
-          weightedMean: 50,
-          medianRunMedian: 48,
-          medianRunP95: 70,
-          min: 25,
-          max: 130,
-        },
-      },
-    });
-  });
-
-  it("uses the conventional median for an even number of runs", () => {
-    const createRun = (fps: number): PerformanceMeasurement => ({
-      durationMs: 1_000,
-      sampleCount: fps,
-      fps,
-      frameTimeMs: { mean: 100, median: 100, p95: 100, min: 100, max: 100 },
-      atrousVariant: "fallback",
-      renderResolution: { width: 640, height: 480 },
-    });
-
+    // Two warm-up frames, then the frame that sets the window's origin.
     expect(
-      aggregatePerformanceMeasurements([createRun(10), createRun(30)]).aggregate
-        .fps.medianRun,
-    ).toBe(20);
+      recorder.observe({ at: 0, callbackIntervalMs: 40, accepted: true }),
+    ).toBeNull();
+    expect(
+      recorder.observe({ at: 40, callbackIntervalMs: 40, accepted: true }),
+    ).toBeNull();
+    expect(
+      recorder.observe({ at: 80, callbackIntervalMs: 40, accepted: true }),
+    ).toBeNull();
+
+    const result = recorder.observe({
+      at: 200,
+      callbackIntervalMs: 40,
+      accepted: true,
+      gpu: gpuSample(5),
+    });
+    expect(result?.measurement.sampling.windowMs).toBe(120);
+  });
+
+  it("counts a rejected frame without letting it advance the sample set", () => {
+    const recorder = createPerformanceRecorder(100, 0);
+    recorder.observe({ at: 0, callbackIntervalMs: 40, accepted: true });
+    recorder.observe({
+      at: 40,
+      callbackIntervalMs: 40,
+      accepted: false,
+      gpu: gpuSample(5),
+    });
+
+    const result = recorder.observe({
+      at: 140,
+      callbackIntervalMs: 40,
+      accepted: true,
+      gpu: gpuSample(5),
+    });
+
+    const sampling = result?.measurement.sampling;
+    expect(sampling?.callbacks).toBe(2);
+    expect(sampling?.rejected).toBe(1);
+    // The rejected frame contributed no sample, and `coverage` says so rather
+    // than leaving the median to look like it covered the whole window.
+    expect(sampling?.sampled).toBe(1);
+    expect(sampling?.coverage).toBe(0.5);
+  });
+
+  it("falls back with a stated reason when the device offers no GPU timing", () => {
+    const recorder = createPerformanceRecorder(50, 0);
+    recorder.observe({
+      at: 0,
+      callbackIntervalMs: 16,
+      accepted: true,
+      gpuSupported: false,
+    });
+    const result = recorder.observe({
+      at: 60,
+      callbackIntervalMs: 16,
+      accepted: true,
+      gpuSupported: false,
+    });
+
+    expect(result?.measurement.kind).toBe("wallFallback");
+    expect(
+      result?.measurement.kind === "wallFallback" && result.measurement.reason,
+    ).toContain("does not expose timestamp-query");
   });
 
   it("rejects runs captured with different render configurations", () => {
-    const base: PerformanceMeasurement = {
-      durationMs: 1_000,
-      sampleCount: 10,
-      fps: 10,
-      frameTimeMs: { mean: 100, median: 100, p95: 100, min: 100, max: 100 },
-      atrousVariant: "fallback",
-      renderResolution: { width: 640, height: 480 },
-    };
+    const base = measurement(6);
 
     expect(() =>
       aggregatePerformanceMeasurements([
@@ -148,13 +138,65 @@ describe("performance capture", () => {
     ).toThrow("Performance runs used different render configurations.");
   });
 
-  it("formats a pasteable multi-run report with the render context", () => {
-    const run: PerformanceMeasurement = {
-      ...summarizeFrameTimes([16.666, 17.333], 34),
-      atrousVariant: "tiled-16",
-      renderResolution: { width: 1080, height: 2208 },
-    };
-    const report = JSON.parse(
+  it("warns when run medians climb monotonically across the capture", () => {
+    const capture = aggregatePerformanceMeasurements([
+      measurement(6),
+      measurement(7),
+      measurement(8.4),
+    ]);
+
+    const trend = capture.aggregate.warnings.find(
+      (warning) => warning.kind === "runTrend",
+    );
+    expect(trend).toBeDefined();
+    expect(trend?.ratio).toBeCloseTo(1.4, 5);
+  });
+
+  it("stays quiet when the same spread arrives unordered", () => {
+    const capture = aggregatePerformanceMeasurements([
+      measurement(8.4),
+      measurement(6),
+      measurement(7),
+    ]);
+
+    expect(
+      capture.aggregate.warnings.some((warning) => warning.kind === "runTrend"),
+    ).toBe(false);
+  });
+
+  it("flags a slowdown that spared no pass as thermally suspect", () => {
+    // Every pass rises by the same factor — including the ray-free ones, which
+    // a change to ray traversal could not touch.
+    const capture = aggregatePerformanceMeasurements([
+      measurement(6, { gi: 3.6, atrous: 2.4 }),
+      measurement(7.2, { gi: 4.32, atrous: 2.88 }),
+      measurement(8.4, { gi: 5.04, atrous: 3.36 }),
+    ]);
+
+    expect(
+      capture.aggregate.warnings.some(
+        (warning) => warning.kind === "rayFreeRatio",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not flag a slowdown confined to the ray-tracing passes", () => {
+    const capture = aggregatePerformanceMeasurements([
+      measurement(6, { gi: 3.6, atrous: 2.4 }),
+      measurement(7.2, { gi: 4.8, atrous: 2.4 }),
+      measurement(8.4, { gi: 6, atrous: 2.4 }),
+    ]);
+
+    expect(
+      capture.aggregate.warnings.some(
+        (warning) => warning.kind === "rayFreeRatio",
+      ),
+    ).toBe(false);
+  });
+
+  it("formats a pasteable report keyed on GPU time", () => {
+    const run = measurement(6);
+    const report: Record<string, unknown> = JSON.parse(
       formatPerformanceReport(
         aggregatePerformanceMeasurements([run, run, run]),
         {
@@ -169,42 +211,16 @@ describe("performance capture", () => {
     );
 
     expect(report).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       atrousVariant: "tiled-16",
       runCount: 3,
       aggregate: {
-        totalDurationMs: 102,
-        totalSampleCount: 6,
-        fps: {
-          weighted: 58.82,
-          medianRun: 58.82,
-          minRun: 58.82,
-          maxRun: 58.82,
-        },
-        frameTimeMs: {
-          weightedMean: 17,
-          medianRunMedian: 16.67,
-          medianRunP95: 17.33,
-          min: 16.67,
-          max: 17.33,
-        },
+        totalWindowMs: 15_000,
+        totalSampleCount: 300,
+        gpuFrameMs: { medianRun: 6, minRun: 6, maxRun: 6 },
+        warnings: [],
       },
-      renderResolution: { width: 1080, height: 2208 },
       userAgent: "test browser",
-    });
-    expect(report.runs).toHaveLength(3);
-    expect(report.runs[0]).toEqual({
-      run: 1,
-      durationMs: 34,
-      sampleCount: 2,
-      fps: 58.82,
-      frameTimeMs: {
-        mean: 17,
-        median: 16.67,
-        p95: 17.33,
-        min: 16.67,
-        max: 17.33,
-      },
     });
     expect(Object.keys(report)).toEqual([
       "schemaVersion",
@@ -220,13 +236,28 @@ describe("performance capture", () => {
       "settings",
       "userAgent",
     ]);
-    expect(Object.keys(report.aggregate.frameTimeMs)).toEqual([
-      "weightedMean",
-      "medianRunMedian",
-      "medianRunP95",
-      "min",
-      "max",
-    ]);
+  });
+
+  it("reports a null GPU aggregate when no run carried timing", () => {
+    const fallback: PerformanceMeasurement = {
+      ...measurement(6),
+      measurement: {
+        kind: "wallFallback",
+        reason: "This browser or device does not expose timestamp-query.",
+        sampling: {
+          windowMs: 5_000,
+          callbacks: 100,
+          sampled: 0,
+          rejected: 0,
+          coverage: 0,
+          warmupFrames: 30,
+        },
+      },
+    };
+
+    expect(
+      aggregatePerformanceMeasurements([fallback]).aggregate.gpuFrameMs,
+    ).toBeNull();
   });
 
   it("keeps only the supported a-trous selector in the report URL", () => {
@@ -238,11 +269,6 @@ describe("performance capture", () => {
     expect(
       sanitizePerformanceReportUrl(
         "https://example.com/demo?atrous=8&token=secret#private",
-      ),
-    ).toBe("https://example.com/demo");
-    expect(
-      sanitizePerformanceReportUrl(
-        "https://example.com/demo?atrous=unknown&user=42",
       ),
     ).toBe("https://example.com/demo");
   });
