@@ -11,16 +11,32 @@ import { StatsOverlay } from "@/components/StatsOverlay";
 import type { PerformanceMeasurement } from "@/gi/performance";
 import { DEFAULT_SETTINGS } from "@/gi/settings";
 
+const summary = (value: number) => ({
+  mean: value,
+  median: value,
+  p95: value,
+  min: value,
+  max: value,
+});
+
 const measurement: PerformanceMeasurement = {
-  durationMs: 5_010,
-  sampleCount: 151,
-  fps: 30.14,
-  frameTimeMs: {
-    mean: 33.18,
-    median: 33.1,
-    p95: 35.4,
-    min: 31.8,
-    max: 41.2,
+  measurement: {
+    kind: "gpuTimestamp",
+    frameMs: summary(33.1),
+    passMs: { gi: summary(20), atrous: summary(13.1) },
+    sampling: {
+      windowMs: 5_010,
+      callbacks: 151,
+      sampled: 151,
+      rejected: 0,
+      coverage: 1,
+      warmupFrames: 30,
+    },
+  },
+  presentation: {
+    callbackIntervalMs: summary(33.18),
+    vsyncBound: false,
+    displayPeriodMs: null,
   },
   atrousVariant: "fallback",
   renderResolution: { width: 1080, height: 2208 },
@@ -63,7 +79,7 @@ describe("StatsOverlay performance capture", () => {
     });
     fireEvent.click(measureButton);
 
-    await screen.findByText(/30\.1 fps median run/);
+    await screen.findByText(/33.10 ms GPU median run/);
     expect(measurePerformance).toHaveBeenCalledTimes(3);
     const copyButton = screen.getByRole("button", { name: "Copy result" });
     expect(copyButton).toBe(measureButton);
@@ -75,12 +91,12 @@ describe("StatsOverlay performance capture", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
     const copied = JSON.parse(writeText.mock.calls[0]?.[0] ?? "");
     expect(copied).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       atrousVariant: "fallback",
       runCount: 3,
       aggregate: {
         totalSampleCount: 453,
-        fps: { weighted: 30.14, medianRun: 30.14 },
+        gpuFrameMs: { medianRun: 33.1 },
       },
       renderResolution: { width: 1080, height: 2208 },
     });
@@ -117,7 +133,7 @@ describe("StatsOverlay performance capture", () => {
     expect(await screen.findByText("renderer stopped")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Measure 3×5 s" }));
-    expect(await screen.findByText(/30\.1 fps median run/)).toBeVisible();
+    expect(await screen.findByText(/33.10 ms GPU median run/)).toBeVisible();
   });
 
   it("keeps the measured report available when clipboard access fails", async () => {
@@ -137,7 +153,7 @@ describe("StatsOverlay performance capture", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Measure 3×5 s" }));
-    await screen.findByText(/30\.1 fps median run/);
+    await screen.findByText(/33.10 ms GPU median run/);
     fireEvent.click(screen.getByRole("button", { name: "Copy result" }));
 
     expect(
@@ -197,6 +213,6 @@ describe("StatsOverlay performance capture", () => {
     ).toBeVisible();
 
     resolveThird?.(measurement);
-    expect(await screen.findByText(/30\.1 fps median run/)).toBeVisible();
+    expect(await screen.findByText(/33.10 ms GPU median run/)).toBeVisible();
   });
 });

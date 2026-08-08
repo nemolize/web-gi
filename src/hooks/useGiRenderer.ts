@@ -6,6 +6,7 @@ import { DEFAULT_CAMERA, dollyCamera, orbitCamera } from "@/gi/camera";
 import {
   createPerformanceRecorder,
   PERFORMANCE_CAPTURE_DURATION_MS,
+  PERFORMANCE_WARMUP_FRAMES,
   type PerformanceMeasurement,
 } from "@/gi/performance";
 import type { RendererStats } from "@/gi/renderer";
@@ -37,6 +38,9 @@ export type RendererHandle = Pick<
   | "renderFrame"
   | "setSettings"
   | "stats"
+  | "supportsGpuTiming"
+  | "setGpuTimingEnabled"
+  | "takeGpuSamples"
 >;
 
 export type RendererFactory = (
@@ -68,7 +72,9 @@ type ActiveMeasurement = {
 };
 
 const STATS_INTERVAL_MS = 250;
-const PERFORMANCE_CAPTURE_TIMEOUT_MS = PERFORMANCE_CAPTURE_DURATION_MS + 2_000;
+/** Warm-up runs before the window opens, so it has to fit inside the timeout. */
+export const PERFORMANCE_CAPTURE_TIMEOUT_MS =
+  PERFORMANCE_CAPTURE_DURATION_MS + PERFORMANCE_WARMUP_FRAMES * 100 + 2_000;
 const MAX_CAPTURE_FRAME_GAP_MS = 1_000;
 const ORBIT_SPEED = 0.005;
 const DOLLY_SPEED = 0.0015;
@@ -94,6 +100,7 @@ export const useGiRenderer = (
     if (measurement === null) return;
     measurementRef.current = null;
     window.clearTimeout(measurement.timeoutId);
+    rendererRef.current?.setGpuTimingEnabled(false);
     measurement.reject(new Error(message));
   }, []);
 
@@ -173,52 +180,74 @@ export const useGiRenderer = (
           const shouldUpdateStats = now - lastStatsAt > STATS_INTERVAL_MS;
           const currentStats =
             measurement !== null || shouldUpdateStats ? active.stats : null;
-          if (
-            measurement !== null &&
-            currentStats !== null &&
-            currentStats.atrousVariant !== null &&
-            currentStats.width > 0 &&
-            currentStats.height > 0
-          ) {
-            const currentContext = {
-              atrousVariant: currentStats.atrousVariant,
-              renderResolution: {
-                width: currentStats.width,
-                height: currentStats.height,
-              },
-            };
-            const initialContext = measurement.renderContext;
-            if (initialContext === null) {
-              measurement.renderContext = currentContext;
-            } else if (
-              initialContext.atrousVariant !== currentContext.atrousVariant ||
-              initialContext.renderResolution.width !==
-                currentContext.renderResolution.width ||
-              initialContext.renderResolution.height !==
-                currentContext.renderResolution.height
-            ) {
-              cancelMeasurement(
-                "Performance capture stopped because the render configuration changed.",
-              );
-            } else if (
-              measurement.lastFrameAt !== null &&
-              now - measurement.lastFrameAt > MAX_CAPTURE_FRAME_GAP_MS
-            ) {
-              cancelMeasurement(
-                "Performance capture stopped because rendering was interrupted.",
-              );
+          if (measurement !== null && currentStats !== null) {
+            // A frame the capture will not count still reaches the recorder,
+            // marked rejected — the window and the sample set then advance on
+            // the same frames instead of drifting apart.
+            const usable =
+              currentStats.atrousVariant !== null &&
+              currentStats.width > 0 &&
+              currentStats.height > 0;
+            const currentContext = usable
+              ? {
+                  atrousVariant: currentStats.atrousVariant,
+                  renderResolution: {
+                    width: currentStats.width,
+                    height: currentStats.height,
+                  },
+                }
+              : null;
+
+            if (currentContext !== null) {
+              const initialContext = measurement.renderContext;
+              if (initialContext === null) {
+                measurement.renderContext = currentContext;
+              } else if (
+                initialContext.atrousVariant !== currentContext.atrousVariant ||
+                initialContext.renderResolution.width !==
+                  currentContext.renderResolution.width ||
+                initialContext.renderResolution.height !==
+                  currentContext.renderResolution.height
+              ) {
+                cancelMeasurement(
+                  "Performance capture stopped because the render configuration changed.",
+                );
+              } else if (
+                measurement.lastFrameAt !== null &&
+                now - measurement.lastFrameAt > MAX_CAPTURE_FRAME_GAP_MS
+              ) {
+                cancelMeasurement(
+                  "Performance capture stopped because rendering was interrupted.",
+                );
+              }
             }
 
             if (measurementRef.current === measurement) {
               measurement.lastFrameAt = now;
-              const result = measurement.recorder.record(
-                now,
-                currentStats.frameMs,
-              );
+              // Drained every frame: leaving samples queued would attribute
+              // them to whichever window happened to close next.
+              const gpu = active.takeGpuSamples().at(-1) ?? null;
+              const result = measurement.recorder.observe({
+                at: now,
+                callbackIntervalMs: currentStats.frameMs,
+                accepted: currentContext !== null,
+                gpu,
+                gpuSupported: active.supportsGpuTiming,
+              });
               if (result !== null) {
+                const context = measurement.renderContext;
                 measurementRef.current = null;
                 window.clearTimeout(measurement.timeoutId);
-                measurement.resolve({ ...result, ...currentContext });
+                active.setGpuTimingEnabled(false);
+                if (context === null) {
+                  measurement.reject(
+                    new Error(
+                      "Performance capture ended before the renderer reported a usable frame.",
+                    ),
+                  );
+                } else {
+                  measurement.resolve({ ...result, ...context });
+                }
               }
             }
           }
@@ -352,7 +381,8 @@ export const useGiRenderer = (
 
   const measurePerformance =
     useCallback((): Promise<PerformanceMeasurement> => {
-      if (rendererRef.current === null) {
+      const renderer = rendererRef.current;
+      if (renderer === null) {
         return Promise.reject(new Error("The renderer is not running."));
       }
       if (measurementRef.current !== null) {
@@ -360,6 +390,9 @@ export const useGiRenderer = (
           new Error("A performance capture is already running."),
         );
       }
+
+      renderer.setGpuTimingEnabled(true);
+      renderer.takeGpuSamples();
 
       return new Promise((resolve, reject) => {
         const timeoutId = window.setTimeout(() => {
