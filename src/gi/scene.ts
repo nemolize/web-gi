@@ -155,16 +155,17 @@ export const makeBox = (
   ];
 };
 
-/**
- * `occluderGroups` is one entry per cluster bound; the walls trail as a single
- * group, since a closest-hit ray almost always reaches one of them.
- */
 type SceneDefinition = {
+  /**
+   * One entry per cluster bound, so quads belonging to one object go in one
+   * entry: a ray that misses the bound skips the whole run.
+   */
   readonly occluderGroups: readonly (readonly Quad[])[];
+  /** Trail as a single group, which a closest-hit ray almost always reaches. */
   readonly walls: readonly Quad[];
 };
 
-type Walls = {
+type WallMaterials = {
   readonly floor: Material;
   readonly ceiling: Material;
   readonly back: Material;
@@ -179,8 +180,8 @@ type Walls = {
  * Keeping the shell identical is what lets `sceneBounds`, the camera clamp and
  * the shadow-ray shortcut hold for all of them.
  */
-const room = (walls: Partial<Walls> = {}): Quad[] => {
-  const m: Walls = {
+const room = (walls: Partial<WallMaterials> = {}): Quad[] => {
+  const m: WallMaterials = {
     floor: WHITE,
     ceiling: WHITE,
     back: WHITE,
@@ -205,11 +206,9 @@ const blocks = (): Quad[][] => [
   makeBox(vec3(0.66, 0.165, 0.66), vec3(0.15, 0.165, 0.15), -17, WHITE),
 ];
 
-/** Axis-aligned box spanning two opposite corners. */
 const boxBetween = (min: Vec3, max: Vec3, material: Material): Quad[] =>
   makeBox(scale(add(min, max), 0.5), scale(sub(max, min), 0.5), 0, material);
 
-/** Emissive patch just under the ceiling, facing down. */
 const ceilingLight = (
   x: readonly [number, number],
   z: readonly [number, number],
@@ -261,9 +260,8 @@ const manyLights = (): Quad[] => {
  */
 const doorway = (): SceneDefinition => ({
   occluderGroups: [
-    // The partition is one group: a thin slab bounds all three pieces, so a ray
-    // that stays on one side of it skips them together. It faces the default
-    // camera, which puts the doorway and the dark half in the same frame.
+    // The partition faces the default camera, which puts the doorway and the
+    // dark half in the same frame.
     [
       ...boxBetween(vec3(0, 0, 0.485), vec3(0.55, 1, 0.515), WHITE),
       ...boxBetween(vec3(0.85, 0, 0.485), vec3(1, 1, 0.515), WHITE),
@@ -278,12 +276,11 @@ const doorway = (): SceneDefinition => ({
 });
 
 /**
- * Cove lighting: the emitter faces the ceiling from behind a lip, so nothing on
- * screen is lit directly and the image is one bounce off the ceiling.
+ * Cove lighting: the emitter faces the ceiling, so every surface below it is
+ * reached by the bounce off the ceiling rather than by the source.
  */
 const cove = (): SceneDefinition => ({
   occluderGroups: [
-    // Shelf and lip are one fixture; a single bound covers both.
     [
       ...boxBetween(vec3(0.16, 0.6, 0.04), vec3(0.84, 0.64, 0.2), WHITE),
       ...boxBetween(vec3(0.16, 0.64, 0.19), vec3(0.84, 0.76, 0.2), WHITE),
@@ -291,8 +288,8 @@ const cove = (): SceneDefinition => ({
     makeBox(vec3(0.32, 0.26, 0.55), vec3(0.1, 0.26, 0.1), 14, WHITE),
     makeBox(vec3(0.68, 0.15, 0.42), vec3(0.12, 0.15, 0.12), -22, WHITE),
     [
-      // Faces up: `u x v` is +Y, and a downward-looking ray is culled by the
-      // primary trace, which is what keeps the emitter itself off screen.
+      // `u x v` is +Y, so the primary trace culls the emitter from below and
+      // the lip hides it at low angles; pitched up, the eye looks into it.
       makeQuad(
         vec3(0.2, 0.645, 0.05),
         vec3(0, 0, 0.13),
@@ -306,7 +303,6 @@ const cove = (): SceneDefinition => ({
   walls: room({ front: AMBER, floor: SLATE }),
 });
 
-/** Height of each pillar in the 3x3 grid, row-major from the back-left. */
 const PILLAR_HEIGHTS = [0.42, 0.22, 0.34, 0.18, 0.5, 0.26, 0.3, 0.44, 0.2];
 
 /**
@@ -371,8 +367,6 @@ const clusterOf = (group: readonly Quad[], start: number): OccluderCluster => {
   };
 };
 
-// Quads that move together share a group, so one bound rejects the run: a
-// variant's emitters, the pieces of one partition, the six faces of one box.
 const SCENE_DEFINITIONS: Record<SceneVariant, () => SceneDefinition> = {
   classic: () => ({
     occluderGroups: [...blocks(), classicLight()],

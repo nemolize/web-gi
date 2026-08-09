@@ -125,8 +125,6 @@ describe("buildScene", () => {
     expect(light.origin.y).toBeLessThan(0.7);
   });
 
-  // The partition is the whole point of the variant, so both halves of the claim
-  // are checked: it blocks at eye height and the doorway is genuinely open.
   it("blocks the doorway partition everywhere but the opening", () => {
     const { quads, occluderCount } = buildScene("doorway");
     const occluders = quads.slice(0, occluderCount);

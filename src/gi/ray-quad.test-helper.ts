@@ -2,13 +2,9 @@ import type { Vec3 } from "@/gi/math";
 import { add, dot, scale, sub } from "@/gi/math";
 import type { Quad } from "@/gi/scene";
 
-const RAY_EPS = 1e-4;
+export const RAY_EPS = 1e-4;
 
-/**
- * Mirrors `intersectQuad` in `scene.wgsl`. Tests that assert what a ray can
- * reach have to agree with the shader, so the traversal invariants and the
- * scene-layout checks share this one copy of it.
- */
+/** Mirrors `intersectQuad` in `scene.wgsl`. */
 export const intersectQuad = (
   q: Quad,
   ro: Vec3,

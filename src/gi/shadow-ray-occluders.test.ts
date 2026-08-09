@@ -4,11 +4,10 @@
 // the scene data, not of the shader, so it is checked here rather than assumed.
 import type { Vec3 } from "@/gi/math";
 import { add, normalize, scale, sub, vec3 } from "@/gi/math";
-import { intersectQuad } from "@/gi/ray-quad.test-helper";
+import { intersectQuad, RAY_EPS } from "@/gi/ray-quad.test-helper";
 import type { Quad } from "@/gi/scene";
 import { buildScene, SCENE_VARIANTS, sceneBounds } from "@/gi/scene";
 
-const RAY_EPS = 1e-4;
 const SURFACE_EPS = 1e-3;
 const SEGMENTS = 200_000;
 const T_FAR = 1e20;

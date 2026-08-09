@@ -42,13 +42,13 @@ The panel exposes the RIS candidate count, spatial neighbour count and radius,
 GI bounce depth, the temporal accumulation window, resolution scale, and
 exposure, and switches between five scenes staged in the same unit-cube room:
 
-| Scene           | What it is for                                                                            |
-| --------------- | ----------------------------------------------------------------------------------------- |
-| **Cornell box** | The classic single ceiling emitter and two blocks                                         |
-| **30 lights**   | A grid of tinted emitters, where DI resampling has more to work with                      |
-| **Two rooms**   | A partition with one doorway: the near half is lit only through the opening and by bounce |
-| **Cove light**  | An upward-facing emitter behind a lip, so the whole image is one bounce off the ceiling   |
-| **Pillars**     | Nine pillars under a broad emitter — overlapping penumbrae and contact regions            |
+| Scene           | What it is for                                                                                |
+| --------------- | --------------------------------------------------------------------------------------------- |
+| **Cornell box** | The classic single ceiling emitter and two blocks                                             |
+| **30 lights**   | A grid of tinted emitters, where DI resampling has more to work with                          |
+| **Two rooms**   | A partition with one doorway: the near half is lit only through the opening and by bounce     |
+| **Cove light**  | An upward-facing emitter behind a lip: the room below it is lit by the bounce off the ceiling |
+| **Pillars**     | Nine pillars under a broad emitter — overlapping penumbrae and contact regions                |
 
 ## Pipeline
 
