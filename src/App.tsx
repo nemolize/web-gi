@@ -48,7 +48,7 @@ export const App = () => {
       <main className="relative min-w-0 grow">
         <canvas
           ref={canvasRef}
-          aria-label="Cornell box render"
+          aria-label="Render output"
           className="block size-full cursor-grab touch-none active:cursor-grabbing"
         />
         {status === "running" && (

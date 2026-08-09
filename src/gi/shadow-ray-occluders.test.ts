@@ -3,11 +3,11 @@
 // That holds because the room is the convex hull of the scene — a property of
 // the scene data, not of the shader, so it is checked here rather than assumed.
 import type { Vec3 } from "@/gi/math";
-import { add, dot, normalize, scale, sub, vec3 } from "@/gi/math";
+import { add, normalize, scale, sub, vec3 } from "@/gi/math";
+import { intersectQuad, RAY_EPS } from "@/gi/ray-quad.test-helper";
 import type { Quad } from "@/gi/scene";
 import { buildScene, SCENE_VARIANTS, sceneBounds } from "@/gi/scene";
 
-const RAY_EPS = 1e-4;
 const SURFACE_EPS = 1e-3;
 const SEGMENTS = 200_000;
 const T_FAR = 1e20;
@@ -16,20 +16,6 @@ const requireQuad = (quads: readonly Quad[], index: number): Quad => {
   const quad = quads[index];
   if (quad === undefined) throw new Error(`missing quad at ${String(index)}`);
   return quad;
-};
-
-/** Mirrors `intersectQuad` in `scene.wgsl`. */
-const intersectQuad = (q: Quad, ro: Vec3, rd: Vec3, tMax: number): number => {
-  const denom = dot(q.normal, rd);
-  if (Math.abs(denom) < 1e-9) return -1;
-  const t = dot(q.normal, sub(q.origin, ro)) / denom;
-  if (t <= RAY_EPS || t >= tMax) return -1;
-  const p = sub(add(ro, scale(rd, t)), q.origin);
-  const a = dot(p, q.u) / dot(q.u, q.u);
-  if (a < 0 || a > 1) return -1;
-  const b = dot(p, q.v) / dot(q.v, q.v);
-  if (b < 0 || b > 1) return -1;
-  return t;
 };
 
 /** Mirrors `safeInverse` / `segmentHitsBounds` in `scene.wgsl`. */

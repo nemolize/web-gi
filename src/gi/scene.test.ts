@@ -1,4 +1,6 @@
+import type { Vec3 } from "@/gi/math";
 import { add, dot, length, scale, sub, vec3 } from "@/gi/math";
+import { intersectQuad } from "@/gi/ray-quad.test-helper";
 import type { Quad } from "@/gi/scene";
 import {
   buildScene,
@@ -88,7 +90,7 @@ describe("buildScene", () => {
 
   // `traceOccluded` stops at `occluderCount`, so anything a shadow ray must be
   // able to hit has to sort before the walls.
-  it("sorts every occluder before the walls in both variants", () => {
+  it("sorts every occluder before the walls in every variant", () => {
     for (const variant of SCENE_VARIANTS) {
       const { quads, occluderCount, lights } = buildScene(variant);
       expect(occluderCount).toBe(quads.length - 6);
@@ -105,6 +107,38 @@ describe("buildScene", () => {
         expect(isInsideRoom(centreOf(occluder), 0)).toBe(true);
       }
     }
+  });
+
+  it("lights every variant", () => {
+    for (const variant of SCENE_VARIANTS) {
+      expect(buildScene(variant).lights.length).toBeGreaterThan(0);
+    }
+  });
+
+  // The cove emitter is the one that does not face the room: it points at the
+  // ceiling, and a flipped normal would light nothing a shadow ray can reach.
+  it("aims the cove emitter at the ceiling", () => {
+    const scene = buildScene("cove");
+    expect(scene.lights).toHaveLength(1);
+    const light = requireAt(scene.quads, requireAt(scene.lights, 0).quadIndex);
+    expect(light.normal.y).toBeCloseTo(1);
+    expect(light.origin.y).toBeLessThan(0.7);
+  });
+
+  it("blocks the doorway partition everywhere but the opening", () => {
+    const { quads, occluderCount } = buildScene("doorway");
+    const occluders = quads.slice(0, occluderCount);
+    const crosses = (from: Vec3, to: Vec3): boolean => {
+      const delta = sub(to, from);
+      const distance = length(delta);
+      const direction = scale(delta, 1 / distance);
+      return !occluders.some(
+        (quad) => intersectQuad(quad, from, direction, distance) > 0,
+      );
+    };
+    expect(crosses(vec3(0.7, 0.3, 0.25), vec3(0.7, 0.3, 0.8))).toBe(true);
+    expect(crosses(vec3(0.2, 0.3, 0.25), vec3(0.2, 0.3, 0.8))).toBe(false);
+    expect(crosses(vec3(0.7, 0.85, 0.25), vec3(0.7, 0.85, 0.8))).toBe(false);
   });
 
   it("puts a single emitter on the ceiling in the classic variant", () => {

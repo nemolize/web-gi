@@ -7,9 +7,9 @@ test("renders the control panel and starts (or reports) the WebGPU renderer", as
 }) => {
   await page.goto("/");
 
-  await expect(page).toHaveTitle("web-gi — Real-time GI Cornell Box");
+  await expect(page).toHaveTitle("web-gi — Real-time GI on WebGPU");
   await expect(page.getByRole("heading", { name: "web-gi" })).toBeVisible();
-  await expect(page.getByLabel("Cornell box render")).toBeVisible();
+  await expect(page.getByLabel("Render output")).toBeVisible();
 
   // WebGPU availability depends on the runner, so accept either outcome: a
   // renderer that has accumulated at least one frame, or an explicit notice.
@@ -52,6 +52,17 @@ test("exposes the ReSTIR stages as independent toggles", async ({ page }) => {
   await expect(spatialReuse).toBeEnabled();
 });
 
+test("offers every scene and switches between them", async ({ page }) => {
+  await page.goto("/");
+
+  const scene = page.getByLabel("Scene");
+  await expect(scene).toHaveValue("classic");
+  await expect(scene.locator("option")).toHaveCount(5);
+
+  await scene.selectOption("pillars");
+  await expect(scene).toHaveValue("pillars");
+});
+
 test("keeps desktop sidebar keyboard navigation untrapped", async ({
   page,
 }) => {
@@ -71,7 +82,7 @@ test("serves the SPA shell for a deep route with no file on disk", async ({
 }) => {
   await page.goto("/some/deep/route");
 
-  await expect(page).toHaveTitle("web-gi — Real-time GI Cornell Box");
+  await expect(page).toHaveTitle("web-gi — Real-time GI on WebGPU");
   await expect(page.getByRole("heading", { name: "web-gi" })).toBeVisible();
 });
 
@@ -100,7 +111,7 @@ test.describe("mobile controls", () => {
   }) => {
     await page.goto("/");
 
-    const canvas = page.getByLabel("Cornell box render");
+    const canvas = page.getByLabel("Render output");
     const controlsButton = page.getByRole("button", { name: "Controls" });
     const panelElement = page.locator("#render-controls");
     const panel = page.getByRole("dialog", { name: "Rendering controls" });
@@ -141,7 +152,7 @@ test.describe("mobile controls", () => {
     await page.setViewportSize({ width: 844, height: 390 });
     await page.goto("/");
 
-    const canvas = page.getByLabel("Cornell box render");
+    const canvas = page.getByLabel("Render output");
     const controlsButton = page.getByRole("button", { name: "Controls" });
 
     await expect(controlsButton).toBeVisible();

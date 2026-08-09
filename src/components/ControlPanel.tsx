@@ -7,7 +7,13 @@ import {
 } from "react";
 
 import type { SceneVariant } from "@/gi/scene";
+import { SCENE_LABELS, SCENE_VARIANTS } from "@/gi/scene";
 import type { RenderMode, RenderSettings } from "@/gi/settings";
+
+const SCENE_OPTIONS = SCENE_VARIANTS.map((value) => ({
+  value,
+  label: SCENE_LABELS[value],
+}));
 
 type ToggleProps = {
   readonly label: string;
@@ -17,7 +23,7 @@ type ToggleProps = {
 };
 
 const FOCUSABLE_CONTROL_SELECTOR =
-  'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
 
 const Toggle = ({ label, checked, disabled, onChange }: ToggleProps) => (
@@ -119,6 +125,43 @@ const Segmented = <T extends string>({
   </div>
 );
 
+type SelectProps<T extends string> = {
+  readonly label: string;
+  readonly value: T;
+  readonly options: readonly { readonly value: T; readonly label: string }[];
+  readonly onChange: (value: T) => void;
+};
+
+const Select = <T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: SelectProps<T>) => (
+  <label className="block text-sm text-neutral-200">
+    <span>{label}</span>
+    <select
+      // Without it the accessible name is the label plus every option's text,
+      // because the label wraps the select's own subtree.
+      aria-label={label}
+      value={value}
+      onChange={(event) => {
+        const selected = options.find(
+          (option) => option.value === event.target.value,
+        );
+        if (selected !== undefined) onChange(selected.value);
+      }}
+      className="mt-1 w-full rounded border border-neutral-700 bg-neutral-800 px-2 py-1 text-xs text-neutral-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400"
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  </label>
+);
+
 const Section = ({
   title,
   children,
@@ -166,13 +209,10 @@ const SettingsSections = memo(
               updateSettings({ mode });
             }}
           />
-          <Segmented<SceneVariant>
+          <Select<SceneVariant>
             label="Scene"
             value={settings.scene}
-            options={[
-              { value: "classic", label: "Classic" },
-              { value: "manyLights", label: "30 lights" },
-            ]}
+            options={SCENE_OPTIONS}
             onChange={(scene) => {
               updateSettings({ scene });
             }}

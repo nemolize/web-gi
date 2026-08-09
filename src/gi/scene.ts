@@ -66,8 +66,22 @@ export type Scene = {
   readonly occluderClusterCount: number;
 };
 
-export const SCENE_VARIANTS = ["classic", "manyLights"] as const;
+export const SCENE_VARIANTS = [
+  "classic",
+  "manyLights",
+  "doorway",
+  "cove",
+  "pillars",
+] as const;
 export type SceneVariant = (typeof SCENE_VARIANTS)[number];
+
+export const SCENE_LABELS: Record<SceneVariant, string> = {
+  classic: "Cornell box",
+  manyLights: "30 lights",
+  doorway: "Two rooms",
+  cove: "Cove light",
+  pillars: "Pillars",
+};
 
 export const QUAD_STRIDE_BYTES = 96;
 export const LIGHT_STRIDE_BYTES = 16;
@@ -96,18 +110,17 @@ export const makeQuad = (
   };
 };
 
-const WHITE: Material = {
-  albedo: vec3(0.725, 0.71, 0.68),
+const diffuse = (albedo: Vec3): Material => ({
+  albedo,
   emission: vec3(0, 0, 0),
-};
-const RED: Material = {
-  albedo: vec3(0.63, 0.065, 0.05),
-  emission: vec3(0, 0, 0),
-};
-const GREEN: Material = {
-  albedo: vec3(0.14, 0.45, 0.091),
-  emission: vec3(0, 0, 0),
-};
+});
+
+const WHITE = diffuse(vec3(0.725, 0.71, 0.68));
+const RED = diffuse(vec3(0.63, 0.065, 0.05));
+const GREEN = diffuse(vec3(0.14, 0.45, 0.091));
+const SLATE = diffuse(vec3(0.32, 0.34, 0.38));
+const AMBER = diffuse(vec3(0.62, 0.4, 0.16));
+const TEAL = diffuse(vec3(0.13, 0.4, 0.42));
 
 const emitter = (emission: Vec3): Material => ({
   albedo: vec3(0, 0, 0),
@@ -142,15 +155,50 @@ export const makeBox = (
   ];
 };
 
-const room = (): Quad[] => [
-  // floor, ceiling, back, front (behind the eye), left (red), right (green)
-  makeQuad(vec3(0, 0, 0), vec3(0, 0, 1), vec3(1, 0, 0), WHITE),
-  makeQuad(vec3(0, 1, 0), vec3(1, 0, 0), vec3(0, 0, 1), WHITE),
-  makeQuad(vec3(0, 0, 0), vec3(1, 0, 0), vec3(0, 1, 0), WHITE),
-  makeQuad(vec3(0, 0, 1), vec3(0, 1, 0), vec3(1, 0, 0), WHITE),
-  makeQuad(vec3(0, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1), RED),
-  makeQuad(vec3(1, 0, 0), vec3(0, 0, 1), vec3(0, 1, 0), GREEN),
-];
+type SceneDefinition = {
+  /**
+   * One entry per cluster bound, so quads belonging to one object go in one
+   * entry: a ray that misses the bound skips the whole run.
+   */
+  readonly occluderGroups: readonly (readonly Quad[])[];
+  /** Trail as a single group, which a closest-hit ray almost always reaches. */
+  readonly walls: readonly Quad[];
+};
+
+type WallMaterials = {
+  readonly floor: Material;
+  readonly ceiling: Material;
+  readonly back: Material;
+  /** Behind the eye; primary rays cull it, bounces still light off it. */
+  readonly front: Material;
+  readonly left: Material;
+  readonly right: Material;
+};
+
+/**
+ * The six inward-facing faces of the unit cube every variant is staged in.
+ * Keeping the shell identical is what lets `sceneBounds`, the camera clamp and
+ * the shadow-ray shortcut hold for all of them.
+ */
+const room = (walls: Partial<WallMaterials> = {}): Quad[] => {
+  const m: WallMaterials = {
+    floor: WHITE,
+    ceiling: WHITE,
+    back: WHITE,
+    front: WHITE,
+    left: WHITE,
+    right: WHITE,
+    ...walls,
+  };
+  return [
+    makeQuad(vec3(0, 0, 0), vec3(0, 0, 1), vec3(1, 0, 0), m.floor),
+    makeQuad(vec3(0, 1, 0), vec3(1, 0, 0), vec3(0, 0, 1), m.ceiling),
+    makeQuad(vec3(0, 0, 0), vec3(1, 0, 0), vec3(0, 1, 0), m.back),
+    makeQuad(vec3(0, 0, 1), vec3(0, 1, 0), vec3(1, 0, 0), m.front),
+    makeQuad(vec3(0, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1), m.left),
+    makeQuad(vec3(1, 0, 0), vec3(0, 0, 1), vec3(0, 1, 0), m.right),
+  ];
+};
 
 /** One group per box, so each keeps its own bound in `clusters`. */
 const blocks = (): Quad[][] => [
@@ -158,13 +206,23 @@ const blocks = (): Quad[][] => [
   makeBox(vec3(0.66, 0.165, 0.66), vec3(0.15, 0.165, 0.15), -17, WHITE),
 ];
 
-const classicLight = (): Quad[] => [
+const boxBetween = (min: Vec3, max: Vec3, material: Material): Quad[] =>
+  makeBox(scale(add(min, max), 0.5), scale(sub(max, min), 0.5), 0, material);
+
+const ceilingLight = (
+  x: readonly [number, number],
+  z: readonly [number, number],
+  emission: Vec3,
+): Quad =>
   makeQuad(
-    vec3(0.35, 0.998, 0.36),
-    vec3(0.3, 0, 0),
-    vec3(0, 0, 0.28),
-    emitter(vec3(18, 15, 10)),
-  ),
+    vec3(x[0], 0.998, z[0]),
+    vec3(x[1] - x[0], 0, 0),
+    vec3(0, 0, z[1] - z[0]),
+    emitter(emission),
+  );
+
+const classicLight = (): Quad[] => [
+  ceilingLight([0.35, 0.65], [0.36, 0.64], vec3(18, 15, 10)),
 ];
 
 /**
@@ -185,19 +243,90 @@ const manyLights = (): Quad[] => {
         0.6 + 0.4 * Math.cos(2 * Math.PI * (hue + 1 / 3)),
         0.6 + 0.4 * Math.cos(2 * Math.PI * (hue + 2 / 3)),
       );
+      const x = 0.12 + ix * 0.13;
+      const z = 0.14 + iz * 0.15;
       quads.push(
-        makeQuad(
-          vec3(0.12 + ix * 0.13, 0.998, 0.14 + iz * 0.15),
-          vec3(size, 0, 0),
-          vec3(0, 0, size),
-          // Tuned so total emitted power roughly matches the classic variant.
-          emitter(scale(tint, 26)),
-        ),
+        // Tuned so total emitted power roughly matches the classic variant.
+        ceilingLight([x, x + size], [z, z + size], scale(tint, 26)),
       );
     }
   }
   return quads;
 };
+
+/**
+ * A partition with a single doorway. Only one half is lit directly, so in the
+ * other the indirect term is the whole image rather than a tint on top of one.
+ */
+const doorway = (): SceneDefinition => ({
+  occluderGroups: [
+    // The partition faces the default camera, which puts the doorway and the
+    // dark half in the same frame.
+    [
+      ...boxBetween(vec3(0, 0, 0.485), vec3(0.55, 1, 0.515), WHITE),
+      ...boxBetween(vec3(0.85, 0, 0.485), vec3(1, 1, 0.515), WHITE),
+      ...boxBetween(vec3(0.55, 0.62, 0.485), vec3(0.85, 1, 0.515), WHITE),
+    ],
+    makeBox(vec3(0.33, 0.18, 0.72), vec3(0.13, 0.18, 0.13), 25, WHITE),
+    [ceilingLight([0.15, 0.45], [0.14, 0.42], vec3(30, 26, 20))],
+  ],
+  // Only the lit half sees the amber wall, so the colour reaching the dark half
+  // has bounced at least twice.
+  walls: room({ back: AMBER }),
+});
+
+/**
+ * Cove lighting: the emitter faces the ceiling, so every surface below it is
+ * reached by the bounce off the ceiling rather than by the source.
+ */
+const cove = (): SceneDefinition => ({
+  occluderGroups: [
+    [
+      ...boxBetween(vec3(0.16, 0.6, 0.04), vec3(0.84, 0.64, 0.2), WHITE),
+      ...boxBetween(vec3(0.16, 0.64, 0.19), vec3(0.84, 0.76, 0.2), WHITE),
+    ],
+    makeBox(vec3(0.32, 0.26, 0.55), vec3(0.1, 0.26, 0.1), 14, WHITE),
+    makeBox(vec3(0.68, 0.15, 0.42), vec3(0.12, 0.15, 0.12), -22, WHITE),
+    [
+      // `u x v` is +Y, so the primary trace culls the emitter from below and
+      // the lip hides it at low angles; pitched up, the eye looks into it.
+      makeQuad(
+        vec3(0.2, 0.645, 0.05),
+        vec3(0, 0, 0.13),
+        vec3(0.6, 0, 0),
+        // Roughly twice the classic emitter's power: everything the eye sees
+        // has lost an albedo factor on the ceiling first.
+        emitter(vec3(34, 31, 25)),
+      ),
+    ],
+  ],
+  walls: room({ front: AMBER, floor: SLATE }),
+});
+
+const PILLAR_HEIGHTS = [0.42, 0.22, 0.34, 0.18, 0.5, 0.26, 0.3, 0.44, 0.2];
+
+/**
+ * A grid of pillars under one broad ceiling emitter: overlapping penumbrae and
+ * pillar-to-floor contact are where spatial reuse and the a-trous filter smear.
+ */
+const pillars = (): SceneDefinition => ({
+  occluderGroups: [
+    ...PILLAR_HEIGHTS.map((height, index) =>
+      makeBox(
+        vec3(
+          0.22 + (index % 3) * 0.28,
+          height / 2,
+          0.22 + Math.floor(index / 3) * 0.28,
+        ),
+        vec3(0.07, height / 2, 0.07),
+        index * 12,
+        WHITE,
+      ),
+    ),
+    [ceilingLight([0.2, 0.8], [0.2, 0.8], vec3(5, 4.6, 3.9))],
+  ],
+  walls: room({ floor: SLATE, back: TEAL }),
+});
 
 const LUMINANCE = vec3(0.2126, 0.7152, 0.0722);
 
@@ -238,16 +367,23 @@ const clusterOf = (group: readonly Quad[], start: number): OccluderCluster => {
   };
 };
 
+const SCENE_DEFINITIONS: Record<SceneVariant, () => SceneDefinition> = {
+  classic: () => ({
+    occluderGroups: [...blocks(), classicLight()],
+    walls: room({ left: RED, right: GREEN }),
+  }),
+  manyLights: () => ({
+    occluderGroups: [...blocks(), manyLights()],
+    walls: room({ left: RED, right: GREEN }),
+  }),
+  doorway,
+  cove,
+  pillars,
+};
+
 export const buildScene = (variant: SceneVariant): Scene => {
-  // Emitters share one group: they are a single ceiling patch, so one bound
-  // rejects all of them for any ray that stays below it. The walls trail as
-  // their own group — a shadow ray never reaches them, and a closest-hit ray
-  // almost always does, so bounding them individually would buy nothing.
-  const occluderGroups: Quad[][] = [
-    ...blocks(),
-    variant === "manyLights" ? manyLights() : classicLight(),
-  ];
-  const groups = [...occluderGroups, room()];
+  const { occluderGroups, walls } = SCENE_DEFINITIONS[variant]();
+  const groups = [...occluderGroups, walls];
   const quads = groups.flat();
 
   let start = 0;

@@ -2,8 +2,8 @@ import type { Vec3 } from "@/gi/math";
 import { add, clamp, cross, dot, normalize, scale, sub, vec3 } from "@/gi/math";
 
 /**
- * Orbit camera around a fixed target. The Cornell box is closed, so the radius
- * is clamped to keep the eye inside the room.
+ * Orbit camera around a fixed target at the centre of the room, with the dolly
+ * range clamped to `[MIN_RADIUS, MAX_RADIUS]`.
  */
 export type OrbitCamera = {
   readonly target: Vec3;
