@@ -1,10 +1,10 @@
 # web-gi
 
-A real-time global illumination Cornell box in the browser, built on WebGPU
-compute shaders. Direct and indirect lighting are both resolved with
-**ReSTIR** (Reservoir-based Spatio-Temporal Importance Resampling), and a
-brute-force path tracer is available side by side as the ground-truth
-reference.
+Real-time global illumination in the browser, built on WebGPU compute shaders
+and staged in a set of switchable rooms — the Cornell box among them. Direct
+and indirect lighting are both resolved with **ReSTIR** (Reservoir-based
+Spatio-Temporal Importance Resampling), and a brute-force path tracer is
+available side by side as the ground-truth reference.
 
 Requires a browser with WebGPU (recent Chrome, Edge, or Safari). The page
 reports the reason if the API or an adapter is unavailable.
@@ -12,8 +12,8 @@ reports the reason if the API or an adapter is unavailable.
 ## What it does
 
 Every surface in the scene is Lambertian, so all light transport is diffuse
-interreflection — colour bleeding from the red and green walls, soft shadows
-from the area light, and multi-bounce indirect light are the whole point of the
+interreflection — colour bleeding from the coloured walls, soft shadows from
+the area lights, and multi-bounce indirect light are the whole point of the
 image.
 
 - **ReSTIR DI** — per pixel, `M` light samples are drawn and resampled with RIS,
@@ -40,8 +40,15 @@ visible from any angle.
 
 The panel exposes the RIS candidate count, spatial neighbour count and radius,
 GI bounce depth, the temporal accumulation window, resolution scale, and
-exposure. Two scene variants ship: the classic single ceiling emitter, and a
-grid of 30 tinted lights where DI resampling has more to work with.
+exposure, and switches between five scenes staged in the same unit-cube room:
+
+| Scene           | What it is for                                                                            |
+| --------------- | ----------------------------------------------------------------------------------------- |
+| **Cornell box** | The classic single ceiling emitter and two blocks                                         |
+| **30 lights**   | A grid of tinted emitters, where DI resampling has more to work with                      |
+| **Two rooms**   | A partition with one doorway: the near half is lit only through the opening and by bounce |
+| **Cove light**  | An upward-facing emitter behind a lip, so the whole image is one bounce off the ceiling   |
+| **Pillars**     | Nine pillars under a broad emitter — overlapping penumbrae and contact regions            |
 
 ## Pipeline
 
@@ -87,13 +94,13 @@ Algorithm 4) with the 1/Z correction for spatial reuse, and clamp the temporal
 history length. That combination is biased, and the visibility test used to
 reject GI candidates is not reflected in the 1/Z normalisation.
 
-A `compareLinear` sweep at 480×450 over three camera positions, both scenes and
-all combinations of spatial-neighbour counts 0/4/8 and bounce depths 1/3/6
-measured luminance ratios of 0.9947–1.0041 after at least 2,048 reference frames
-and 1,024 ReSTIR frames. Relative L2 ranged from 0.0014–0.0043 and mean absolute
-error from 0.0026–0.0085 in linear radiance. The residual is not consistently
-dark; its observed luminance shortfall or excess stayed within 0.53% across this
-sweep.
+A `compareLinear` sweep at 480×450 over three camera positions, the Cornell box
+and 30-light scenes, and all combinations of spatial-neighbour counts 0/4/8 and
+bounce depths 1/3/6 measured luminance ratios of 0.9947–1.0041 after at least
+2,048 reference frames and 1,024 ReSTIR frames. Relative L2 ranged from
+0.0014–0.0043 and mean absolute error from 0.0026–0.0085 in linear radiance.
+The residual is not consistently dark; its observed luminance shortfall or
+excess stayed within 0.53% across this sweep.
 
 Only diffuse BRDFs are implemented. Adding specular surfaces would need
 reconnection to be skipped at near-delta vertices.
