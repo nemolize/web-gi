@@ -34,11 +34,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let albedo = textureLoad(texAlbedo, pixel, 0).xyz;
   rngInit(pixel, uni.frame, 5u);
 
-  // See `restir-di-spatial.wgsl`: neighbours only, coordinates packed, because
-  // a dynamically-indexed array lands in per-thread scratch — and scratch is
-  // carved from the pool that bounds how many waves stay resident, so its size
-  // is an occupancy lever. `M` is not kept: the 1/Z loop re-reads it from the
-  // reservoir, whose line the acceptance loop has already touched.
+  // Neighbours only, coordinates packed, `M` re-read rather than memoised —
+  // see `restir-di-spatial.wgsl` for why.
   var neighbors: array<u32, MAX_NEIGHBORS>;
   var neighborCount = 0u;
 
