@@ -9,6 +9,10 @@ import {
 import type { CameraBasis, OrbitCamera } from "@/gi/camera";
 import { cameraBasis } from "@/gi/camera";
 import type { LinearImage } from "@/gi/compare";
+import type {
+  CompletionWindowCapture,
+  DevComparisonContext,
+} from "@/gi/dev-hooks";
 import { installDevHooks } from "@/gi/dev-hooks";
 import type { GpuFrameSample } from "@/gi/performance";
 import { MAX_RENDER_PIXELS, resolveRenderSize } from "@/gi/render-size";
@@ -31,6 +35,7 @@ import atrousCommonWgsl from "@/gi/shaders/denoise-atrous-common.wgsl?raw";
 import atrousFallbackWgsl from "@/gi/shaders/denoise-atrous-fallback.wgsl?raw";
 import temporalWgsl from "@/gi/shaders/denoise-temporal.wgsl?raw";
 import gbufferWgsl from "@/gi/shaders/gbuffer.wgsl?raw";
+import pathTraceWgsl from "@/gi/shaders/path-trace.wgsl?raw";
 import presentWgsl from "@/gi/shaders/present.wgsl?raw";
 import referenceWgsl from "@/gi/shaders/reference.wgsl?raw";
 import diWgsl from "@/gi/shaders/restir-di.wgsl?raw";
@@ -166,6 +171,7 @@ type Layouts = {
   readonly resample: GPUBindGroupLayout;
   readonly spatial: GPUBindGroupLayout;
   readonly shade: GPUBindGroupLayout;
+  readonly pathTrace: GPUBindGroupLayout;
   readonly reference: GPUBindGroupLayout;
   readonly temporal: GPUBindGroupLayout;
   readonly atrous: GPUBindGroupLayout;
@@ -182,6 +188,7 @@ type Pipelines = {
   readonly gi: GPUComputePipeline;
   readonly giSpatial: GPUComputePipeline;
   readonly shade: GPUComputePipeline;
+  readonly pathTrace: GPUComputePipeline;
   readonly reference: GPUComputePipeline;
   readonly temporal: GPUComputePipeline;
   readonly atrous: GPUComputePipeline;
@@ -201,6 +208,7 @@ type Targets = {
   readonly gi: readonly GPUBindGroup[];
   readonly giSpatial: readonly GPUBindGroup[];
   readonly shade: readonly GPUBindGroup[];
+  readonly pathTrace: readonly GPUBindGroup[];
   readonly reference: readonly GPUBindGroup[];
   readonly temporal: readonly GPUBindGroup[];
   readonly atrous: readonly (readonly GPUBindGroup[])[];
@@ -223,12 +231,12 @@ type CaptureResources = {
   readonly bytesPerRow: number;
   readonly texture: GPUTexture;
   readonly staging: GPUBuffer;
-  readonly restir: GPUBindGroup;
-  readonly reference: GPUBindGroup;
+  readonly denoised: GPUBindGroup;
+  readonly reference: readonly GPUBindGroup[];
 };
 
 type CapturePipelines = {
-  readonly restir: GPUComputePipeline;
+  readonly denoised: GPUComputePipeline;
   readonly reference: GPUComputePipeline;
 };
 
@@ -239,6 +247,15 @@ const at = <T>(items: readonly T[], index: number): T => {
   }
   return value;
 };
+
+const camerasEqual = (a: OrbitCamera, b: OrbitCamera): boolean =>
+  a.target.x === b.target.x &&
+  a.target.y === b.target.y &&
+  a.target.z === b.target.z &&
+  a.radius === b.radius &&
+  a.yaw === b.yaw &&
+  a.pitch === b.pitch &&
+  a.fovY === b.fovY;
 
 /**
  * WGSL compile failures otherwise surface only as "invalid pipeline" noise at
@@ -306,6 +323,7 @@ export class GiRenderer {
 
   private capture: CaptureResources | null = null;
   private capturePipelines: CapturePipelines | null = null;
+  private captureInProgress = false;
   private quadBuffer: GPUBuffer;
   private lightBuffer: GPUBuffer;
   private clusterBuffer: GPUBuffer;
@@ -321,6 +339,9 @@ export class GiRenderer {
   private accumFrames = 0;
   private parity = 0;
   private previousBasis: CameraBasis | null = null;
+  private lastCamera: OrbitCamera | null = null;
+  private comparisonInProgress = false;
+  private comparisonGeneration = 0;
   private lastFrameAt = 0;
   private lastFrameMs = 0;
   private destroyed = false;
@@ -406,7 +427,11 @@ export class GiRenderer {
       };
     }
 
-    installDevHooks(() => this.captureLinearImage());
+    installDevHooks(
+      () => this.captureLinearImage(),
+      (durationMs) => this.captureAfterCompletionWindow(durationMs),
+      () => this.getComparisonContext(),
+    );
     this.scene = buildScene(settings.scene);
     const uploaded = this.uploadScene(this.scene);
     this.quadBuffer = uploaded.quadBuffer;
@@ -515,6 +540,11 @@ export class GiRenderer {
         readOnlyStorage,
         storageTexture("rgba16float"),
       ]),
+      pathTrace: createLayout(device, "path-trace", compute, [
+        rawTexture,
+        floatTexture,
+        storageTexture("rgba16float"),
+      ]),
       reference: createLayout(device, "reference", compute, [
         rawTexture,
         storageTexture("rgba32float"),
@@ -613,6 +643,7 @@ export class GiRenderer {
       gi: compute("restir-gi", giWgsl, layouts.resample),
       giSpatial: compute("restir-gi-spatial", giSpatialWgsl, layouts.spatial),
       shade: compute("shade", shadeWgsl, layouts.shade),
+      pathTrace: compute("path-trace", pathTraceWgsl, layouts.pathTrace),
       reference: compute("reference", referenceWgsl, layouts.reference),
       temporal: compute("denoise-temporal", temporalWgsl, layouts.temporal),
       atrous: compute(
@@ -667,6 +698,9 @@ export class GiRenderer {
 
   setSettings(next: RenderSettings): void {
     const previous = this.settings;
+    if (JSON.stringify(previous) !== JSON.stringify(next)) {
+      this.comparisonGeneration += 1;
+    }
     this.settings = next;
     if (previous.scene !== next.scene) {
       this.quadBuffer.destroy();
@@ -857,6 +891,13 @@ export class GiRenderer {
           view(at(illumination, 0)),
         ]),
       ),
+      pathTrace: parities.map((p) =>
+        createBindGroup(device, this.layouts.pathTrace, [
+          view(at(depth, p)),
+          view(at(normal, p)),
+          view(at(illumination, 0)),
+        ]),
+      ),
       reference: parities.map((p) =>
         createBindGroup(device, this.layouts.reference, [
           view(at(reference, 1 - p)),
@@ -935,6 +976,7 @@ export class GiRenderer {
     this.device.pushErrorScope("validation");
     const targets = this.createTargets(width, height);
     this.targets = targets;
+    this.comparisonGeneration += 1;
     this.resetAccumulation();
     void this.watchAllocation(width * height);
     return targets;
@@ -1006,6 +1048,15 @@ export class GiRenderer {
   }
 
   renderFrame(camera: OrbitCamera): void {
+    if (this.lastCamera !== null && !camerasEqual(this.lastCamera, camera)) {
+      this.comparisonGeneration += 1;
+    }
+    this.lastCamera = camera;
+    if (this.comparisonInProgress) return;
+    this.renderFrameNow(camera);
+  }
+
+  private renderFrameNow(camera: OrbitCamera): void {
     if (this.destroyed || this.allocationFailure !== null) return;
     // Wall-clock interval between submissions. requestAnimationFrame paces the
     // loop, so this reports the real (vsync- or GPU-bound) frame time rather
@@ -1076,19 +1127,27 @@ export class GiRenderer {
       );
     } else {
       dispatch(this.pipelines.gbuffer, at(targets.gbuffer, parity), "gbuffer");
-      dispatch(this.pipelines.di, at(targets.di, parity), "di");
-      dispatch(
-        this.pipelines.diSpatial,
-        at(targets.diSpatial, parity),
-        "diSpatial",
-      );
-      dispatch(this.pipelines.gi, at(targets.gi, parity), "gi");
-      dispatch(
-        this.pipelines.giSpatial,
-        at(targets.giSpatial, parity),
-        "giSpatial",
-      );
-      dispatch(this.pipelines.shade, at(targets.shade, parity), "shade");
+      if (this.settings.mode === "path-traced") {
+        dispatch(
+          this.pipelines.pathTrace,
+          at(targets.pathTrace, parity),
+          "pathTrace",
+        );
+      } else {
+        dispatch(this.pipelines.di, at(targets.di, parity), "di");
+        dispatch(
+          this.pipelines.diSpatial,
+          at(targets.diSpatial, parity),
+          "diSpatial",
+        );
+        dispatch(this.pipelines.gi, at(targets.gi, parity), "gi");
+        dispatch(
+          this.pipelines.giSpatial,
+          at(targets.giSpatial, parity),
+          "giSpatial",
+        );
+        dispatch(this.pipelines.shade, at(targets.shade, parity), "shade");
+      }
       dispatch(
         this.pipelines.temporal,
         at(targets.temporal, parity),
@@ -1194,6 +1253,71 @@ export class GiRenderer {
     this.accumFrames += 1;
   }
 
+  /**
+   * Runs one submitted frame at a time so the comparison window measures work
+   * the GPU has completed, independent of display refresh rate and queue depth.
+   */
+  private async captureAfterCompletionWindow(
+    durationMs: number,
+  ): Promise<CompletionWindowCapture | null> {
+    const camera = this.lastCamera;
+    if (
+      camera === null ||
+      this.destroyed ||
+      this.deviceIsLost ||
+      !Number.isFinite(durationMs) ||
+      durationMs <= 0
+    ) {
+      return null;
+    }
+    if (this.comparisonInProgress) {
+      throw new Error("A comparison is already running.");
+    }
+
+    this.comparisonInProgress = true;
+    try {
+      await this.device.queue.onSubmittedWorkDone();
+      this.resetAccumulation();
+      const started = performance.now();
+      do {
+        this.renderFrameNow(camera);
+        await this.device.queue.onSubmittedWorkDone();
+      } while (performance.now() - started < durationMs);
+      const actualDurationMs = performance.now() - started;
+      const frames = this.accumFrames;
+      const image = await this.captureLinearImage();
+      return image === null ? null : { image, actualDurationMs, frames };
+    } finally {
+      this.comparisonInProgress = false;
+    }
+  }
+
+  private getComparisonContext(): DevComparisonContext | null {
+    const targets = this.targets;
+    const camera = this.lastCamera;
+    if (targets === null || camera === null) return null;
+    const basis = cameraBasis(camera, targets.width / targets.height);
+    const referenceDetails = {
+      scene: this.settings.scene,
+      maxBounces: this.settings.maxBounces,
+      width: targets.width,
+      height: targets.height,
+      camera: basis,
+    };
+    const referenceKey = JSON.stringify(referenceDetails);
+    return {
+      mode: this.settings.mode,
+      referenceKey,
+      runKey: JSON.stringify({
+        referenceKey,
+        settings: this.settings,
+        generation: this.comparisonGeneration,
+      }),
+      accumFrames: this.accumFrames,
+      details: { ...referenceDetails, settings: { ...this.settings } },
+    };
+  }
+
   /** True when this device can time passes at all. */
   get supportsGpuTiming(): boolean {
     return this.passProbe !== null;
@@ -1228,17 +1352,39 @@ export class GiRenderer {
    * convergence: switch mode, wait, then capture.
    */
   async captureLinearImage(): Promise<LinearImage | null> {
+    if (this.captureInProgress) {
+      throw new Error("A linear capture is already running.");
+    }
+    this.captureInProgress = true;
+    try {
+      return await this.captureLinearImageNow();
+    } finally {
+      this.captureInProgress = false;
+    }
+  }
+
+  private async captureLinearImageNow(): Promise<LinearImage | null> {
     const targets = this.targets;
-    if (this.destroyed || targets === null || this.deviceIsLost) return null;
+    if (
+      this.destroyed ||
+      targets === null ||
+      this.deviceIsLost ||
+      this.accumFrames === 0
+    ) {
+      return null;
+    }
 
     const capture = this.ensureCapture(targets);
     const pipelines = this.ensureCapturePipelines();
     const encoder = this.device.createCommandEncoder({ label: "capture" });
     const reference = this.settings.mode === "reference";
     const pass = encoder.beginComputePass();
-    pass.setPipeline(reference ? pipelines.reference : pipelines.restir);
+    pass.setPipeline(reference ? pipelines.reference : pipelines.denoised);
     pass.setBindGroup(0, this.sceneBindGroup);
-    pass.setBindGroup(1, reference ? capture.reference : capture.restir);
+    pass.setBindGroup(
+      1,
+      reference ? at(capture.reference, 1 - this.parity) : capture.denoised,
+    );
     pass.dispatchWorkgroups(
       Math.ceil(targets.width / WORKGROUP_SIZE),
       Math.ceil(targets.height / WORKGROUP_SIZE),
@@ -1287,7 +1433,10 @@ export class GiRenderer {
         }),
         compute: { module, entryPoint },
       });
-    const created = { restir: build("restir"), reference: build("reference") };
+    const created = {
+      denoised: build("denoised"),
+      reference: build("reference"),
+    };
     this.capturePipelines = created;
     return created;
   }
@@ -1319,25 +1468,26 @@ export class GiRenderer {
     const view = texture.createView();
     // The reference entry point reads only binding 0; the albedo and emission
     // slots are filled to satisfy the shared layout.
-    const referenceColour = at(targets.referenceViews, this.parity);
     const created: CaptureResources = {
       width: targets.width,
       height: targets.height,
       bytesPerRow,
       texture,
       staging,
-      restir: createBindGroup(this.device, this.layouts.capture, [
+      denoised: createBindGroup(this.device, this.layouts.capture, [
         targets.atrousView,
         targets.albedoView,
         targets.emissionView,
         view,
       ]),
-      reference: createBindGroup(this.device, this.layouts.capture, [
-        referenceColour,
-        targets.albedoView,
-        targets.emissionView,
-        view,
-      ]),
+      reference: targets.referenceViews.map((referenceColour) =>
+        createBindGroup(this.device, this.layouts.capture, [
+          referenceColour,
+          targets.albedoView,
+          targets.emissionView,
+          view,
+        ]),
+      ),
     };
     this.capture = created;
     return created;

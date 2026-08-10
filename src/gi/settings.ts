@@ -1,6 +1,6 @@
 import type { SceneVariant } from "@/gi/scene";
 
-export const RENDER_MODES = ["restir", "reference"] as const;
+export const RENDER_MODES = ["restir", "path-traced", "reference"] as const;
 export type RenderMode = (typeof RENDER_MODES)[number];
 
 export type RenderSettings = {

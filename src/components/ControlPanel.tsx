@@ -194,6 +194,7 @@ type SettingsSectionsProps = Pick<
 const SettingsSections = memo(
   ({ settings, updateSettings, resetView }: SettingsSectionsProps) => {
     const restir = settings.mode === "restir";
+    const denoised = settings.mode !== "reference";
 
     return (
       <>
@@ -203,6 +204,7 @@ const SettingsSections = memo(
             value={settings.mode}
             options={[
               { value: "restir", label: "ReSTIR" },
+              { value: "path-traced", label: "Denoised PT" },
               { value: "reference", label: "Reference PT" },
             ]}
             onChange={(mode) => {
@@ -332,7 +334,7 @@ const SettingsSections = memo(
           <Toggle
             label="À-trous filter"
             checked={settings.denoise}
-            disabled={!restir}
+            disabled={!denoised}
             onChange={(denoise) => {
               updateSettings({ denoise });
             }}

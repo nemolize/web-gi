@@ -110,6 +110,88 @@ describe("StatsOverlay performance capture", () => {
     expect(measureButton).toHaveFocus();
   });
 
+  it("saves and compares linear development captures", async () => {
+    const saveReference = vi.fn().mockResolvedValue(true);
+    const compareReference = vi.fn().mockResolvedValue({
+      luminanceRatio: 1,
+      relativeL2: 0.01234,
+      meanAbsolute: 0.05678,
+      maxAbsolute: 0.5,
+      outliers: 2,
+      pixels: 100,
+    });
+    const compareReferenceAfter = vi.fn().mockResolvedValue({
+      luminanceRatio: 1,
+      relativeL2: 0.01234,
+      meanAbsolute: 0.05678,
+      maxAbsolute: 0.5,
+      outliers: 2,
+      pixels: 100,
+      label: "path-traced",
+      mode: "path-traced",
+      requestedDurationMs: 5_000,
+      actualDurationMs: 5_012,
+      targetFrames: 240,
+      referenceFrames: 2_048,
+      context: {
+        scene: "classic",
+        maxBounces: 3,
+        width: 640,
+        height: 480,
+        camera: {
+          pos: { x: 0, y: 0, z: 2 },
+          forward: { x: 0, y: 0, z: -1 },
+          right: { x: 1, y: 0, z: 0 },
+          up: { x: 0, y: 1, z: 0 },
+          tanHalfFov: 0.25,
+          aspect: 4 / 3,
+        },
+        settings: { ...DEFAULT_SETTINGS, mode: "path-traced" },
+      },
+    });
+    globalThis.__gi = {
+      capture: vi.fn(),
+      compare: vi.fn(),
+      saveReference,
+      compareReference,
+      compareReferenceAfter,
+    };
+    const stats = {
+      width: 640,
+      height: 480,
+      accumFrames: 42,
+      frameMs: 16,
+      atrousVariant: "tiled-16" as const,
+    };
+    const measurePerformance = vi.fn();
+    const { rerender } = render(
+      <StatsOverlay
+        stats={stats}
+        settings={{ ...DEFAULT_SETTINGS, mode: "reference" }}
+        measurePerformance={measurePerformance}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Compare 5 s" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save ref" }));
+    expect(await screen.findByText("Reference saved.")).toBeVisible();
+    rerender(
+      <StatsOverlay
+        stats={stats}
+        settings={{ ...DEFAULT_SETTINGS, mode: "path-traced" }}
+        measurePerformance={measurePerformance}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Save ref" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Compare 5 s" }));
+    expect(
+      await screen.findByText(
+        "path-traced · saved 640×480 eye 0.000,0.000,2.000 · relative L2 0.0123 · mean absolute 0.0568 · 240 frames in 5.01 s",
+      ),
+    ).toBeVisible();
+    expect(compareReferenceAfter).toHaveBeenCalledWith("path-traced", 5_000);
+  });
+
   it("allows retrying after capture failure", async () => {
     const measurePerformance = vi
       .fn()

@@ -22,6 +22,8 @@ export type StatsOverlayProps = {
 type CaptureStatus =
   "idle" | "measuring" | "ready" | "copied" | "capture-error" | "copy-error";
 
+const COMPARISON_DURATION_MS = 5_000;
+
 const createReportContext = (
   settings: RenderSettings,
 ): PerformanceReportContext => ({
@@ -44,7 +46,17 @@ export const StatsOverlay = ({
   const [activeRun, setActiveRun] = useState(0);
   const [report, setReport] = useState<string | null>(null);
   const [captureError, setCaptureError] = useState<string | null>(null);
+  const comparisonSettingsKey = JSON.stringify(settings);
+  const [comparisonStatus, setComparisonStatus] = useState<{
+    readonly settingsKey: string;
+    readonly text: string;
+  } | null>(null);
+  const [isComparing, setIsComparing] = useState(false);
   const primaryButtonRef = useRef<HTMLButtonElement>(null);
+
+  const showComparisonStatus = (text: string): void => {
+    setComparisonStatus({ settingsKey: comparisonSettingsKey, text });
+  };
 
   const startCapture = async (): Promise<void> => {
     setCaptureStatus("measuring");
@@ -89,7 +101,7 @@ export const StatsOverlay = ({
   };
 
   const runPrimaryAction = (): void => {
-    if (captureStatus === "measuring") return;
+    if (captureStatus === "measuring" || isComparing) return;
     if (report === null) {
       void startCapture();
     } else {
@@ -105,6 +117,49 @@ export const StatsOverlay = ({
         : captureStatus === "copied"
           ? "Copy again"
           : "Copy result";
+
+  const saveReference = async (): Promise<void> => {
+    setIsComparing(true);
+    setComparisonStatus(null);
+    try {
+      const saved = await globalThis.__gi?.saveReference();
+      showComparisonStatus(
+        saved === true ? "Reference saved." : "No stable frame to save.",
+      );
+    } catch (error) {
+      showComparisonStatus(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setIsComparing(false);
+    }
+  };
+
+  const compareReference = async (): Promise<void> => {
+    setIsComparing(true);
+    setComparisonStatus(null);
+    try {
+      const comparison = await globalThis.__gi?.compareReferenceAfter(
+        settings.mode,
+        COMPARISON_DURATION_MS,
+      );
+      const capturedView =
+        comparison === null || comparison === undefined
+          ? null
+          : `${String(comparison.context.width)}×${String(comparison.context.height)} eye ${comparison.context.camera.pos.x.toFixed(3)},${comparison.context.camera.pos.y.toFixed(3)},${comparison.context.camera.pos.z.toFixed(3)}`;
+      showComparisonStatus(
+        comparison === null || comparison === undefined
+          ? "Save a reference first."
+          : `${comparison.mode} · saved ${capturedView ?? "view"} · relative L2 ${comparison.relativeL2.toFixed(4)} · mean absolute ${comparison.meanAbsolute.toFixed(4)} · ${String(comparison.targetFrames)} frames in ${(comparison.actualDurationMs / 1_000).toFixed(2)} s`,
+      );
+    } catch (error) {
+      showComparisonStatus(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setIsComparing(false);
+    }
+  };
 
   return (
     <section
@@ -135,6 +190,44 @@ export const StatsOverlay = ({
           {stats.accumFrames}
         </dd>
       </dl>
+      {import.meta.env.DEV && (
+        <div className="mt-2 border-t border-neutral-700 pt-2">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={
+                isComparing ||
+                captureStatus === "measuring" ||
+                settings.mode !== "reference"
+              }
+              className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+              onClick={() => void saveReference()}
+            >
+              Save ref
+            </button>
+            <button
+              type="button"
+              disabled={
+                isComparing ||
+                captureStatus === "measuring" ||
+                settings.mode === "reference"
+              }
+              className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+              onClick={() => void compareReference()}
+            >
+              {isComparing ? "Comparing…" : "Compare 5 s"}
+            </button>
+          </div>
+          <p
+            aria-live="polite"
+            className="mt-1 font-mono text-xs text-neutral-400"
+          >
+            {comparisonStatus?.settingsKey === comparisonSettingsKey
+              ? comparisonStatus.text
+              : null}
+          </p>
+        </div>
+      )}
       <div className="mt-2 border-t border-neutral-700 pt-2">
         {capture !== null && (
           <div className="mb-2 font-mono text-xs">
@@ -154,9 +247,9 @@ export const StatsOverlay = ({
           <button
             ref={primaryButtonRef}
             type="button"
-            aria-disabled={captureStatus === "measuring"}
+            aria-disabled={captureStatus === "measuring" || isComparing}
             className={`min-h-11 grow rounded border px-3 py-2 text-xs font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400 ${
-              captureStatus === "measuring"
+              captureStatus === "measuring" || isComparing
                 ? "cursor-wait border-neutral-700 bg-neutral-900 text-neutral-400"
                 : "border-sky-700 bg-sky-950 text-sky-100 hover:bg-sky-900"
             }`}
@@ -168,6 +261,7 @@ export const StatsOverlay = ({
             <button
               type="button"
               aria-label="Measure again"
+              disabled={isComparing}
               className="min-h-11 rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-xs text-neutral-300 hover:bg-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400"
               onClick={() => {
                 primaryButtonRef.current?.focus();
