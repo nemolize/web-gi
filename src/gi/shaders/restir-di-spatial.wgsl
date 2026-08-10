@@ -32,11 +32,12 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   rngInit(pixel, uni.frame, 3u);
 
   // Only the neighbours are recorded: this pixel is always a contributor, and
-  // its surface is already in registers. Coordinates pack into one u32 because
-  // the arrays are dynamically indexed, which puts them in per-thread scratch
-  // rather than registers — half the footprint is half the traffic.
+  // its surface is already in registers. The array is dynamically indexed, so
+  // it lands in per-thread scratch; packing coordinates into one u32 and
+  // re-reading `M` from the reservoir in the 1/Z loop rather than memoising it
+  // both shrink that footprint. Aimed at occupancy, which the device A/B did
+  // not confirm — it credits the win to the merged compute pass instead.
   var neighbors: array<u32, MAX_NEIGHBORS>;
-  var neighborM: array<f32, MAX_NEIGHBORS>;
   var neighborCount = 0u;
 
   let center = srcReservoirs[index];
@@ -89,7 +90,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       rand(),
     );
     neighbors[neighborCount] = packPixel(neighbor);
-    neighborM[neighborCount] = other.m;
     neighborCount = neighborCount + 1u;
   }
 
@@ -113,7 +113,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       reservoir.lightPos.xyz,
       reservoir.lightQuad,
     )) {
-      z += neighborM[i];
+      z += srcReservoirs[coord.y * uni.resolution.x + coord.x].m;
     }
   }
   reservoir.m = z;

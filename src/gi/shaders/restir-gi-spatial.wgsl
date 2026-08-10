@@ -34,10 +34,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let albedo = textureLoad(texAlbedo, pixel, 0).xyz;
   rngInit(pixel, uni.frame, 5u);
 
-  // See `restir-di-spatial.wgsl`: neighbours only, coordinates packed, because
-  // a dynamically-indexed array lands in per-thread scratch.
+  // Neighbours only, coordinates packed, `M` re-read rather than memoised —
+  // see `restir-di-spatial.wgsl` for why.
   var neighbors: array<u32, MAX_NEIGHBORS>;
-  var neighborM: array<f32, MAX_NEIGHBORS>;
   var neighborCount = 0u;
 
   let center = srcReservoirs[index];
@@ -110,7 +109,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       rand(),
     );
     neighbors[neighborCount] = packPixel(neighbor);
-    neighborM[neighborCount] = giM(other);
     neighborCount = neighborCount + 1u;
   }
 
@@ -159,7 +157,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       contributorAlbedo,
       reservoir,
     )) {
-      z += neighborM[i];
+      z += giM(srcReservoirs[coord.y * uni.resolution.x + coord.x]);
     }
   }
   giSetM(&reservoir, z);

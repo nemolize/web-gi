@@ -1045,13 +1045,18 @@ export class GiRenderer {
       };
     };
 
+    // A compute pass's usage scope is the single dispatch, so merging the chain
+    // into one pass is legal. Timestamps bracket a pass, so a capture restores
+    // the boundaries and therefore never measures the shipped structure.
+    const sharedPass = timing ? null : encoder.beginComputePass();
     const dispatch = (
       pipeline: GPUComputePipeline,
       passBindGroup: GPUBindGroup,
       label: string,
       workgroupSize = WORKGROUP_SIZE,
     ): void => {
-      const pass = encoder.beginComputePass(timestampWrites(label));
+      const pass =
+        sharedPass ?? encoder.beginComputePass(timestampWrites(label));
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, this.sceneBindGroup);
       pass.setBindGroup(1, passBindGroup);
@@ -1059,7 +1064,7 @@ export class GiRenderer {
         Math.ceil(targets.width / workgroupSize),
         Math.ceil(targets.height / workgroupSize),
       );
-      pass.end();
+      if (sharedPass === null) pass.end();
     };
 
     const reference = this.settings.mode === "reference";
@@ -1099,6 +1104,7 @@ export class GiRenderer {
         );
       }
     }
+    sharedPass?.end();
 
     // Timed too: without it the per-pass total is not the frame's GPU time.
     const presentTimestamps = timestampWrites("present");
