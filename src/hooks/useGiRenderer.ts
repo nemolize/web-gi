@@ -12,7 +12,7 @@ import {
 import type { RendererStats } from "@/gi/renderer";
 import { GiRenderer, WebGpuUnsupportedError } from "@/gi/renderer";
 import type { RenderSettings } from "@/gi/settings";
-import { DEFAULT_SETTINGS } from "@/gi/settings";
+import { settingsFromSearch } from "@/gi/settings";
 
 export type RendererStatus =
   "initializing" | "running" | "unsupported" | "error";
@@ -87,7 +87,9 @@ export const useGiRenderer = (
   const rendererFactoryRef = useRef<RendererFactory>(rendererFactory);
   const cameraRef = useRef<OrbitCamera>(DEFAULT_CAMERA);
 
-  const [settings, setSettings] = useState<RenderSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<RenderSettings>(() =>
+    settingsFromSearch(window.location.search),
+  );
   const settingsRef = useRef<RenderSettings>(settings);
   const [stats, setStats] = useState<RendererStats>(EMPTY_STATS);
   const [status, setStatus] = useState<RendererStatus>("initializing");

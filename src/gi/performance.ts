@@ -1,5 +1,6 @@
 import type { AtrousVariant } from "@/gi/atrous";
 import type { RenderSettings } from "@/gi/settings";
+import { sanitizedRenderQueryParams } from "@/gi/settings";
 
 export const PERFORMANCE_CAPTURE_DURATION_MS = 5_000;
 export const PERFORMANCE_CAPTURE_RUN_COUNT = 3;
@@ -576,6 +577,9 @@ export const formatPerformanceReport = (
 export const sanitizePerformanceReportUrl = (url: string): string => {
   const source = new URL(url);
   const sanitized = new URL(source.pathname, source.origin);
+  for (const [key, value] of sanitizedRenderQueryParams(source.search)) {
+    sanitized.searchParams.set(key, value);
+  }
   const atrous = source.searchParams.get("atrous");
   if (atrous === "fallback") {
     sanitized.searchParams.set("atrous", atrous);

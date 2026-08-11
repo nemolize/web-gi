@@ -143,9 +143,34 @@ describe("useGiRenderer", () => {
 
   afterEach(() => {
     cleanup();
+    window.history.replaceState(null, "", "/");
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("creates the renderer with settings from the benchmark preset", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?preset=heavy&mode=path-traced&measure=auto",
+    );
+    const fake = createFakeRenderer();
+    const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+
+    render(<RendererHarness rendererFactory={create} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+    expect(create.mock.calls[0]?.[1]).toMatchObject({
+      scene: "manyLights",
+      mode: "path-traced",
+      diCandidates: 32,
+      spatialSamples: 8,
+      maxBounces: 6,
+      resolutionScale: 0.75,
+    });
   });
 
   it("applies settings changed while renderer creation is pending", async () => {

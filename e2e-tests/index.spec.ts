@@ -58,6 +58,21 @@ test("exposes the ReSTIR stages as independent toggles", async ({ page }) => {
   await expect(spatialReuse).toBeEnabled();
 });
 
+test("loads the heavy benchmark preset from a short query", async ({
+  page,
+}) => {
+  await page.goto("/?preset=heavy&mode=path-traced&measure=auto");
+
+  await expect(
+    page.getByRole("radio", { name: "Denoised PT" }),
+  ).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByLabel("Scene")).toHaveValue("manyLights");
+  await expect(page.getByLabel("RIS candidates")).toHaveValue("32");
+  await expect(page.getByLabel("Spatial neighbours")).toHaveValue("8");
+  await expect(page.getByLabel("Bounces")).toHaveValue("6");
+  await expect(page.getByLabel("Resolution scale")).toHaveValue("0.75");
+});
+
 test("renders finite Denoised PT output when WebGPU is available", async ({
   page,
 }) => {

@@ -1,5 +1,6 @@
 import { ControlPanel } from "@/components/ControlPanel";
 import { StatsOverlay } from "@/components/StatsOverlay";
+import { shouldAutoMeasure } from "@/gi/settings";
 import { useGiRenderer } from "@/hooks/useGiRenderer";
 
 interface OverlayProps {
@@ -56,6 +57,7 @@ export const App = () => {
             stats={stats}
             settings={settings}
             measurePerformance={measurePerformance}
+            autoMeasure={shouldAutoMeasure(window.location.search)}
           />
         )}
         {status === "initializing" && (

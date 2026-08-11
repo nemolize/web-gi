@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StatsOverlay } from "@/components/StatsOverlay";
@@ -108,6 +109,36 @@ describe("StatsOverlay performance capture", () => {
     againButton.focus();
     fireEvent.click(againButton);
     expect(measureButton).toHaveFocus();
+  });
+
+  it("starts one three-run capture when automatic measurement is requested", async () => {
+    const measurePerformance = vi.fn().mockResolvedValue(measurement);
+    const props = {
+      stats: {
+        width: 1080,
+        height: 2208,
+        accumFrames: 42,
+        frameMs: 33.1,
+        atrousVariant: "fallback" as const,
+      },
+      settings: DEFAULT_SETTINGS,
+      measurePerformance,
+      autoMeasure: true,
+    };
+    const { rerender } = render(
+      <StrictMode>
+        <StatsOverlay {...props} />
+      </StrictMode>,
+    );
+
+    await screen.findByText(/33.10 ms GPU median run/);
+    expect(measurePerformance).toHaveBeenCalledTimes(3);
+    rerender(
+      <StrictMode>
+        <StatsOverlay {...props} />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(measurePerformance).toHaveBeenCalledTimes(3));
   });
 
   it("saves and compares linear development captures", async () => {

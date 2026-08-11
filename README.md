@@ -54,6 +54,16 @@ exposure, and switches between five scenes staged in the same unit-cube room:
 | **Cove light**  | An upward-facing emitter behind a lip: the room below it is lit by the bounce off the ceiling |
 | **Pillars**     | Nine pillars under a broad emitter — overlapping penumbrae and contact regions                |
 
+Repeatable benchmark runs can start from short query strings:
+
+- `?preset=heavy&mode=restir&measure=auto`
+- `?preset=heavy&mode=path-traced&measure=auto`
+
+`preset=heavy` selects 30 lights, 32 DI candidates, eight spatial neighbours,
+six bounces, and 75% resolution. `measure=auto` starts the standard three-by-five
+second capture as soon as the renderer is ready; the completed report remains
+available through `Copy result`.
+
 ## Pipeline
 
 One frame, in dispatch order (`src/gi/renderer.ts`):

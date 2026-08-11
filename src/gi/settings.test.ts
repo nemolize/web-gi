@@ -9,7 +9,41 @@ import {
   FLAG_GI_TEMPORAL,
   packFlags,
   requiresAccumulationReset,
+  sanitizedRenderQueryParams,
+  settingsFromSearch,
+  shouldAutoMeasure,
 } from "@/gi/settings";
+
+describe("render query", () => {
+  it("loads the heavy benchmark preset with a selected renderer", () => {
+    expect(
+      settingsFromSearch("?preset=heavy&mode=path-traced&measure=auto"),
+    ).toEqual({
+      ...DEFAULT_SETTINGS,
+      scene: "manyLights",
+      mode: "path-traced",
+      diCandidates: 32,
+      spatialSamples: 8,
+      maxBounces: 6,
+      resolutionScale: 0.75,
+    });
+    expect(
+      shouldAutoMeasure("?preset=heavy&mode=path-traced&measure=auto"),
+    ).toBe(true);
+  });
+
+  it("drops unsupported values and unrelated query data", () => {
+    expect(settingsFromSearch("?preset=other&mode=invalid")).toEqual(
+      DEFAULT_SETTINGS,
+    );
+    expect(
+      sanitizedRenderQueryParams(
+        "?preset=heavy&mode=restir&measure=auto&token=secret",
+      ).toString(),
+    ).toBe("preset=heavy&mode=restir&measure=auto");
+    expect(shouldAutoMeasure("?measure=1")).toBe(false);
+  });
+});
 
 describe("packFlags", () => {
   it("sets every bit when all stages are on", () => {

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   aggregatePerformanceMeasurements,
@@ -17,6 +17,7 @@ export type StatsOverlayProps = {
   readonly stats: RendererStats;
   readonly settings: RenderSettings;
   readonly measurePerformance: () => Promise<PerformanceMeasurement>;
+  readonly autoMeasure?: boolean;
 };
 
 type CaptureStatus =
@@ -39,6 +40,7 @@ export const StatsOverlay = ({
   stats,
   settings,
   measurePerformance,
+  autoMeasure = false,
 }: StatsOverlayProps) => {
   const fps = stats.frameMs > 0 ? 1000 / stats.frameMs : 0;
   const [captureStatus, setCaptureStatus] = useState<CaptureStatus>("idle");
@@ -53,12 +55,13 @@ export const StatsOverlay = ({
   } | null>(null);
   const [isComparing, setIsComparing] = useState(false);
   const primaryButtonRef = useRef<HTMLButtonElement>(null);
+  const autoMeasureStateRef = useRef<"idle" | "scheduled" | "started">("idle");
 
   const showComparisonStatus = (text: string): void => {
     setComparisonStatus({ settingsKey: comparisonSettingsKey, text });
   };
 
-  const startCapture = async (): Promise<void> => {
+  const startCapture = useCallback(async (): Promise<void> => {
     setCaptureStatus("measuring");
     setCapture(null);
     setReport(null);
@@ -81,7 +84,22 @@ export const StatsOverlay = ({
       setCaptureError(error instanceof Error ? error.message : String(error));
       setCaptureStatus("capture-error");
     }
-  };
+  }, [measurePerformance, settings]);
+
+  useEffect(() => {
+    if (!autoMeasure || autoMeasureStateRef.current !== "idle") return;
+    autoMeasureStateRef.current = "scheduled";
+    const timeoutId = window.setTimeout(() => {
+      autoMeasureStateRef.current = "started";
+      void startCapture();
+    }, 0);
+    return () => {
+      window.clearTimeout(timeoutId);
+      if (autoMeasureStateRef.current === "scheduled") {
+        autoMeasureStateRef.current = "idle";
+      }
+    };
+  }, [autoMeasure, startCapture]);
 
   const copyReport = async (): Promise<void> => {
     if (report === null) return;

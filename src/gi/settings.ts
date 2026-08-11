@@ -45,6 +45,56 @@ export const DEFAULT_SETTINGS: RenderSettings = {
   exposure: 1,
 };
 
+const HEAVY_SETTINGS: Partial<RenderSettings> = {
+  scene: "manyLights",
+  diCandidates: 32,
+  spatialSamples: 8,
+  maxBounces: 6,
+  resolutionScale: 0.75,
+};
+
+const enumValue = <T extends string>(
+  params: URLSearchParams,
+  key: string,
+  values: readonly T[],
+): T | undefined => {
+  const value = params.get(key);
+  return value !== null && values.some((candidate) => candidate === value)
+    ? values.find((candidate) => candidate === value)
+    : undefined;
+};
+
+export const sanitizedRenderQueryParams = (search: string): URLSearchParams => {
+  const source = new URLSearchParams(search);
+  const sanitized = new URLSearchParams();
+  if (source.get("preset") === "heavy") {
+    sanitized.set("preset", "heavy");
+  }
+  const mode = enumValue(source, "mode", RENDER_MODES);
+  if (mode !== undefined) sanitized.set("mode", mode);
+  if (source.get("measure") === "auto") {
+    sanitized.set("measure", "auto");
+  }
+  return sanitized;
+};
+
+/** Query settings are initial conditions; panel changes remain session-local. */
+export const settingsFromSearch = (search: string): RenderSettings => {
+  const params = sanitizedRenderQueryParams(search);
+  const preset = params.get("preset");
+  const base =
+    preset === "heavy"
+      ? { ...DEFAULT_SETTINGS, ...HEAVY_SETTINGS }
+      : { ...DEFAULT_SETTINGS };
+  return {
+    ...base,
+    mode: enumValue(params, "mode", RENDER_MODES) ?? base.mode,
+  };
+};
+
+export const shouldAutoMeasure = (search: string): boolean =>
+  new URLSearchParams(search).get("measure") === "auto";
+
 export const FLAG_DI_ENABLED = 1 << 0;
 export const FLAG_DI_TEMPORAL = 1 << 1;
 export const FLAG_DI_SPATIAL = 1 << 2;
