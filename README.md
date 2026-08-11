@@ -64,6 +64,17 @@ six bounces, and 75% resolution. `measure=auto` starts the standard three-by-fiv
 second capture as soon as the renderer is ready; the completed report remains
 available through `Copy result`.
 
+Equal-time linear-radiance comparisons use similarly short URLs:
+
+- `?preset=heavy&compare=restir`
+- `?preset=heavy&compare=path-traced`
+
+Each comparison builds an independent `Reference PT` oracle for exactly 2,048
+GPU-completion-paced frames, saves it, switches to the requested renderer, and
+captures five seconds of completed GPU work. The comparison report includes the
+camera basis, settings, a-trous variant, frame counts, actual durations, and
+linear-radiance error metrics, and is available through `Copy result`.
+
 ## Pipeline
 
 One frame, in dispatch order (`src/gi/renderer.ts`):

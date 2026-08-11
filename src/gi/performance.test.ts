@@ -326,5 +326,10 @@ describe("performance capture", () => {
     ).toBe(
       "https://example.com/demo?preset=heavy&mode=path-traced&measure=auto",
     );
+    expect(
+      sanitizePerformanceReportUrl(
+        "https://example.com/demo?preset=heavy&compare=restir&mode=path-traced&measure=auto&token=secret",
+      ),
+    ).toBe("https://example.com/demo?preset=heavy&compare=restir");
   });
 });

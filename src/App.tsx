@@ -1,6 +1,6 @@
 import { ControlPanel } from "@/components/ControlPanel";
 import { StatsOverlay } from "@/components/StatsOverlay";
-import { shouldAutoMeasure } from "@/gi/settings";
+import { autoComparisonMode, shouldAutoMeasure } from "@/gi/settings";
 import { useGiRenderer } from "@/hooks/useGiRenderer";
 
 interface OverlayProps {
@@ -40,6 +40,9 @@ export const App = () => {
     status,
     errorMessage,
     measurePerformance,
+    saveComparisonReference,
+    compareReferenceAfter,
+    runAutomaticComparison,
     resetView,
     retryRenderer,
   } = useGiRenderer();
@@ -57,7 +60,11 @@ export const App = () => {
             stats={stats}
             settings={settings}
             measurePerformance={measurePerformance}
+            saveComparisonReference={saveComparisonReference}
+            compareReferenceAfter={compareReferenceAfter}
+            runAutomaticComparison={runAutomaticComparison}
             autoMeasure={shouldAutoMeasure(window.location.search)}
+            autoCompareMode={autoComparisonMode(window.location.search)}
           />
         )}
         {status === "initializing" && (

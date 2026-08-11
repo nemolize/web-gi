@@ -73,6 +73,18 @@ test("loads the heavy benchmark preset from a short query", async ({
   await expect(page.getByLabel("Resolution scale")).toHaveValue("0.75");
 });
 
+test("starts an automatic comparison from the reference renderer", async ({
+  page,
+}) => {
+  await page.goto("/?preset=heavy&compare=path-traced");
+
+  await expect(
+    page.getByRole("radio", { name: "Reference PT" }),
+  ).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByLabel("Scene")).toHaveValue("manyLights");
+  await expect(page.getByLabel("Bounces")).toHaveValue("6");
+});
+
 test("renders finite Denoised PT output when WebGPU is available", async ({
   page,
 }) => {

@@ -10,9 +10,12 @@ import type { CameraBasis, OrbitCamera } from "@/gi/camera";
 import { cameraBasis } from "@/gi/camera";
 import type { LinearImage } from "@/gi/compare";
 import type {
+  ComparisonContext,
+  ComparisonSession,
   CompletionWindowCapture,
-  DevComparisonContext,
-} from "@/gi/dev-hooks";
+  LinearComparisonReport,
+} from "@/gi/comparison-session";
+import { createComparisonSession } from "@/gi/comparison-session";
 import { installDevHooks } from "@/gi/dev-hooks";
 import type { GpuFrameSample } from "@/gi/performance";
 import { MAX_RENDER_PIXELS, resolveRenderSize } from "@/gi/render-size";
@@ -82,6 +85,8 @@ const MAX_TIMED_PASSES = 16;
  * on a phone rendering at five times its display period.
  */
 const PROBE_RING_SIZE = 12;
+const REFERENCE_CAPTURE_TIMEOUT_MS = 5 * 60_000;
+const COMPLETION_WINDOW_TIMEOUT_PADDING_MS = 30_000;
 
 type ProbeSlot = {
   readonly resolve: GPUBuffer;
@@ -341,7 +346,9 @@ export class GiRenderer {
   private previousBasis: CameraBasis | null = null;
   private lastCamera: OrbitCamera | null = null;
   private comparisonInProgress = false;
+  private comparisonAbortController: AbortController | null = null;
   private comparisonGeneration = 0;
+  private readonly comparisonSession: ComparisonSession;
   private lastFrameAt = 0;
   private lastFrameMs = 0;
   private destroyed = false;
@@ -427,11 +434,13 @@ export class GiRenderer {
       };
     }
 
-    installDevHooks(
+    this.comparisonSession = createComparisonSession(
       () => this.captureLinearImage(),
       (durationMs) => this.captureAfterCompletionWindow(durationMs),
+      (frames) => this.captureAfterCompletionFrames(frames),
       () => this.getComparisonContext(),
     );
+    installDevHooks(() => this.captureLinearImage(), this.comparisonSession);
     this.scene = buildScene(settings.scene);
     const uploaded = this.uploadScene(this.scene);
     this.quadBuffer = uploaded.quadBuffer;
@@ -700,6 +709,7 @@ export class GiRenderer {
     const previous = this.settings;
     if (JSON.stringify(previous) !== JSON.stringify(next)) {
       this.comparisonGeneration += 1;
+      this.abortComparison("Render settings changed during the comparison.");
     }
     this.settings = next;
     if (previous.scene !== next.scene) {
@@ -724,6 +734,8 @@ export class GiRenderer {
    * tracer averages full radiance per pixel and has to start over.
    */
   notifyCameraChanged(): void {
+    this.comparisonGeneration += 1;
+    this.abortComparison("The camera moved during the comparison.");
     if (this.settings.mode === "reference") {
       this.resetAccumulation();
     }
@@ -750,6 +762,31 @@ export class GiRenderer {
       frameMs: this.lastFrameMs,
       atrousVariant: this.atrousVariant,
     };
+  }
+
+  saveComparisonReference(): Promise<boolean> {
+    return this.comparisonSession.saveReference();
+  }
+
+  saveComparisonReferenceAfterFrames(frames: number): Promise<boolean> {
+    return this.comparisonSession.saveReferenceAfterFrames(frames);
+  }
+
+  compareReferenceAfter(
+    label: string,
+    durationMs: number,
+  ): Promise<LinearComparisonReport | null> {
+    return this.comparisonSession.compareReferenceAfter(label, durationMs);
+  }
+
+  releaseComparisonResources(): void {
+    this.comparisonSession.clearReference();
+    this.releaseCapture();
+  }
+
+  cancelComparison(message = "The comparison was cancelled."): void {
+    this.comparisonGeneration += 1;
+    this.abortComparison(message);
   }
 
   private resolveSize(): { width: number; height: number } {
@@ -1050,6 +1087,7 @@ export class GiRenderer {
   renderFrame(camera: OrbitCamera): void {
     if (this.lastCamera !== null && !camerasEqual(this.lastCamera, camera)) {
       this.comparisonGeneration += 1;
+      this.abortComparison("The camera moved during the comparison.");
     }
     this.lastCamera = camera;
     if (this.comparisonInProgress) return;
@@ -1257,6 +1295,91 @@ export class GiRenderer {
    * Runs one submitted frame at a time so the comparison window measures work
    * the GPU has completed, independent of display refresh rate and queue depth.
    */
+  private abortComparison(message: string): void {
+    this.comparisonAbortController?.abort(new Error(message));
+  }
+
+  private beginComparison(): AbortController {
+    if (this.comparisonInProgress) {
+      throw new Error("A comparison is already running.");
+    }
+    const controller = new AbortController();
+    this.comparisonInProgress = true;
+    this.comparisonAbortController = controller;
+    return controller;
+  }
+
+  private endComparison(controller: AbortController): void {
+    if (this.comparisonAbortController === controller) {
+      this.comparisonAbortController = null;
+      this.comparisonInProgress = false;
+    }
+  }
+
+  private waitForComparisonOperation<T>(
+    operation: Promise<T>,
+    signal: AbortSignal,
+    deadline: number,
+    failureMessage: string,
+  ): Promise<T> {
+    const remainingMs = deadline - performance.now();
+    if (remainingMs <= 0) {
+      return Promise.reject(new Error("The comparison timed out."));
+    }
+    if (signal.aborted) {
+      return Promise.reject(
+        signal.reason instanceof Error
+          ? signal.reason
+          : new Error("The comparison was cancelled."),
+      );
+    }
+
+    return new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const cleanup = (): boolean => {
+        if (settled) return false;
+        settled = true;
+        window.clearTimeout(timeoutId);
+        signal.removeEventListener("abort", onAbort);
+        return true;
+      };
+      const fail = (error: unknown): void => {
+        if (!cleanup()) return;
+        reject(error instanceof Error ? error : new Error(failureMessage));
+      };
+      const onAbort = (): void => {
+        fail(
+          signal.reason instanceof Error
+            ? signal.reason
+            : new Error("The comparison was cancelled."),
+        );
+      };
+      const timeoutId = window.setTimeout(() => {
+        fail(new Error("The comparison timed out."));
+      }, remainingMs);
+      signal.addEventListener("abort", onAbort, { once: true });
+      void operation.then(
+        (value) => {
+          if (!cleanup()) return;
+          resolve(value);
+        },
+        (error: unknown) => fail(error),
+      );
+    });
+  }
+
+  private waitForSubmittedWork(
+    signal: AbortSignal,
+    deadline: number,
+  ): Promise<void> {
+    return this.waitForComparisonOperation(
+      this.device.queue.onSubmittedWorkDone(),
+      signal,
+      deadline,
+      "GPU completion failed during the comparison.",
+    );
+  }
+
   private async captureAfterCompletionWindow(
     durationMs: number,
   ): Promise<CompletionWindowCapture | null> {
@@ -1270,34 +1393,97 @@ export class GiRenderer {
     ) {
       return null;
     }
-    if (this.comparisonInProgress) {
-      throw new Error("A comparison is already running.");
-    }
-
-    this.comparisonInProgress = true;
+    const controller = this.beginComparison();
+    const generation = this.comparisonGeneration;
+    const deadline =
+      performance.now() + durationMs + COMPLETION_WINDOW_TIMEOUT_PADDING_MS;
     try {
-      await this.device.queue.onSubmittedWorkDone();
+      await this.waitForSubmittedWork(controller.signal, deadline);
       this.resetAccumulation();
       const started = performance.now();
       do {
         this.renderFrameNow(camera);
-        await this.device.queue.onSubmittedWorkDone();
+        await this.waitForSubmittedWork(controller.signal, deadline);
+        if (this.comparisonGeneration !== generation) {
+          throw new Error(
+            "Render configuration changed during the comparison.",
+          );
+        }
       } while (performance.now() - started < durationMs);
       const actualDurationMs = performance.now() - started;
       const frames = this.accumFrames;
-      const image = await this.captureLinearImage();
+      const image = await this.waitForComparisonOperation(
+        this.captureLinearImage(),
+        controller.signal,
+        deadline,
+        "Linear readback failed during the comparison.",
+      );
+      if (this.comparisonGeneration !== generation) {
+        throw new Error("Render configuration changed during the comparison.");
+      }
       return image === null ? null : { image, actualDurationMs, frames };
     } finally {
-      this.comparisonInProgress = false;
+      this.endComparison(controller);
     }
   }
 
-  private getComparisonContext(): DevComparisonContext | null {
+  /** Builds an exact-size oracle without display-refresh pacing. */
+  private async captureAfterCompletionFrames(
+    requestedFrames: number,
+  ): Promise<CompletionWindowCapture | null> {
+    const camera = this.lastCamera;
+    if (
+      camera === null ||
+      this.destroyed ||
+      this.deviceIsLost ||
+      !Number.isInteger(requestedFrames) ||
+      requestedFrames <= 0
+    ) {
+      return null;
+    }
+    const controller = this.beginComparison();
+    const generation = this.comparisonGeneration;
+    const deadline = performance.now() + REFERENCE_CAPTURE_TIMEOUT_MS;
+    try {
+      await this.waitForSubmittedWork(controller.signal, deadline);
+      this.resetAccumulation();
+      const started = performance.now();
+      while (this.accumFrames < requestedFrames) {
+        const beforeFrame = this.accumFrames;
+        this.renderFrameNow(camera);
+        await this.waitForSubmittedWork(controller.signal, deadline);
+        if (this.comparisonGeneration !== generation) {
+          throw new Error(
+            "Render configuration changed during the comparison.",
+          );
+        }
+        if (this.accumFrames === beforeFrame) return null;
+      }
+      const actualDurationMs = performance.now() - started;
+      const image = await this.waitForComparisonOperation(
+        this.captureLinearImage(),
+        controller.signal,
+        deadline,
+        "Linear readback failed during the comparison.",
+      );
+      if (this.comparisonGeneration !== generation) {
+        throw new Error("Render configuration changed during the comparison.");
+      }
+      return image === null
+        ? null
+        : { image, actualDurationMs, frames: this.accumFrames };
+    } finally {
+      this.endComparison(controller);
+    }
+  }
+
+  private getComparisonContext(): ComparisonContext | null {
     const targets = this.targets;
     const camera = this.lastCamera;
     if (targets === null || camera === null) return null;
     const basis = cameraBasis(camera, targets.width / targets.height);
     const referenceDetails = {
+      atrousVariant: this.atrousVariant,
       scene: this.settings.scene,
       maxBounces: this.settings.maxBounces,
       width: targets.width,
@@ -1414,8 +1600,8 @@ export class GiRenderer {
   }
 
   /**
-   * Built on demand so a production bundle never compiles them: the capture
-   * shader is measurement instrumentation and no shipped path calls it.
+   * Built on demand so normal rendering never compiles the measurement-only
+   * capture shader.
    */
   private ensureCapturePipelines(): CapturePipelines {
     const existing = this.capturePipelines;
@@ -1503,6 +1689,7 @@ export class GiRenderer {
 
   destroy(): void {
     if (this.destroyed) return;
+    this.cancelComparison("The renderer stopped during the comparison.");
     this.destroyed = true;
     this.releaseTargets();
     this.quadBuffer.destroy();

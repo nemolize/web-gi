@@ -1,5 +1,9 @@
 import type { LinearImage } from "@/gi/compare";
-import type { DevComparisonContext } from "@/gi/dev-hooks";
+import type {
+  ComparisonContext,
+  CompletionWindowCapture,
+} from "@/gi/comparison-session";
+import { createComparisonSession } from "@/gi/comparison-session";
 import { installDevHooks } from "@/gi/dev-hooks";
 import { DEFAULT_SETTINGS, type RenderMode } from "@/gi/settings";
 
@@ -17,12 +21,13 @@ const image = (value: number): LinearImage => ({
 const comparisonContext = (
   mode: RenderMode,
   runKey: string,
-): DevComparisonContext => ({
+): ComparisonContext => ({
   mode,
   referenceKey: "shared",
   runKey,
   accumFrames: mode === "reference" ? 2_048 : 128,
   details: {
+    atrousVariant: "tiled-16",
     scene: "classic",
     maxBounces: 3,
     width: 1,
@@ -39,7 +44,56 @@ const comparisonContext = (
   },
 });
 
+const installComparisonHooks = (
+  capture: () => Promise<LinearImage | null>,
+  captureAfter: (durationMs: number) => Promise<CompletionWindowCapture | null>,
+  getContext: () => ComparisonContext | null,
+): void => {
+  const comparison = createComparisonSession(
+    capture,
+    captureAfter,
+    captureAfter,
+    getContext,
+  );
+  installDevHooks(capture, comparison);
+};
+
 describe("development comparison hooks", () => {
+  it("records an exact completion-paced reference frame count and duration", async () => {
+    let context = comparisonContext("reference", "reference-run");
+    const captureAfterFrames = vi.fn().mockImplementation((frames: number) => {
+      context = { ...context, accumFrames: frames };
+      return Promise.resolve({
+        image: image(1),
+        actualDurationMs: 25_600,
+        frames,
+      });
+    });
+    const comparison = createComparisonSession(
+      vi.fn().mockResolvedValue(image(1)),
+      vi.fn().mockResolvedValue({
+        image: image(1.1),
+        actualDurationMs: 5_010,
+        frames: 125,
+      }),
+      captureAfterFrames,
+      () => context,
+    );
+
+    await expect(comparison.saveReferenceAfterFrames(2_048)).resolves.toBe(
+      true,
+    );
+    context = comparisonContext("path-traced", "target-run");
+    await expect(
+      comparison.compareReferenceAfter("path-traced", 5_000),
+    ).resolves.toMatchObject({
+      referenceFrames: 2_048,
+      referenceActualDurationMs: 25_600,
+      targetFrames: 125,
+    });
+    expect(captureAfterFrames).toHaveBeenCalledWith(2_048);
+  });
+
   it("keeps a reference capture and scores later renders against it", async () => {
     const capture = vi
       .fn<() => Promise<LinearImage | null>>()
@@ -52,7 +106,7 @@ describe("development comparison hooks", () => {
       frames: 240,
     });
     let context = comparisonContext("reference", "reference-run");
-    installDevHooks(capture, captureAfter, () => context);
+    installComparisonHooks(capture, captureAfter, () => context);
 
     await expect(globalThis.__gi?.saveReference()).resolves.toBe(true);
     context = comparisonContext("path-traced", "path-traced-run");
@@ -79,7 +133,11 @@ describe("development comparison hooks", () => {
   it("only saves Reference PT frames", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const context = comparisonContext("path-traced", "path-traced-run");
-    installDevHooks(vi.fn().mockResolvedValue(null), vi.fn(), () => context);
+    installComparisonHooks(
+      vi.fn().mockResolvedValue(null),
+      vi.fn(),
+      () => context,
+    );
 
     await expect(globalThis.__gi?.saveReference()).rejects.toThrow(
       "Select Reference PT",
@@ -93,7 +151,7 @@ describe("development comparison hooks", () => {
       context = comparisonContext("path-traced", "changed-run");
       return { image: image(1), actualDurationMs: 5_010, frames: 200 };
     });
-    installDevHooks(
+    installComparisonHooks(
       vi.fn().mockResolvedValue(image(1)),
       captureAfter,
       () => context,

@@ -55,6 +55,11 @@ const createFakeRenderer = (): FakeRenderer => {
     notifyCameraChanged: vi.fn(),
     supportsGpuTiming: false,
     setGpuTimingEnabled: vi.fn(),
+    saveComparisonReference: vi.fn().mockResolvedValue(true),
+    saveComparisonReferenceAfterFrames: vi.fn().mockResolvedValue(true),
+    compareReferenceAfter: vi.fn().mockResolvedValue(null),
+    releaseComparisonResources: vi.fn(),
+    cancelComparison: vi.fn(),
     takeGpuSamples: vi.fn(() => []),
     get stats() {
       statsReads += 1;
@@ -85,6 +90,7 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
     retryRenderer,
     updateSettings,
     measurePerformance,
+    runAutomaticComparison,
     resetView,
   } = useGiRenderer(rendererFactory);
   const [capturedCallbacks, setCapturedCallbacks] = useState<number | null>(
@@ -108,6 +114,14 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
       </button>
       <button type="button" onClick={resetView}>
         Reset view
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          void runAutomaticComparison("path-traced", 2_048, 5_000);
+        }}
+      >
+        Auto compare
       </button>
       <button
         type="button"
@@ -433,6 +447,9 @@ describe("useGiRenderer", () => {
         "Performance capture stopped because the page was hidden.",
       ),
     );
+    expect(fake.renderer.cancelComparison).toHaveBeenCalledWith(
+      "Comparison stopped because the page was hidden.",
+    );
   });
 
   it("times out when frames stop arriving", async () => {
@@ -471,6 +488,31 @@ describe("useGiRenderer", () => {
         "Performance capture stopped because the camera moved.",
       ),
     );
+  });
+
+  it("builds an exact reference before switching and releases readback resources", async () => {
+    const fake = createFakeRenderer();
+    const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+
+    render(<RendererHarness rendererFactory={create} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Auto compare" }));
+
+    await waitFor(() =>
+      expect(
+        fake.renderer.saveComparisonReferenceAfterFrames,
+      ).toHaveBeenCalledWith(2_048),
+    );
+    expect(fake.renderer.setSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "path-traced" }),
+    );
+    expect(fake.renderer.compareReferenceAfter).toHaveBeenCalledWith(
+      "path-traced",
+      5_000,
+    );
+    expect(fake.renderer.releaseComparisonResources).toHaveBeenCalledOnce();
   });
 
   it("ignores the destroyed notification from renderer cleanup", async () => {

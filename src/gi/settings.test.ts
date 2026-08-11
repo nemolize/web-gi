@@ -1,4 +1,5 @@
 import {
+  autoComparisonMode,
   DEFAULT_SETTINGS,
   FLAG_DENOISE,
   FLAG_DI_ENABLED,
@@ -42,6 +43,33 @@ describe("render query", () => {
       ).toString(),
     ).toBe("preset=heavy&mode=restir&measure=auto");
     expect(shouldAutoMeasure("?measure=1")).toBe(false);
+  });
+
+  it("starts automatic comparisons in reference mode", () => {
+    const search = "?preset=heavy&compare=path-traced";
+    expect(settingsFromSearch(search)).toEqual({
+      ...DEFAULT_SETTINGS,
+      scene: "manyLights",
+      mode: "reference",
+      diCandidates: 32,
+      spatialSamples: 8,
+      maxBounces: 6,
+      resolutionScale: 0.75,
+    });
+    expect(autoComparisonMode(search)).toBe("path-traced");
+    expect(sanitizedRenderQueryParams(search).toString()).toBe(
+      "preset=heavy&compare=path-traced",
+    );
+  });
+
+  it("does not combine automatic comparison and performance capture", () => {
+    const search = "?compare=restir&mode=path-traced&measure=auto";
+    expect(sanitizedRenderQueryParams(search).toString()).toBe(
+      "compare=restir",
+    );
+    expect(settingsFromSearch(search).mode).toBe("reference");
+    expect(shouldAutoMeasure(search)).toBe(false);
+    expect(autoComparisonMode("?compare=invalid")).toBeNull();
   });
 });
 

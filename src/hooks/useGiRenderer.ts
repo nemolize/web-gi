@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { OrbitCamera } from "@/gi/camera";
 import { DEFAULT_CAMERA, dollyCamera, orbitCamera } from "@/gi/camera";
+import type { LinearComparisonReport } from "@/gi/comparison-session";
 import {
   createPerformanceRecorder,
   PERFORMANCE_CAPTURE_DURATION_MS,
@@ -11,7 +12,7 @@ import {
 } from "@/gi/performance";
 import type { RendererStats } from "@/gi/renderer";
 import { GiRenderer, WebGpuUnsupportedError } from "@/gi/renderer";
-import type { RenderSettings } from "@/gi/settings";
+import type { ComparisonMode, RenderSettings } from "@/gi/settings";
 import { settingsFromSearch } from "@/gi/settings";
 
 export type RendererStatus =
@@ -25,6 +26,16 @@ export type UseGiRenderer = {
   readonly status: RendererStatus;
   readonly errorMessage: string | null;
   readonly measurePerformance: () => Promise<PerformanceMeasurement>;
+  readonly saveComparisonReference: () => Promise<boolean>;
+  readonly compareReferenceAfter: (
+    label: string,
+    durationMs: number,
+  ) => Promise<LinearComparisonReport | null>;
+  readonly runAutomaticComparison: (
+    mode: ComparisonMode,
+    referenceFrames: number,
+    durationMs: number,
+  ) => Promise<LinearComparisonReport | null>;
   readonly resetView: () => void;
   readonly retryRenderer: () => void;
 };
@@ -40,6 +51,11 @@ export type RendererHandle = Pick<
   | "stats"
   | "supportsGpuTiming"
   | "setGpuTimingEnabled"
+  | "saveComparisonReference"
+  | "saveComparisonReferenceAfterFrames"
+  | "compareReferenceAfter"
+  | "releaseComparisonResources"
+  | "cancelComparison"
   | "takeGpuSamples"
 >;
 
@@ -130,6 +146,7 @@ export const useGiRenderer = (
         }
         renderer.setSettings(settingsRef.current);
         rendererRef.current = renderer;
+        setStats(EMPTY_STATS);
         setErrorMessage(null);
         setStatus("running");
 
@@ -294,6 +311,9 @@ export const useGiRenderer = (
         cancelMeasurement(
           "Performance capture stopped because the page was hidden.",
         );
+        rendererRef.current?.cancelComparison(
+          "Comparison stopped because the page was hidden.",
+        );
       }
     };
 
@@ -377,6 +397,7 @@ export const useGiRenderer = (
 
   const retryRenderer = useCallback((): void => {
     setStatus("initializing");
+    setStats(EMPTY_STATS);
     setErrorMessage(null);
     setRendererVersion((version) => version + 1);
   }, []);
@@ -413,6 +434,57 @@ export const useGiRenderer = (
       });
     }, [cancelMeasurement]);
 
+  const saveComparisonReference = useCallback((): Promise<boolean> => {
+    const renderer = rendererRef.current;
+    return renderer === null
+      ? Promise.reject(new Error("The renderer is not running."))
+      : renderer.saveComparisonReference();
+  }, []);
+
+  const compareReferenceAfter = useCallback(
+    (
+      label: string,
+      durationMs: number,
+    ): Promise<LinearComparisonReport | null> => {
+      const renderer = rendererRef.current;
+      return renderer === null
+        ? Promise.reject(new Error("The renderer is not running."))
+        : renderer.compareReferenceAfter(label, durationMs);
+    },
+    [],
+  );
+
+  const runAutomaticComparison = useCallback(
+    async (
+      mode: ComparisonMode,
+      referenceFrames: number,
+      durationMs: number,
+    ): Promise<LinearComparisonReport | null> => {
+      const renderer = rendererRef.current;
+      if (renderer === null) throw new Error("The renderer is not running.");
+      if (measurementRef.current !== null) {
+        throw new Error("A performance capture is already running.");
+      }
+      try {
+        const saved =
+          await renderer.saveComparisonReferenceAfterFrames(referenceFrames);
+        if (!saved) throw new Error("No stable reference frame to save.");
+        if (rendererRef.current !== renderer) {
+          throw new Error("The renderer restarted during the comparison.");
+        }
+
+        const targetSettings = { ...settingsRef.current, mode };
+        settingsRef.current = targetSettings;
+        renderer.setSettings(targetSettings);
+        setSettings(targetSettings);
+        return await renderer.compareReferenceAfter(mode, durationMs);
+      } finally {
+        renderer.releaseComparisonResources();
+      }
+    },
+    [],
+  );
+
   return {
     canvasRef,
     settings,
@@ -421,6 +493,9 @@ export const useGiRenderer = (
     status,
     errorMessage,
     measurePerformance,
+    saveComparisonReference,
+    compareReferenceAfter,
+    runAutomaticComparison,
     resetView,
     retryRenderer,
   };

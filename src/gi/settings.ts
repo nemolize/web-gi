@@ -2,6 +2,8 @@ import type { SceneVariant } from "@/gi/scene";
 
 export const RENDER_MODES = ["restir", "path-traced", "reference"] as const;
 export type RenderMode = (typeof RENDER_MODES)[number];
+export const COMPARISON_MODES = ["restir", "path-traced"] as const;
+export type ComparisonMode = (typeof COMPARISON_MODES)[number];
 
 export type RenderSettings = {
   readonly scene: SceneVariant;
@@ -70,10 +72,15 @@ export const sanitizedRenderQueryParams = (search: string): URLSearchParams => {
   if (source.get("preset") === "heavy") {
     sanitized.set("preset", "heavy");
   }
-  const mode = enumValue(source, "mode", RENDER_MODES);
-  if (mode !== undefined) sanitized.set("mode", mode);
-  if (source.get("measure") === "auto") {
-    sanitized.set("measure", "auto");
+  const comparison = enumValue(source, "compare", COMPARISON_MODES);
+  if (comparison !== undefined) {
+    sanitized.set("compare", comparison);
+  } else {
+    const mode = enumValue(source, "mode", RENDER_MODES);
+    if (mode !== undefined) sanitized.set("mode", mode);
+    if (source.get("measure") === "auto") {
+      sanitized.set("measure", "auto");
+    }
   }
   return sanitized;
 };
@@ -88,12 +95,23 @@ export const settingsFromSearch = (search: string): RenderSettings => {
       : { ...DEFAULT_SETTINGS };
   return {
     ...base,
-    mode: enumValue(params, "mode", RENDER_MODES) ?? base.mode,
+    mode:
+      autoComparisonMode(params) === null
+        ? (enumValue(params, "mode", RENDER_MODES) ?? base.mode)
+        : "reference",
   };
 };
 
 export const shouldAutoMeasure = (search: string): boolean =>
-  new URLSearchParams(search).get("measure") === "auto";
+  sanitizedRenderQueryParams(search).get("measure") === "auto";
+
+export const autoComparisonMode = (
+  search: string | URLSearchParams,
+): ComparisonMode | null => {
+  const params =
+    typeof search === "string" ? new URLSearchParams(search) : search;
+  return enumValue(params, "compare", COMPARISON_MODES) ?? null;
+};
 
 export const FLAG_DI_ENABLED = 1 << 0;
 export const FLAG_DI_TEMPORAL = 1 << 1;
