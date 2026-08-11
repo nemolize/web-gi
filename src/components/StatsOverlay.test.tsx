@@ -236,8 +236,15 @@ describe("StatsOverlay performance capture", () => {
     expect(compareReferenceAfter).toHaveBeenCalledWith("path-traced", 5_000);
   });
 
-  it("automates a converged reference and equal-time comparison once", async () => {
-    const runAutomaticComparison = vi.fn().mockResolvedValue(comparisonReport);
+  it("automates a fixed-size reference and equal-time comparison once", async () => {
+    const automaticComparisonReport = {
+      ...comparisonReport,
+      referenceFrames: 512,
+      referenceActualDurationMs: 6_400,
+    };
+    const runAutomaticComparison = vi
+      .fn()
+      .mockResolvedValue(automaticComparisonReport);
     render(
       <StrictMode>
         <StatsOverlay
@@ -263,7 +270,7 @@ describe("StatsOverlay performance capture", () => {
     expect(runAutomaticComparison).toHaveBeenCalledOnce();
     expect(runAutomaticComparison).toHaveBeenCalledWith(
       "path-traced",
-      2_048,
+      512,
       5_000,
     );
     expect(screen.queryByRole("button", { name: "Measure again" })).toBeNull();
@@ -274,7 +281,7 @@ describe("StatsOverlay performance capture", () => {
     expect(copied).toMatchObject({
       schemaVersion: 1,
       mode: "path-traced",
-      referenceFrames: 2_048,
+      referenceFrames: 512,
       targetFrames: 240,
       relativeL2: 0.01234,
     });
@@ -310,8 +317,13 @@ describe("StatsOverlay performance capture", () => {
   });
 
   it("automates and copies the paired comparison matrix once", async () => {
-    const restirReport = {
+    const pathTracedReport = {
       ...comparisonReport,
+      referenceFrames: 512,
+      referenceActualDurationMs: 6_400,
+    };
+    const restirReport = {
+      ...pathTracedReport,
       label: "restir",
       mode: "restir" as const,
       context: {
@@ -321,7 +333,7 @@ describe("StatsOverlay performance capture", () => {
     };
     const matrixReport = {
       kind: "comparison-matrix" as const,
-      requestedReferenceFrames: 2_048,
+      requestedReferenceFrames: 512,
       requestedDurationMs: 5_000,
       cases: [
         {
@@ -332,7 +344,7 @@ describe("StatsOverlay performance capture", () => {
           runOrder: ["restir", "path-traced"] as const,
           comparisons: {
             restir: restirReport,
-            "path-traced": comparisonReport,
+            "path-traced": pathTracedReport,
           },
         },
       ],
@@ -371,7 +383,7 @@ describe("StatsOverlay performance capture", () => {
     ).toBeVisible();
     expect(runAutomaticComparisonMatrix).toHaveBeenCalledOnce();
     expect(runAutomaticComparisonMatrix).toHaveBeenCalledWith(
-      2_048,
+      512,
       5_000,
       expect.any(Function),
     );
@@ -382,7 +394,7 @@ describe("StatsOverlay performance capture", () => {
     expect(copied).toMatchObject({
       schemaVersion: 1,
       kind: "comparison-matrix",
-      requestedReferenceFrames: 2_048,
+      requestedReferenceFrames: 512,
       cases: [{ label: "classic/front" }],
     });
   });

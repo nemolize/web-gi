@@ -49,7 +49,7 @@ type CaptureStatus =
   "idle" | "measuring" | "ready" | "copied" | "capture-error" | "copy-error";
 
 export const COMPARISON_DURATION_MS = 5_000;
-export const AUTO_COMPARISON_REFERENCE_FRAMES = 2_048;
+export const AUTO_COMPARISON_REFERENCE_FRAMES = 512;
 
 type EnvironmentReportContext = Omit<PerformanceReportContext, "settings">;
 

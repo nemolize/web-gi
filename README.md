@@ -71,14 +71,17 @@ Equal-time linear-radiance comparisons use similarly short URLs:
 - `?preset=heavy&compare=path-traced`
 
 The matrix preset runs the Cornell box and 30-light scene from the front, left,
-and right-high views. It builds one exact 2,048-frame, GPU-completion-paced
+and right-high views. It builds one exact 512-frame, GPU-completion-paced
 `Reference PT` oracle per view and compares both ReSTIR and Denoised PT against
 that shared image for five seconds each, alternating their run order between
 views to reduce systematic thermal-order bias. The individual URLs run the same
 process for one renderer at the default view. Reports include the camera basis,
 settings, a-trous variant, frame counts, actual durations, and linear-radiance
 error metrics, and remain available through `Copy result`. Keep the page visible
-and unchanged while the several-minute matrix is running.
+and unchanged while the several-minute matrix is running. The automatic
+512-frame reference is a mobile runtime/quality compromise; higher-confidence
+validation can use the development controls to save a longer reference, with
+the actual frame count retained in the report.
 
 ## Pipeline
 
