@@ -85,6 +85,20 @@ test("starts an automatic comparison from the reference renderer", async ({
   await expect(page.getByLabel("Bounces")).toHaveValue("6");
 });
 
+test("loads the paired comparison matrix from one preset", async ({ page }) => {
+  await page.goto(
+    "/?preset=matrix&compare=restir&mode=path-traced&measure=auto",
+  );
+
+  await expect(page).toHaveURL(/\?preset=matrix/);
+  await expect(
+    page.getByRole("radio", { name: "Reference PT" }),
+  ).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByLabel("RIS candidates")).toHaveValue("32");
+  await expect(page.getByLabel("Spatial neighbours")).toHaveValue("8");
+  await expect(page.getByLabel("Bounces")).toHaveValue("6");
+});
+
 test("renders finite Denoised PT output when WebGPU is available", async ({
   page,
 }) => {

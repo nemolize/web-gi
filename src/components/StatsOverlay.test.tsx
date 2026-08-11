@@ -9,6 +9,7 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StatsOverlay } from "@/components/StatsOverlay";
+import { DEFAULT_CAMERA } from "@/gi/camera";
 import type { PerformanceMeasurement } from "@/gi/performance";
 import { DEFAULT_SETTINGS } from "@/gi/settings";
 
@@ -79,6 +80,12 @@ const inertComparisonProps = () => ({
   saveComparisonReference: vi.fn().mockResolvedValue(false),
   compareReferenceAfter: vi.fn().mockResolvedValue(null),
   runAutomaticComparison: vi.fn().mockResolvedValue(null),
+  runAutomaticComparisonMatrix: vi.fn().mockResolvedValue({
+    kind: "comparison-matrix",
+    requestedReferenceFrames: 2_048,
+    requestedDurationMs: 5_000,
+    cases: [],
+  }),
 });
 
 describe("StatsOverlay performance capture", () => {
@@ -198,6 +205,7 @@ describe("StatsOverlay performance capture", () => {
         saveComparisonReference={saveReference}
         compareReferenceAfter={compareReferenceAfter}
         runAutomaticComparison={vi.fn().mockResolvedValue(null)}
+        runAutomaticComparisonMatrix={vi.fn()}
         stats={stats}
         settings={{ ...DEFAULT_SETTINGS, mode: "reference" }}
         measurePerformance={measurePerformance}
@@ -212,6 +220,7 @@ describe("StatsOverlay performance capture", () => {
         saveComparisonReference={saveReference}
         compareReferenceAfter={compareReferenceAfter}
         runAutomaticComparison={vi.fn().mockResolvedValue(null)}
+        runAutomaticComparisonMatrix={vi.fn()}
         stats={stats}
         settings={{ ...DEFAULT_SETTINGS, mode: "path-traced" }}
         measurePerformance={measurePerformance}
@@ -298,6 +307,84 @@ describe("StatsOverlay performance capture", () => {
       ),
     ).toBeVisible();
     expect(screen.getByText("Render settings changed")).toBeVisible();
+  });
+
+  it("automates and copies the paired comparison matrix once", async () => {
+    const restirReport = {
+      ...comparisonReport,
+      label: "restir",
+      mode: "restir" as const,
+      context: {
+        ...comparisonReport.context,
+        settings: { ...DEFAULT_SETTINGS, mode: "restir" as const },
+      },
+    };
+    const matrixReport = {
+      kind: "comparison-matrix" as const,
+      requestedReferenceFrames: 2_048,
+      requestedDurationMs: 5_000,
+      cases: [
+        {
+          label: "classic/front",
+          scene: "classic" as const,
+          cameraLabel: "front",
+          camera: DEFAULT_CAMERA,
+          runOrder: ["restir", "path-traced"] as const,
+          comparisons: {
+            restir: restirReport,
+            "path-traced": comparisonReport,
+          },
+        },
+      ],
+    };
+    const runAutomaticComparisonMatrix = vi
+      .fn()
+      .mockImplementation(async (_frames, _duration, onProgress) => {
+        onProgress({
+          caseIndex: 1,
+          totalCases: 1,
+          entry: matrixReport.cases[0],
+          phase: "reference",
+        });
+        return matrixReport;
+      });
+
+    render(
+      <StatsOverlay
+        {...inertComparisonProps()}
+        runAutomaticComparisonMatrix={runAutomaticComparisonMatrix}
+        measurePerformance={vi.fn()}
+        autoCompareMode="matrix"
+        stats={{
+          width: 640,
+          height: 480,
+          accumFrames: 1,
+          frameMs: 12,
+          atrousVariant: "tiled-16",
+        }}
+        settings={{ ...DEFAULT_SETTINGS, mode: "reference" }}
+      />,
+    );
+
+    expect(
+      await screen.findByText("1 cases · 2 comparisons complete"),
+    ).toBeVisible();
+    expect(runAutomaticComparisonMatrix).toHaveBeenCalledOnce();
+    expect(runAutomaticComparisonMatrix).toHaveBeenCalledWith(
+      2_048,
+      5_000,
+      expect.any(Function),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy result" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+    const copied = JSON.parse(writeText.mock.calls[0]?.[0] ?? "");
+    expect(copied).toMatchObject({
+      schemaVersion: 1,
+      kind: "comparison-matrix",
+      requestedReferenceFrames: 2_048,
+      cases: [{ label: "classic/front" }],
+    });
   });
 
   it("allows retrying after capture failure", async () => {

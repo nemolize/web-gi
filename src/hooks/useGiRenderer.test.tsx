@@ -9,7 +9,15 @@ import {
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { cameraBasis, DEFAULT_CAMERA } from "@/gi/camera";
+import {
+  COMPARISON_MATRIX_CASES,
+  COMPARISON_MATRIX_RUN_ORDERS,
+  type LinearComparisonMatrixReport,
+} from "@/gi/comparison-matrix";
+import type { LinearComparisonReport } from "@/gi/comparison-session";
 import type { DeviceLossInfo, RendererStats } from "@/gi/renderer";
+import { DEFAULT_SETTINGS } from "@/gi/settings";
 import type { RendererFactory, RendererHandle } from "@/hooks/useGiRenderer";
 import {
   PERFORMANCE_CAPTURE_TIMEOUT_MS,
@@ -19,6 +27,9 @@ import {
 type FakeRenderer = {
   readonly renderer: RendererHandle;
   readonly destroy: ReturnType<typeof vi.fn>;
+  readonly compareReferenceAfter: ReturnType<
+    typeof vi.fn<RendererHandle["compareReferenceAfter"]>
+  >;
   readonly lose: (reason: GPUDeviceLostReason, message?: string) => void;
   readonly setStats: (patch: Partial<RendererStats>) => void;
   readonly statsReadCount: () => number;
@@ -46,6 +57,9 @@ const createFakeRenderer = (): FakeRenderer => {
     atrousVariant: "fallback",
   };
   let statsReads = 0;
+  const compareReferenceAfter = vi
+    .fn<RendererHandle["compareReferenceAfter"]>()
+    .mockResolvedValue(null);
   const renderer = {
     deviceLost,
     destroy,
@@ -57,7 +71,7 @@ const createFakeRenderer = (): FakeRenderer => {
     setGpuTimingEnabled: vi.fn(),
     saveComparisonReference: vi.fn().mockResolvedValue(true),
     saveComparisonReferenceAfterFrames: vi.fn().mockResolvedValue(true),
-    compareReferenceAfter: vi.fn().mockResolvedValue(null),
+    compareReferenceAfter,
     releaseComparisonResources: vi.fn(),
     cancelComparison: vi.fn(),
     takeGpuSamples: vi.fn(() => []),
@@ -70,6 +84,7 @@ const createFakeRenderer = (): FakeRenderer => {
   return {
     renderer,
     destroy,
+    compareReferenceAfter,
     lose,
     setStats: (patch) => {
       stats = { ...stats, ...patch };
@@ -91,12 +106,16 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
     updateSettings,
     measurePerformance,
     runAutomaticComparison,
+    runAutomaticComparisonMatrix,
     resetView,
   } = useGiRenderer(rendererFactory);
   const [capturedCallbacks, setCapturedCallbacks] = useState<number | null>(
     null,
   );
   const [captureError, setCaptureError] = useState<string | null>(null);
+  const [matrixCases, setMatrixCases] = useState<number | null>(null);
+  const [matrixReport, setMatrixReport] =
+    useState<LinearComparisonMatrixReport | null>(null);
 
   return (
     <>
@@ -126,6 +145,19 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
       <button
         type="button"
         onClick={() => {
+          void runAutomaticComparisonMatrix(2_048, 5_000, () => undefined).then(
+            (report) => {
+              setMatrixCases(report.cases.length);
+              setMatrixReport(report);
+            },
+          );
+        }}
+      >
+        Auto compare matrix
+      </button>
+      <button
+        type="button"
+        onClick={() => {
           void measurePerformance()
             .then((measurement) => {
               setCapturedCallbacks(measurement.measurement.sampling.callbacks);
@@ -141,6 +173,10 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
       </button>
       <output data-testid="captured-callbacks">{capturedCallbacks}</output>
       <output data-testid="capture-error">{captureError}</output>
+      <output data-testid="matrix-cases">{matrixCases}</output>
+      <output data-testid="matrix-report">
+        {matrixReport === null ? null : JSON.stringify(matrixReport)}
+      </output>
     </>
   );
 };
@@ -513,6 +549,126 @@ describe("useGiRenderer", () => {
       5_000,
     );
     expect(fake.renderer.releaseComparisonResources).toHaveBeenCalledOnce();
+  });
+
+  it("shares one reference between both renderers in every matrix case", async () => {
+    window.history.replaceState(null, "", "/?preset=matrix");
+    const fake = createFakeRenderer();
+    let currentSettings = DEFAULT_SETTINGS;
+    let currentCamera = DEFAULT_CAMERA;
+    vi.mocked(fake.renderer.setSettings).mockImplementation((settings) => {
+      currentSettings = settings;
+    });
+    vi.mocked(fake.renderer.renderFrame).mockImplementation((camera) => {
+      currentCamera = camera;
+    });
+    fake.compareReferenceAfter.mockImplementation((label) => {
+      if (label !== "restir" && label !== "path-traced") {
+        throw new Error(`Unexpected comparison mode: ${label}`);
+      }
+      const mode = label;
+      return Promise.resolve({
+        luminanceRatio: 1,
+        relativeL2: 0.01,
+        meanAbsolute: 0.02,
+        maxAbsolute: 0.5,
+        outliers: 1,
+        pixels: 640 * 480,
+        label,
+        mode,
+        requestedDurationMs: 5_000,
+        actualDurationMs: 5_010,
+        targetFrames: mode === "restir" ? 50 : 80,
+        referenceFrames: 2_048,
+        referenceActualDurationMs: 60_000,
+        context: {
+          atrousVariant: "tiled-16",
+          scene: currentSettings.scene,
+          maxBounces: currentSettings.maxBounces,
+          width: 640,
+          height: 480,
+          camera: cameraBasis(currentCamera, 4 / 3),
+          settings: currentSettings,
+        },
+      } satisfies LinearComparisonReport);
+    });
+    const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+
+    render(<RendererHarness rendererFactory={create} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Auto compare matrix" }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("matrix-cases")).toHaveTextContent("6"),
+    );
+    expect(
+      fake.renderer.saveComparisonReferenceAfterFrames,
+    ).toHaveBeenCalledTimes(6);
+    expect(fake.renderer.compareReferenceAfter).toHaveBeenCalledTimes(12);
+    expect(fake.compareReferenceAfter.mock.calls).toEqual(
+      Array.from({ length: 6 }, (_, index) =>
+        index % 2 === 0
+          ? [
+              ["restir", 5_000],
+              ["path-traced", 5_000],
+            ]
+          : [
+              ["path-traced", 5_000],
+              ["restir", 5_000],
+            ],
+      ).flat(),
+    );
+
+    const saves = vi.mocked(fake.renderer.saveComparisonReferenceAfterFrames)
+      .mock.invocationCallOrder;
+    const comparisons = fake.compareReferenceAfter.mock.invocationCallOrder;
+    for (let index = 0; index < saves.length; index++) {
+      expect(saves[index]).toBeLessThan(comparisons[index * 2] ?? 0);
+      expect(comparisons[index * 2]).toBeLessThan(
+        comparisons[index * 2 + 1] ?? 0,
+      );
+      if (index + 1 < saves.length) {
+        expect(comparisons[index * 2 + 1]).toBeLessThan(saves[index + 1] ?? 0);
+      }
+    }
+    expect(fake.renderer.releaseComparisonResources).toHaveBeenCalledTimes(6);
+
+    const matrix: unknown = JSON.parse(
+      screen.getByTestId("matrix-report").textContent ?? "null",
+    );
+    expect(matrix).toMatchObject({
+      cases: COMPARISON_MATRIX_CASES.map((entry, index) => ({
+        label: entry.label,
+        scene: entry.scene,
+        camera: entry.camera,
+        runOrder:
+          index % 2 === 0
+            ? COMPARISON_MATRIX_RUN_ORDERS[0]
+            : COMPARISON_MATRIX_RUN_ORDERS[1],
+        comparisons: {
+          restir: {
+            context: {
+              scene: entry.scene,
+              camera: JSON.parse(
+                JSON.stringify(cameraBasis(entry.camera, 4 / 3)),
+              ),
+            },
+          },
+          "path-traced": {
+            context: {
+              scene: entry.scene,
+              camera: JSON.parse(
+                JSON.stringify(cameraBasis(entry.camera, 4 / 3)),
+              ),
+            },
+          },
+        },
+      })),
+    });
   });
 
   it("ignores the destroyed notification from renderer cleanup", async () => {

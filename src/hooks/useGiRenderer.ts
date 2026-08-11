@@ -3,6 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { OrbitCamera } from "@/gi/camera";
 import { DEFAULT_CAMERA, dollyCamera, orbitCamera } from "@/gi/camera";
+import {
+  COMPARISON_MATRIX_CASES,
+  COMPARISON_MATRIX_RUN_ORDERS,
+  type ComparisonMatrixProgress,
+  type LinearComparisonMatrixReport,
+} from "@/gi/comparison-matrix";
 import type { LinearComparisonReport } from "@/gi/comparison-session";
 import {
   createPerformanceRecorder,
@@ -36,6 +42,11 @@ export type UseGiRenderer = {
     referenceFrames: number,
     durationMs: number,
   ) => Promise<LinearComparisonReport | null>;
+  readonly runAutomaticComparisonMatrix: (
+    referenceFrames: number,
+    durationMs: number,
+    onProgress: (progress: ComparisonMatrixProgress) => void,
+  ) => Promise<LinearComparisonMatrixReport>;
   readonly resetView: () => void;
   readonly retryRenderer: () => void;
 };
@@ -485,6 +496,103 @@ export const useGiRenderer = (
     [],
   );
 
+  const runAutomaticComparisonMatrix = useCallback(
+    async (
+      referenceFrames: number,
+      durationMs: number,
+      onProgress: (progress: ComparisonMatrixProgress) => void,
+    ): Promise<LinearComparisonMatrixReport> => {
+      const renderer = rendererRef.current;
+      if (renderer === null) throw new Error("The renderer is not running.");
+      if (measurementRef.current !== null) {
+        throw new Error("A performance capture is already running.");
+      }
+
+      const requireActiveRenderer = (): void => {
+        if (rendererRef.current !== renderer) {
+          throw new Error("The renderer restarted during the comparison.");
+        }
+        if (document.visibilityState !== "visible") {
+          throw new Error("Comparison stopped because the page was hidden.");
+        }
+      };
+      const applyView = (
+        scene: (typeof COMPARISON_MATRIX_CASES)[number]["scene"],
+        mode: RenderSettings["mode"],
+        camera: OrbitCamera,
+      ): void => {
+        requireActiveRenderer();
+        const nextSettings = { ...settingsRef.current, scene, mode };
+        cameraRef.current = camera;
+        settingsRef.current = nextSettings;
+        renderer.setSettings(nextSettings);
+        setSettings(nextSettings);
+        renderer.renderFrame(camera);
+      };
+
+      const cases: LinearComparisonMatrixReport["cases"][number][] = [];
+      for (const [caseOffset, entry] of COMPARISON_MATRIX_CASES.entries()) {
+        try {
+          const caseIndex = caseOffset + 1;
+          const runOrder =
+            caseOffset % 2 === 0
+              ? COMPARISON_MATRIX_RUN_ORDERS[0]
+              : COMPARISON_MATRIX_RUN_ORDERS[1];
+          onProgress({
+            caseIndex,
+            totalCases: COMPARISON_MATRIX_CASES.length,
+            entry,
+            phase: "reference",
+          });
+          applyView(entry.scene, "reference", entry.camera);
+          const saved =
+            await renderer.saveComparisonReferenceAfterFrames(referenceFrames);
+          requireActiveRenderer();
+          if (!saved) throw new Error("No stable reference frame to save.");
+
+          let restir: LinearComparisonReport | null = null;
+          let pathTraced: LinearComparisonReport | null = null;
+          for (const mode of runOrder) {
+            onProgress({
+              caseIndex,
+              totalCases: COMPARISON_MATRIX_CASES.length,
+              entry,
+              phase: mode,
+            });
+            applyView(entry.scene, mode, entry.camera);
+            const report = await renderer.compareReferenceAfter(
+              mode,
+              durationMs,
+            );
+            requireActiveRenderer();
+            if (report === null) {
+              throw new Error("The comparison did not produce a capture.");
+            }
+            if (mode === "restir") restir = report;
+            else pathTraced = report;
+          }
+          if (restir === null || pathTraced === null) {
+            throw new Error("The comparison matrix is incomplete.");
+          }
+          cases.push({
+            ...entry,
+            runOrder,
+            comparisons: { restir, "path-traced": pathTraced },
+          });
+        } finally {
+          renderer.releaseComparisonResources();
+        }
+      }
+      return {
+        kind: "comparison-matrix",
+        requestedReferenceFrames: referenceFrames,
+        requestedDurationMs: durationMs,
+        cases,
+      };
+    },
+    [],
+  );
+
   return {
     canvasRef,
     settings,
@@ -496,6 +604,7 @@ export const useGiRenderer = (
     saveComparisonReference,
     compareReferenceAfter,
     runAutomaticComparison,
+    runAutomaticComparisonMatrix,
     resetView,
     retryRenderer,
   };

@@ -71,6 +71,23 @@ describe("render query", () => {
     expect(shouldAutoMeasure(search)).toBe(false);
     expect(autoComparisonMode("?compare=invalid")).toBeNull();
   });
+
+  it("loads the paired comparison matrix as one self-contained preset", () => {
+    const search =
+      "?preset=matrix&compare=restir&mode=path-traced&measure=auto&token=secret";
+    expect(settingsFromSearch(search)).toEqual({
+      ...DEFAULT_SETTINGS,
+      scene: "manyLights",
+      mode: "reference",
+      diCandidates: 32,
+      spatialSamples: 8,
+      maxBounces: 6,
+      resolutionScale: 0.75,
+    });
+    expect(autoComparisonMode(search)).toBe("matrix");
+    expect(shouldAutoMeasure(search)).toBe(false);
+    expect(sanitizedRenderQueryParams(search).toString()).toBe("preset=matrix");
+  });
 });
 
 describe("packFlags", () => {

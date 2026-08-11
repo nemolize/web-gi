@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type {
+  ComparisonMatrixProgress,
+  LinearComparisonMatrixReport,
+} from "@/gi/comparison-matrix";
 import type { LinearComparisonReport } from "@/gi/comparison-session";
 import {
   aggregatePerformanceMeasurements,
@@ -12,7 +16,11 @@ import {
   sanitizePerformanceReportUrl,
 } from "@/gi/performance";
 import type { RendererStats } from "@/gi/renderer";
-import type { ComparisonMode, RenderSettings } from "@/gi/settings";
+import type {
+  AutoComparisonMode,
+  ComparisonMode,
+  RenderSettings,
+} from "@/gi/settings";
 
 export type StatsOverlayProps = {
   readonly stats: RendererStats;
@@ -28,8 +36,13 @@ export type StatsOverlayProps = {
     referenceFrames: number,
     durationMs: number,
   ) => Promise<LinearComparisonReport | null>;
+  readonly runAutomaticComparisonMatrix: (
+    referenceFrames: number,
+    durationMs: number,
+    onProgress: (progress: ComparisonMatrixProgress) => void,
+  ) => Promise<LinearComparisonMatrixReport>;
   readonly autoMeasure?: boolean;
-  readonly autoCompareMode?: ComparisonMode | null;
+  readonly autoCompareMode?: AutoComparisonMode | null;
 };
 
 type CaptureStatus =
@@ -56,7 +69,7 @@ const createReportContext = (
 });
 
 const formatLinearComparisonReport = (
-  comparison: LinearComparisonReport,
+  comparison: LinearComparisonReport | LinearComparisonMatrixReport,
 ): string =>
   JSON.stringify(
     {
@@ -75,6 +88,7 @@ export const StatsOverlay = ({
   saveComparisonReference,
   compareReferenceAfter,
   runAutomaticComparison,
+  runAutomaticComparisonMatrix,
   autoMeasure = false,
   autoCompareMode = null,
 }: StatsOverlayProps) => {
@@ -164,13 +178,31 @@ export const StatsOverlay = ({
       setCaptureError(null);
       setCaptureStatus("idle");
       setAutoComparisonStatus(
-        `Building ${String(AUTO_COMPARISON_REFERENCE_FRAMES)}-frame reference, then comparing ${autoCompareMode} for ${String(COMPARISON_DURATION_MS / 1_000)} seconds…`,
+        autoCompareMode === "matrix"
+          ? "Starting the comparison matrix…"
+          : `Building ${String(AUTO_COMPARISON_REFERENCE_FRAMES)}-frame reference, then comparing ${autoCompareMode} for ${String(COMPARISON_DURATION_MS / 1_000)} seconds…`,
       );
-      void runAutomaticComparison(
-        autoCompareMode,
-        AUTO_COMPARISON_REFERENCE_FRAMES,
-        COMPARISON_DURATION_MS,
-      )
+      const comparisonPromise =
+        autoCompareMode === "matrix"
+          ? runAutomaticComparisonMatrix(
+              AUTO_COMPARISON_REFERENCE_FRAMES,
+              COMPARISON_DURATION_MS,
+              ({ caseIndex, totalCases, entry, phase }) => {
+                const action =
+                  phase === "reference"
+                    ? `building ${String(AUTO_COMPARISON_REFERENCE_FRAMES)}-frame reference`
+                    : `comparing ${phase} for ${String(COMPARISON_DURATION_MS / 1_000)} seconds`;
+                setAutoComparisonStatus(
+                  `${String(caseIndex)}/${String(totalCases)} · ${entry.label} · ${action}…`,
+                );
+              },
+            )
+          : runAutomaticComparison(
+              autoCompareMode,
+              AUTO_COMPARISON_REFERENCE_FRAMES,
+              COMPARISON_DURATION_MS,
+            );
+      void comparisonPromise
         .then((comparison) => {
           if (comparison === null) {
             throw new Error("The comparison did not produce a capture.");
@@ -179,7 +211,15 @@ export const StatsOverlay = ({
           setCaptureStatus("ready");
           setIsComparing(false);
           setAutoComparisonStatus(
-            `${comparison.mode} · relative L2 ${comparison.relativeL2.toFixed(4)} · mean absolute ${comparison.meanAbsolute.toFixed(4)} · ${String(comparison.targetFrames)} frames in ${(comparison.actualDurationMs / 1_000).toFixed(2)} s`,
+            "kind" in comparison
+              ? `${String(comparison.cases.length)} cases · ${String(
+                  comparison.cases.reduce(
+                    (total, entry) =>
+                      total + Object.keys(entry.comparisons).length,
+                    0,
+                  ),
+                )} comparisons complete`
+              : `${comparison.mode} · relative L2 ${comparison.relativeL2.toFixed(4)} · mean absolute ${comparison.meanAbsolute.toFixed(4)} · ${String(comparison.targetFrames)} frames in ${(comparison.actualDurationMs / 1_000).toFixed(2)} s`,
           );
         })
         .catch((error: unknown) => {
@@ -200,6 +240,7 @@ export const StatsOverlay = ({
   }, [
     autoCompareMode,
     runAutomaticComparison,
+    runAutomaticComparisonMatrix,
     settings.mode,
     stats.accumFrames,
   ]);

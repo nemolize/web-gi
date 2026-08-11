@@ -43,6 +43,7 @@ export const App = () => {
     saveComparisonReference,
     compareReferenceAfter,
     runAutomaticComparison,
+    runAutomaticComparisonMatrix,
     resetView,
     retryRenderer,
   } = useGiRenderer();
@@ -63,6 +64,7 @@ export const App = () => {
             saveComparisonReference={saveComparisonReference}
             compareReferenceAfter={compareReferenceAfter}
             runAutomaticComparison={runAutomaticComparison}
+            runAutomaticComparisonMatrix={runAutomaticComparisonMatrix}
             autoMeasure={shouldAutoMeasure(window.location.search)}
             autoCompareMode={autoComparisonMode(window.location.search)}
           />

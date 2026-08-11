@@ -4,6 +4,7 @@ export const RENDER_MODES = ["restir", "path-traced", "reference"] as const;
 export type RenderMode = (typeof RENDER_MODES)[number];
 export const COMPARISON_MODES = ["restir", "path-traced"] as const;
 export type ComparisonMode = (typeof COMPARISON_MODES)[number];
+export type AutoComparisonMode = ComparisonMode | "matrix";
 
 export type RenderSettings = {
   readonly scene: SceneVariant;
@@ -69,6 +70,10 @@ const enumValue = <T extends string>(
 export const sanitizedRenderQueryParams = (search: string): URLSearchParams => {
   const source = new URLSearchParams(search);
   const sanitized = new URLSearchParams();
+  if (source.get("preset") === "matrix") {
+    sanitized.set("preset", "matrix");
+    return sanitized;
+  }
   if (source.get("preset") === "heavy") {
     sanitized.set("preset", "heavy");
   }
@@ -90,7 +95,7 @@ export const settingsFromSearch = (search: string): RenderSettings => {
   const params = sanitizedRenderQueryParams(search);
   const preset = params.get("preset");
   const base =
-    preset === "heavy"
+    preset === "heavy" || preset === "matrix"
       ? { ...DEFAULT_SETTINGS, ...HEAVY_SETTINGS }
       : { ...DEFAULT_SETTINGS };
   return {
@@ -107,9 +112,10 @@ export const shouldAutoMeasure = (search: string): boolean =>
 
 export const autoComparisonMode = (
   search: string | URLSearchParams,
-): ComparisonMode | null => {
+): AutoComparisonMode | null => {
   const params =
     typeof search === "string" ? new URLSearchParams(search) : search;
+  if (params.get("preset") === "matrix") return "matrix";
   return enumValue(params, "compare", COMPARISON_MODES) ?? null;
 };
 
