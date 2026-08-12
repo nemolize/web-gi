@@ -383,7 +383,7 @@ describe("StatsOverlay performance capture", () => {
 
     expect(
       await screen.findByText(
-        "1 cases · relative L2 wins by scene: classic ReSTIR 1/1",
+        "1 cases · relative L2 wins by scene: classic ReSTIR 1/Denoised PT 0",
       ),
     ).toBeVisible();
     expect(runAutomaticComparisonMatrix).toHaveBeenCalledOnce();
@@ -402,15 +402,12 @@ describe("StatsOverlay performance capture", () => {
       requestedReferenceFrames: 1_024,
       cases: [{ label: "classic/front" }],
     });
-    // The per-scene split travels with the raw numbers, so the breakdown
-    // survives being pasted somewhere rather than being recomputed by hand.
     expect(copied.summary.byScene).toHaveLength(1);
     expect(copied.summary.byScene[0].scope).toBe("classic");
-    expect(
-      copied.summary.byScene[0].tallies.find(
-        (tally: { metric: string }) => tally.metric === "relativeL2",
-      ).wins,
-    ).toEqual({ restir: 1, "path-traced": 0 });
+    expect(copied.summary.byScene[0].tallies.relativeL2.wins).toEqual({
+      restir: 1,
+      "path-traced": 0,
+    });
   });
 
   it("allows retrying after capture failure", async () => {

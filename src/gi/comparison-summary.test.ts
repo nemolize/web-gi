@@ -5,6 +5,7 @@ import type {
 } from "@/gi/comparison-matrix";
 import type { LinearComparisonReport } from "@/gi/comparison-session";
 import {
+  COMPARISON_METRICS,
   formatComparisonMatrixSummary,
   metricValue,
   summarizeComparisonMatrix,
@@ -107,10 +108,21 @@ describe("metricValue", () => {
 });
 
 describe("summarizeComparisonMatrix", () => {
+  it("scores exactly the metrics it advertises", () => {
+    // The tally record is built key-by-key, so a metric added to
+    // COMPARISON_METRICS without a matching key would go silently unscored.
+    const summary = summarizeComparisonMatrix(
+      matrix([matrixCase("classic", "front", {}, {})]),
+    );
+    expect(Object.keys(summary.overall.tallies).sort()).toEqual(
+      [...COMPARISON_METRICS].sort(),
+    );
+    expect(Object.keys(summary.cases[0]?.metrics ?? {}).sort()).toEqual(
+      [...COMPARISON_METRICS].sort(),
+    );
+  });
+
   it("splits a verdict that the overall tally hides", () => {
-    // The case this summary exists for: ReSTIR sweeps the 30-light scene and
-    // loses the Cornell box. The overall tally is a 3-3 split that reads as
-    // "no difference", while the per-scene view shows two clean sweeps.
     const summary = summarizeComparisonMatrix(
       matrix([
         matrixCase("classic", "front", { relativeL2: 2 }, { relativeL2: 1 }),
@@ -132,15 +144,15 @@ describe("summarizeComparisonMatrix", () => {
       ]),
     );
 
-    const overall = summary.overall.tallies.find(
-      (tally) => tally.metric === "relativeL2",
-    );
-    expect(overall?.wins).toEqual({ restir: 3, "path-traced": 3 });
+    expect(summary.overall.tallies.relativeL2.wins).toEqual({
+      restir: 3,
+      "path-traced": 3,
+    });
 
     expect(
       summary.byScene.map(({ scope, tallies }) => ({
         scope,
-        wins: tallies.find((tally) => tally.metric === "relativeL2")?.wins,
+        wins: tallies.relativeL2.wins,
       })),
     ).toEqual([
       { scope: "classic", wins: { restir: 0, "path-traced": 3 } },
@@ -160,32 +172,50 @@ describe("summarizeComparisonMatrix", () => {
       ]),
     );
 
-    const winners = Object.fromEntries(
-      (summary.cases[0]?.metrics ?? []).map((verdict) => [
-        verdict.metric,
-        verdict.winner,
-      ]),
-    );
-    expect(winners["relativeL2"]).toBe("restir");
-    expect(winners["meanAbsolute"]).toBe("path-traced");
+    const metrics = summary.cases[0]?.metrics;
+    expect(metrics?.relativeL2.winner).toBe("restir");
+    expect(metrics?.meanAbsolute.winner).toBe("path-traced");
     // |1.2 - 1| = 0.2 against |0.95 - 1| = 0.05.
-    expect(winners["luminanceError"]).toBe("path-traced");
+    expect(metrics?.luminanceError.winner).toBe("path-traced");
   });
 
   it("records an exact tie as neither renderer's win", () => {
     const summary = summarizeComparisonMatrix(
       matrix([matrixCase("classic", "front", {}, {})]),
     );
-    const tally = summary.overall.tallies.find(
-      (entry) => entry.metric === "relativeL2",
+    const tally = summary.overall.tallies.relativeL2;
+    expect(tally.wins).toEqual({ restir: 0, "path-traced": 0 });
+    expect(tally.ties).toBe(1);
+    expect(summary.cases[0]?.metrics.relativeL2.winner).toBeNull();
+  });
+
+  it("refuses to pick a winner when either value is not finite", () => {
+    // NaN loses every comparison, so a `<` test would silently hand the win to
+    // whichever side happens to be finite.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase(
+          "classic",
+          "front",
+          { relativeL2: Number.NaN },
+          { relativeL2: 1 },
+        ),
+        matrixCase(
+          "classic",
+          "left",
+          { relativeL2: 1 },
+          { relativeL2: Number.NaN },
+        ),
+      ]),
     );
-    expect(tally?.wins).toEqual({ restir: 0, "path-traced": 0 });
-    expect(tally?.ties).toBe(1);
+
     expect(
-      summary.cases[0]?.metrics.find(
-        (verdict) => verdict.metric === "relativeL2",
-      )?.winner,
-    ).toBeNull();
+      summary.cases.map((entry) => entry.metrics.relativeL2.winner),
+    ).toEqual([null, null]);
+    expect(summary.overall.tallies.relativeL2).toEqual({
+      wins: { restir: 0, "path-traced": 0 },
+      ties: 2,
+    });
   });
 
   it("keeps scenes in the order they were measured", () => {
@@ -207,7 +237,7 @@ describe("summarizeComparisonMatrix", () => {
     expect(summary.byScene).toEqual([]);
     expect(summary.overall.cases).toBe(0);
     expect(
-      summary.overall.tallies.every(
+      Object.values(summary.overall.tallies).every(
         (tally) => tally.wins.restir === 0 && tally.wins["path-traced"] === 0,
       ),
     ).toBe(true);
@@ -237,5 +267,8 @@ describe("formatComparisonMatrixSummary", () => {
     expect(text).toContain("| classic/front | relative L2 |");
     // Counts, not radiance, so an integer metric must not gain six decimals.
     expect(text).toContain("| outliers | 1 | 1 | tie |");
+    // A tie is its own outcome; without it the two win counts read as the whole
+    // story and the remainder looks like the other renderer's.
+    expect(text).toContain("outliers: ReSTIR 0/2 · Denoised PT 0/2 · ties 2");
   });
 });

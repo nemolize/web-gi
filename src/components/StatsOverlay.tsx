@@ -9,7 +9,10 @@ import type {
   ComparisonMatrixSummary,
   ComparisonMetric,
 } from "@/gi/comparison-summary";
-import { summarizeComparisonMatrix, tallyFor } from "@/gi/comparison-summary";
+import {
+  MODE_LABELS,
+  summarizeComparisonMatrix,
+} from "@/gi/comparison-summary";
 import {
   aggregatePerformanceMeasurements,
   formatPerformanceReport,
@@ -82,24 +85,25 @@ const formatLinearComparisonReport = (
       schemaVersion: 1,
       ...createEnvironmentReportContext(),
       ...comparison,
-      // A matrix carries six cases across five metrics, so the verdicts it
-      // implies are what a reader actually wants; deriving them by hand is how
-      // an aggregate claim ends up recorded without its per-scene breakdown.
       ...(summary === null ? {} : { summary }),
     },
     null,
     2,
   );
 
-/** One line per scene, so a split verdict is visible without opening the JSON. */
 const describeSceneVerdicts = (
   summary: ComparisonMatrixSummary,
   metric: ComparisonMetric,
 ): string =>
   summary.byScene
     .map((scope) => {
-      const tally = tallyFor(scope, metric);
-      return `${scope.scope} ReSTIR ${String(tally.wins.restir)}/${String(tally.cases)}`;
+      const { wins, ties } = scope.tallies[metric];
+      const parts = [
+        `${MODE_LABELS.restir} ${String(wins.restir)}`,
+        `${MODE_LABELS["path-traced"]} ${String(wins["path-traced"])}`,
+      ];
+      if (ties > 0) parts.push(`ties ${String(ties)}`);
+      return `${scope.scope} ${parts.join("/")}`;
     })
     .join(" · ");
 

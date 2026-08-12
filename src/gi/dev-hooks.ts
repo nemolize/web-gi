@@ -14,7 +14,6 @@ export type DevHooks = {
   readonly compareReference: ComparisonSession["compareReference"];
   readonly compareReferenceAfter: ComparisonSession["compareReferenceAfter"];
   readonly summarizeMatrix: typeof summarizeComparisonMatrix;
-  /** Markdown for pasting a matrix run into an issue or the README. */
   readonly formatMatrixSummary: typeof formatComparisonMatrixSummary;
 };
 
