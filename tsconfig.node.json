@@ -5,6 +5,8 @@
     "types": ["node"]
   },
   "include": [
+    "port.ts",
+    "port.test.ts",
     "vite.config.ts",
     "vitest.config.ts",
     "playwright.config.ts",
