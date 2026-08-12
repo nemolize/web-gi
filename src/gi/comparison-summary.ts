@@ -40,9 +40,9 @@ export type MetricVerdict = {
   /** Null when the two renderers tie, or when either value is not finite. */
   readonly winner: ComparisonMode | null;
   /**
-   * Whether the winner's repeats sit entirely clear of the loser's. False below
-   * two repeats, where a single sample has no spread to clear and every win
-   * would otherwise read as separated.
+   * Winner's repeats entirely clear of the loser's. A screen, not significance:
+   * on identical renderers it still fires at `2·(n!)²/(2n)!` — 10% at three
+   * repeats. Discards overlapping wins; never establishes a separated one.
    */
   readonly separated: boolean;
 };

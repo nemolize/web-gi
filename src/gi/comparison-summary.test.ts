@@ -323,6 +323,51 @@ describe("summarizeComparisonMatrix", () => {
     expect(verdict?.separated).toBe(true);
   });
 
+  it("separates identical renderers at the rate the doc comment claims", () => {
+    // Every interleaving of three-versus-three exchangeable samples, so the
+    // 10% the doc comment and README quote cannot drift from the predicate.
+    const orderings: boolean[][] = [];
+    const walk = (taken: boolean[]): void => {
+      if (taken.length === 6) {
+        orderings.push(taken);
+        return;
+      }
+      const restirLeft = 3 - taken.filter(Boolean).length;
+      if (restirLeft > 0) walk([...taken, true]);
+      if (taken.length - taken.filter(Boolean).length < 3) {
+        walk([...taken, false]);
+      }
+    };
+    walk([]);
+    expect(orderings).toHaveLength(20);
+
+    const separated = orderings.filter((isRestir) => {
+      // Each rank belongs to one renderer, so read the ranks off per side and
+      // pair them up: a run carries one sample for each.
+      const ranksOf = (mine: boolean): number[] =>
+        isRestir.flatMap((restirWins, rank) =>
+          restirWins === mine ? [rank] : [],
+        );
+      const restirRanks = ranksOf(true);
+      const pathTracedRanks = ranksOf(false);
+      const runs = restirRanks.map((restirRank, repeat) =>
+        matrixCase(
+          "classic",
+          "front",
+          { relativeL2: restirRank },
+          { relativeL2: pathTracedRanks[repeat] ?? Number.NaN },
+          repeat,
+        ),
+      );
+      return (
+        summarizeComparisonMatrix(matrix(runs)).cases[0]?.metrics.relativeL2
+          .separated === true
+      );
+    }).length;
+
+    expect(separated / orderings.length).toBeCloseTo(0.1, 10);
+  });
+
   it("does not separate repeats that merely touch", () => {
     // Ranges sharing an endpoint overlap at that point, so the measurement has
     // not told the two renderers apart.

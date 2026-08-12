@@ -103,10 +103,19 @@ hybrid is worth building (#43).
 Each verdict also reports whether it is **separated** — whether the winner's
 repeats sit entirely clear of the loser's. Margins here have been observed as
 narrow as 3%, which a single pass cannot distinguish from drift, so an
-unseparated win is a win the measurement did not actually establish. A verdict
-from fewer than two repeats is never counted as separated. The completion line
-shows the relative-L2 split by scene along with how many of those wins clear
-spread, without opening the JSON.
+unseparated win is a win the measurement did not establish.
+
+Read that flag in one direction only. It is a screen, not a significance test:
+for two renderers that do not differ at all, the chance that `n` repeats of one
+land entirely below `n` of the other is `2·(n!)²/(2n)!` — **10% at three
+repeats**, so a 30-verdict run should be expected to show about three separated
+wins on noise alone. An unseparated win is genuinely not established; a
+separated one is only a candidate worth repeating at a higher count. Raising the
+repeats is what sharpens it (2.9% at four, 0.8% at five). A verdict from fewer
+than two repeats is never counted as separated.
+
+The completion line shows the relative-L2 split by scene along with how many of
+those wins clear spread, without opening the JSON.
 
 The automatic 1,024-frame reference is the mobile default: at 691×1,445, the
 target-device matrix completed one pass of its measured phases in 188 seconds
