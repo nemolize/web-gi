@@ -85,8 +85,50 @@ const MAX_TIMED_PASSES = 16;
  * on a phone rendering at five times its display period.
  */
 const PROBE_RING_SIZE = 12;
+/** Amortizes queue drains while bounding cancellation lag to four reference frames. */
+const REFERENCE_COMPLETION_BATCH_SIZE = 4;
 const REFERENCE_CAPTURE_TIMEOUT_MS = 5 * 60_000;
 const COMPLETION_WINDOW_TIMEOUT_PADDING_MS = 30_000;
+
+type CompletionBatchOperations = {
+  readonly getFrameCount: () => number;
+  readonly renderFrame: () => void;
+  readonly waitForSubmittedWork: () => Promise<void>;
+  readonly validateAfterWait: () => void;
+};
+
+export const runCompletionBatches = async (
+  requestedFrames: number,
+  batchSize: number,
+  operations: CompletionBatchOperations,
+): Promise<boolean> => {
+  if (
+    !Number.isInteger(requestedFrames) ||
+    requestedFrames <= 0 ||
+    !Number.isInteger(batchSize) ||
+    batchSize <= 0
+  ) {
+    throw new RangeError("Completion batches require positive frame counts.");
+  }
+  while (operations.getFrameCount() < requestedFrames) {
+    const batchStart = operations.getFrameCount();
+    const batchEnd = Math.min(requestedFrames, batchStart + batchSize);
+    while (operations.getFrameCount() < batchEnd) {
+      const beforeFrame = operations.getFrameCount();
+      operations.renderFrame();
+      if (operations.getFrameCount() === beforeFrame) {
+        if (beforeFrame > batchStart) {
+          await operations.waitForSubmittedWork();
+          operations.validateAfterWait();
+        }
+        return false;
+      }
+    }
+    await operations.waitForSubmittedWork();
+    operations.validateAfterWait();
+  }
+  return true;
+};
 
 type ProbeSlot = {
   readonly resolve: GPUBuffer;
@@ -1094,13 +1136,18 @@ export class GiRenderer {
     this.renderFrameNow(camera);
   }
 
-  private renderFrameNow(camera: OrbitCamera): void {
+  private renderFrameNow(
+    camera: OrbitCamera,
+    output: "present" | "headless" = "present",
+  ): void {
     if (this.destroyed || this.allocationFailure !== null) return;
     // Wall-clock interval between submissions. requestAnimationFrame paces the
     // loop, so this reports the real (vsync- or GPU-bound) frame time rather
     // than the negligible command-encoding cost.
     const started = performance.now();
-    this.lastFrameMs = this.lastFrameAt > 0 ? started - this.lastFrameAt : 0;
+    if (output === "present") {
+      this.lastFrameMs = this.lastFrameAt > 0 ? started - this.lastFrameAt : 0;
+    }
     this.lastFrameAt = started;
     const targets = this.ensureTargets();
     const basis = cameraBasis(camera, targets.width / targets.height);
@@ -1203,33 +1250,37 @@ export class GiRenderer {
     }
     sharedPass?.end();
 
-    // Timed too: without it the per-pass total is not the frame's GPU time.
-    const presentTimestamps = timestampWrites("present");
-    const renderPass = encoder.beginRenderPass({
-      colorAttachments: [
-        {
-          view: this.context.getCurrentTexture().createView(),
-          loadOp: "clear",
-          storeOp: "store",
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        },
-      ],
-      ...(presentTimestamps === undefined
-        ? {}
-        : { timestampWrites: presentTimestamps.timestampWrites }),
-    });
-    renderPass.setPipeline(
-      reference
-        ? this.pipelines.presentReference
-        : this.pipelines.presentRestir,
-    );
-    renderPass.setBindGroup(0, this.presentUniformBindGroup);
-    renderPass.setBindGroup(
-      1,
-      reference ? at(targets.presentReference, parity) : targets.presentRestir,
-    );
-    renderPass.draw(3);
-    renderPass.end();
+    if (output === "present") {
+      // Timed too: without it the per-pass total is not the frame's GPU time.
+      const presentTimestamps = timestampWrites("present");
+      const renderPass = encoder.beginRenderPass({
+        colorAttachments: [
+          {
+            view: this.context.getCurrentTexture().createView(),
+            loadOp: "clear",
+            storeOp: "store",
+            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          },
+        ],
+        ...(presentTimestamps === undefined
+          ? {}
+          : { timestampWrites: presentTimestamps.timestampWrites }),
+      });
+      renderPass.setPipeline(
+        reference
+          ? this.pipelines.presentReference
+          : this.pipelines.presentRestir,
+      );
+      renderPass.setBindGroup(0, this.presentUniformBindGroup);
+      renderPass.setBindGroup(
+        1,
+        reference
+          ? at(targets.presentReference, parity)
+          : targets.presentRestir,
+      );
+      renderPass.draw(3);
+      renderPass.end();
+    }
 
     const slot =
       timing && probe !== null && probe.labels.length > 0
@@ -1448,17 +1499,24 @@ export class GiRenderer {
       await this.waitForSubmittedWork(controller.signal, deadline);
       this.resetAccumulation();
       const started = performance.now();
-      while (this.accumFrames < requestedFrames) {
-        const beforeFrame = this.accumFrames;
-        this.renderFrameNow(camera);
-        await this.waitForSubmittedWork(controller.signal, deadline);
-        if (this.comparisonGeneration !== generation) {
-          throw new Error(
-            "Render configuration changed during the comparison.",
-          );
-        }
-        if (this.accumFrames === beforeFrame) return null;
-      }
+      const completed = await runCompletionBatches(
+        requestedFrames,
+        REFERENCE_COMPLETION_BATCH_SIZE,
+        {
+          getFrameCount: () => this.accumFrames,
+          renderFrame: () => this.renderFrameNow(camera, "headless"),
+          waitForSubmittedWork: () =>
+            this.waitForSubmittedWork(controller.signal, deadline),
+          validateAfterWait: () => {
+            if (this.comparisonGeneration !== generation) {
+              throw new Error(
+                "Render configuration changed during the comparison.",
+              );
+            }
+          },
+        },
+      );
+      if (!completed) return null;
       const actualDurationMs = performance.now() - started;
       const image = await this.waitForComparisonOperation(
         this.captureLinearImage(),
