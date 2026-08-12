@@ -79,12 +79,14 @@ process for one renderer at the default view. Reports include the camera basis,
 settings, a-trous variant, frame counts, actual durations, and linear-radiance
 error metrics, and remain available through `Copy result`. Keep the page visible
 and unchanged while the several-minute matrix is running. The automatic
-1,024-frame reference is the current mobile validation candidate. A 512-frame
-target-device run was rejected after it changed one renderer ranking relative
-to the 2,048-frame sweep. Treat 1,024-frame rankings as provisional until the
-same-condition check is complete; higher-confidence validation can use the
-development controls to save a longer reference, with the actual frame count
-retained in the report.
+1,024-frame reference is the mobile default: at 691×1,445, the target-device
+matrix completed its measured phases in 188 seconds and preserved the
+2,048-frame sweep's decisions. ReSTIR had lower Relative L2 in all six cases;
+Denoised PT had lower mean absolute error and fewer outliers in all six, plus
+lower absolute luminance error in four. A 512-frame run was rejected after it
+changed one Relative L2 winner. Higher-confidence one-off validation can still
+use the development controls to save a longer reference, with the actual frame
+count retained in the report.
 
 ## Pipeline
 
