@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:tunnel": "run-p dev tunnel",
-    "tunnel": "cloudflared tunnel --url http://localhost:5173",
+    "tunnel": "cloudflared tunnel --url http://localhost:${PLAYWRIGHT_PORT:-5173}",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "run-p --continue-on-error \"lint:*\"",
