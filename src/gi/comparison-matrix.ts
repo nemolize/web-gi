@@ -38,20 +38,52 @@ export type ComparisonMatrixCase = {
   readonly label: string;
   readonly scene: SceneVariant;
   readonly cameraLabel: string;
+  readonly cameraIndex: number;
   readonly camera: OrbitCamera;
 };
 
 export const COMPARISON_MATRIX_CASES: readonly ComparisonMatrixCase[] =
   COMPARISON_MATRIX_SCENES.flatMap((scene) =>
-    COMPARISON_MATRIX_CAMERAS.map(({ label: cameraLabel, camera }) => ({
-      label: `${scene}/${cameraLabel}`,
-      scene,
-      cameraLabel,
-      camera,
-    })),
+    COMPARISON_MATRIX_CAMERAS.map(
+      ({ label: cameraLabel, camera }, cameraIndex) => ({
+        label: `${scene}/${cameraLabel}`,
+        scene,
+        cameraLabel,
+        cameraIndex,
+        camera,
+      }),
+    ),
   );
 
+export const DEFAULT_COMPARISON_MATRIX_REPEATS = 3;
+
+export type ComparisonMatrixRun = ComparisonMatrixCase & {
+  /** 0-based position among this case's repeats. */
+  readonly repeat: number;
+  readonly runOrder: readonly [ComparisonMode, ComparisonMode];
+};
+
+/**
+ * Repeats run outermost so drift shows up as spread between them. Order
+ * alternates on `cameraIndex + repeat`: parity over the flattened list would
+ * split run order 2:1 per scene in opposite directions.
+ */
+export const comparisonMatrixRuns = (
+  repeats: number,
+): readonly ComparisonMatrixRun[] =>
+  Array.from({ length: Math.max(1, Math.trunc(repeats)) }, (_, repeat) =>
+    COMPARISON_MATRIX_CASES.map((entry) => ({
+      ...entry,
+      repeat,
+      runOrder:
+        (entry.cameraIndex + repeat) % 2 === 0
+          ? COMPARISON_MATRIX_RUN_ORDERS[0]
+          : COMPARISON_MATRIX_RUN_ORDERS[1],
+    })),
+  ).flat();
+
 export type ComparisonMatrixCaseReport = ComparisonMatrixCase & {
+  readonly repeat: number;
   readonly runOrder: readonly [ComparisonMode, ComparisonMode];
   readonly comparisons: Readonly<
     Record<ComparisonMode, LinearComparisonReport>
@@ -62,12 +94,14 @@ export type LinearComparisonMatrixReport = {
   readonly kind: "comparison-matrix";
   readonly requestedReferenceFrames: number;
   readonly requestedDurationMs: number;
+  readonly repeats: number;
+  /** One entry per measured run: `repeats` of each case, in execution order. */
   readonly cases: readonly ComparisonMatrixCaseReport[];
 };
 
 export type ComparisonMatrixProgress = {
-  readonly caseIndex: number;
-  readonly totalCases: number;
-  readonly entry: ComparisonMatrixCase;
+  readonly runIndex: number;
+  readonly totalRuns: number;
+  readonly entry: ComparisonMatrixRun;
   readonly phase: "reference" | ComparisonMode;
 };

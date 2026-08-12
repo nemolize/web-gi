@@ -145,6 +145,7 @@ describe("development comparison hooks", () => {
       kind: "comparison-matrix",
       requestedReferenceFrames: 1_024,
       requestedDurationMs: 5_000,
+      repeats: 0,
       cases: [],
     });
     expect(summary.overall.cases).toBe(0);

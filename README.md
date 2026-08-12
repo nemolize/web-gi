@@ -73,31 +73,56 @@ Equal-time linear-radiance comparisons use similarly short URLs:
 The matrix preset runs the Cornell box and 30-light scene from the front, left,
 and right-high views. It builds one exact 1,024-frame, GPU-completion-paced
 `Reference PT` oracle per view and compares both ReSTIR and Denoised PT against
-that shared image for five seconds each, alternating their run order between
-views to reduce systematic thermal-order bias. The individual URLs run the same
-process for one renderer at the default view. Reports include the camera basis,
-settings, a-trous variant, frame counts, actual durations, and linear-radiance
-error metrics, and remain available through `Copy result`. Keep the page visible
-and unchanged while the several-minute matrix is running.
+that shared image for five seconds each. The whole six-case sweep repeats three
+times, repeats outermost, so a case's measurements are spread across the session
+rather than taken back to back in one thermal state. The individual URLs run the
+same process for one renderer at the default view. Reports include the camera
+basis, settings, a-trous variant, frame counts, actual durations, and
+linear-radiance error metrics, and remain available through `Copy result`. Keep
+the page visible and unchanged while the several-minute matrix is running.
+
+Run order alternates on the camera index plus the repeat number, which keeps each
+scene's split of the two orders balanced over an even repeat count. Alternating
+on position in the flattened case list instead — as this did before — gives one
+scene `[A,B,A]` and the other `[B,A,B]`, a 2:1 split per scene in opposite
+directions, which biases exactly the per-scene comparison the matrix exists to
+make.
 
 A matrix report also carries a derived `summary`: the winner of each metric on
 each case, tallied both overall and **per scene**. Luminance is scored as
-`|ratio - 1|`, since a ratio of 0.9 and one of 1.1 are equally biased. The
-per-scene split is the part worth reading — an even overall tally can be two
-opposite sweeps, and which scene a renderer wins is what decides whether a
-hybrid is worth building (#43). The completion line shows the relative-L2 split
-by scene without opening the JSON.
+`|ratio - 1|`, since a ratio of 0.9 and one of 1.1 are equally biased. A case's
+repeats are folded into one verdict on their **median**, so a single thermal
+outlier cannot flip a case the way a mean would, and the per-case table carries
+the min–max range beside it.
+
+Each verdict also reports whether it is **separated** — whether the winner's
+repeats sit entirely clear of the loser's. Margins here have been observed as
+narrow as 3%, which a single pass cannot distinguish from drift, so an
+unseparated win is a win the measurement did not actually establish. A verdict
+from fewer than two repeats is never counted as separated. The completion line
+shows the relative-L2 split by scene along with how many of those wins clear
+spread, without opening the JSON.
 
 The automatic 1,024-frame reference is the mobile default: at 691×1,445, the
-target-device matrix completed its measured phases in 188 seconds and preserved
-the 2,048-frame sweep's decisions. ReSTIR had lower Relative L2 in all six
-cases; Denoised PT had lower mean absolute error and fewer outliers in all six,
-plus lower absolute luminance error in four. A 512-frame run was rejected after
-it changed one Relative L2 winner. Those figures are aggregates recorded before
-the summary existed, so they do not say how the six cases split by scene; a
-fresh matrix run now reports that directly. Higher-confidence one-off validation
-can still use the development controls to save a longer reference, with the
-actual frame count retained in the report.
+target-device matrix completed one pass of its measured phases in 188 seconds
+and preserved the 2,048-frame sweep's decisions. ReSTIR had lower Relative L2 in
+all six cases; Denoised PT had lower mean absolute error and fewer outliers in
+all six, plus lower absolute luminance error in four. A 512-frame run was
+rejected after it changed one Relative L2 winner. Those figures are aggregates
+from a single unrepeated pass, recorded before the summary existed, so they say
+neither how the six cases split by scene nor which of those wins clear
+run-to-run spread; a fresh matrix run reports both directly. Budget roughly
+three times the single-pass duration for the repeated sweep. Higher-confidence
+one-off validation can still use the development controls to save a longer
+reference, with the actual frame count retained in the report.
+
+A desktop pass recorded before repeats existed found the opposite direction:
+Denoised PT ahead on relative L2, mean absolute, and outliers in all six cases,
+with ReSTIR ahead only on luminance bias, and margins of roughly 3–20%. That
+reading and the mobile one are consistent under an equal-time model — the faster
+the machine, the more path tracing's larger frame count outweighs what
+resampling buys — but the crossover point is not measured, so any claim about
+which renderer wins has to name the device it was measured on.
 
 ## Pipeline
 

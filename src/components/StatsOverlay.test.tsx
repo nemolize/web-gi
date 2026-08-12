@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StatsOverlay } from "@/components/StatsOverlay";
 import { DEFAULT_CAMERA } from "@/gi/camera";
+import { DEFAULT_COMPARISON_MATRIX_REPEATS } from "@/gi/comparison-matrix";
 import type { PerformanceMeasurement } from "@/gi/performance";
 import { DEFAULT_SETTINGS } from "@/gi/settings";
 
@@ -338,12 +339,15 @@ describe("StatsOverlay performance capture", () => {
       kind: "comparison-matrix" as const,
       requestedReferenceFrames: 1_024,
       requestedDurationMs: 5_000,
+      repeats: 1,
       cases: [
         {
           label: "classic/front",
           scene: "classic" as const,
           cameraLabel: "front",
+          cameraIndex: 0,
           camera: DEFAULT_CAMERA,
+          repeat: 0,
           runOrder: ["restir", "path-traced"] as const,
           comparisons: {
             restir: restirReport,
@@ -354,10 +358,10 @@ describe("StatsOverlay performance capture", () => {
     };
     const runAutomaticComparisonMatrix = vi
       .fn()
-      .mockImplementation(async (_frames, _duration, onProgress) => {
+      .mockImplementation(async (_frames, _duration, _repeats, onProgress) => {
         onProgress({
-          caseIndex: 1,
-          totalCases: 1,
+          runIndex: 1,
+          totalRuns: 1,
           entry: matrixReport.cases[0],
           phase: "reference",
         });
@@ -383,13 +387,14 @@ describe("StatsOverlay performance capture", () => {
 
     expect(
       await screen.findByText(
-        "1 cases · relative L2 wins by scene: classic ReSTIR 1/Denoised PT 0",
+        "1 cases × 1 repeats · relative L2 wins by scene: classic ReSTIR 1/Denoised PT 0 (0/1 clear of spread)",
       ),
     ).toBeVisible();
     expect(runAutomaticComparisonMatrix).toHaveBeenCalledOnce();
     expect(runAutomaticComparisonMatrix).toHaveBeenCalledWith(
       1_024,
       5_000,
+      DEFAULT_COMPARISON_MATRIX_REPEATS,
       expect.any(Function),
     );
 

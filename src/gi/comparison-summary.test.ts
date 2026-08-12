@@ -57,11 +57,14 @@ const matrixCase = (
   cameraLabel: string,
   restir: Partial<LinearComparisonReport>,
   pathTraced: Partial<LinearComparisonReport>,
+  repeat = 0,
 ): ComparisonMatrixCaseReport => ({
   label: `${scene}/${cameraLabel}`,
   scene,
   cameraLabel,
+  cameraIndex: 0,
   camera: DEFAULT_CAMERA,
+  repeat,
   runOrder: ["restir", "path-traced"],
   comparisons: {
     restir: report("restir", restir),
@@ -75,6 +78,7 @@ const matrix = (
   kind: "comparison-matrix",
   requestedReferenceFrames: 1_024,
   requestedDurationMs: 5_000,
+  repeats: new Set(cases.map(({ repeat }) => repeat)).size,
   cases,
 });
 
@@ -215,7 +219,110 @@ describe("summarizeComparisonMatrix", () => {
     expect(summary.overall.tallies.relativeL2).toEqual({
       wins: { restir: 0, "path-traced": 0 },
       ties: 2,
+      separated: 0,
     });
+  });
+
+  it("folds a case's repeats into one verdict on the median", () => {
+    // The middle repeat is what decides it; a single slow outlier in the last
+    // repeat must not flip the case the way a mean would.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 2 }, 0),
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 2 }, 1),
+        matrixCase(
+          "classic",
+          "front",
+          { relativeL2: 1 },
+          { relativeL2: 90 },
+          2,
+        ),
+      ]),
+    );
+
+    expect(summary.cases).toHaveLength(1);
+    expect(summary.cases[0]?.repeats).toBe(3);
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.winner).toBe("restir");
+    expect(verdict?.values["path-traced"]).toBe(2);
+    expect(verdict?.spread["path-traced"]).toEqual({
+      median: 2,
+      min: 2,
+      max: 90,
+      samples: 3,
+    });
+  });
+
+  it("averages the two middle repeats when the repeat count is even", () => {
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 1 }, 0),
+        matrixCase("classic", "front", { relativeL2: 4 }, { relativeL2: 1 }, 1),
+      ]),
+    );
+    expect(summary.cases[0]?.metrics.relativeL2.spread.restir.median).toBe(2.5);
+  });
+
+  it("never calls a single-repeat win separated", () => {
+    // One sample has min === max, so every win would trivially clear a spread
+    // that was never measured.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 90 }),
+      ]),
+    );
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.winner).toBe("restir");
+    expect(verdict?.separated).toBe(false);
+  });
+
+  it("marks a win inside run-to-run spread as unseparated", () => {
+    // ReSTIR's median is lower, but its repeats straddle path tracing's — the
+    // measurement has not separated them, however consistent the medians look.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 3 }, 0),
+        matrixCase("classic", "front", { relativeL2: 2 }, { relativeL2: 3 }, 1),
+        matrixCase("classic", "front", { relativeL2: 9 }, { relativeL2: 3 }, 2),
+      ]),
+    );
+
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.winner).toBe("restir");
+    expect(verdict?.separated).toBe(false);
+    expect(summary.overall.tallies.relativeL2.separated).toBe(0);
+  });
+
+  it("marks a win clear of spread as separated", () => {
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 5 }, 0),
+        matrixCase("classic", "front", { relativeL2: 2 }, { relativeL2: 6 }, 1),
+      ]),
+    );
+
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.winner).toBe("restir");
+    expect(verdict?.separated).toBe(true);
+    expect(summary.overall.tallies.relativeL2.separated).toBe(1);
+  });
+
+  it("refuses a verdict when any single repeat is not finite", () => {
+    // A NaN in one repeat is an unusable measurement; the median could hide it.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 2 }, 0),
+        matrixCase(
+          "classic",
+          "front",
+          { relativeL2: Number.NaN },
+          { relativeL2: 2 },
+          1,
+        ),
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 2 }, 2),
+      ]),
+    );
+    expect(summary.cases[0]?.metrics.relativeL2.winner).toBeNull();
   });
 
   it("keeps scenes in the order they were measured", () => {

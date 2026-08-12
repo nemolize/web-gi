@@ -4,6 +4,7 @@ import type {
   ComparisonMatrixProgress,
   LinearComparisonMatrixReport,
 } from "@/gi/comparison-matrix";
+import { DEFAULT_COMPARISON_MATRIX_REPEATS } from "@/gi/comparison-matrix";
 import type { LinearComparisonReport } from "@/gi/comparison-session";
 import type {
   ComparisonMatrixSummary,
@@ -47,6 +48,7 @@ export type StatsOverlayProps = {
   readonly runAutomaticComparisonMatrix: (
     referenceFrames: number,
     durationMs: number,
+    repeats: number,
     onProgress: (progress: ComparisonMatrixProgress) => void,
   ) => Promise<LinearComparisonMatrixReport>;
   readonly autoMeasure?: boolean;
@@ -97,13 +99,13 @@ const describeSceneVerdicts = (
 ): string =>
   summary.byScene
     .map((scope) => {
-      const { wins, ties } = scope.tallies[metric];
+      const { wins, ties, separated } = scope.tallies[metric];
       const parts = [
         `${MODE_LABELS.restir} ${String(wins.restir)}`,
         `${MODE_LABELS["path-traced"]} ${String(wins["path-traced"])}`,
       ];
       if (ties > 0) parts.push(`ties ${String(ties)}`);
-      return `${scope.scope} ${parts.join("/")}`;
+      return `${scope.scope} ${parts.join("/")} (${String(separated)}/${String(scope.cases)} clear of spread)`;
     })
     .join(" · ");
 
@@ -205,7 +207,7 @@ export const StatsOverlay = ({
       setCaptureStatus("idle");
       setAutoComparisonStatus(
         autoCompareMode === "matrix"
-          ? "Starting the comparison matrix…"
+          ? `Starting the comparison matrix (${String(DEFAULT_COMPARISON_MATRIX_REPEATS)} repeats)…`
           : `Building ${String(AUTO_COMPARISON_REFERENCE_FRAMES)}-frame reference, then comparing ${autoCompareMode} for ${String(COMPARISON_DURATION_MS / 1_000)} seconds…`,
       );
       const comparisonPromise =
@@ -213,13 +215,14 @@ export const StatsOverlay = ({
           ? runAutomaticComparisonMatrix(
               AUTO_COMPARISON_REFERENCE_FRAMES,
               COMPARISON_DURATION_MS,
-              ({ caseIndex, totalCases, entry, phase }) => {
+              DEFAULT_COMPARISON_MATRIX_REPEATS,
+              ({ runIndex, totalRuns, entry, phase }) => {
                 const action =
                   phase === "reference"
                     ? `building ${String(AUTO_COMPARISON_REFERENCE_FRAMES)}-frame reference`
                     : `comparing ${phase} for ${String(COMPARISON_DURATION_MS / 1_000)} seconds`;
                 setAutoComparisonStatus(
-                  `${String(caseIndex)}/${String(totalCases)} · ${entry.label} · ${action}…`,
+                  `${String(runIndex)}/${String(totalRuns)} · ${entry.label} · repeat ${String(entry.repeat + 1)} · ${action}…`,
                 );
               },
             )
@@ -237,7 +240,7 @@ export const StatsOverlay = ({
             const summary = summarizeComparisonMatrix(comparison);
             setReport(formatLinearComparisonReport(comparison, summary));
             setAutoComparisonStatus(
-              `${String(comparison.cases.length)} cases · relative L2 wins by scene: ${describeSceneVerdicts(summary, "relativeL2")}`,
+              `${String(summary.cases.length)} cases × ${String(comparison.repeats)} repeats · relative L2 wins by scene: ${describeSceneVerdicts(summary, "relativeL2")}`,
             );
           } else {
             setReport(formatLinearComparisonReport(comparison, null));

@@ -5,8 +5,8 @@ import type { OrbitCamera } from "@/gi/camera";
 import { DEFAULT_CAMERA, dollyCamera, orbitCamera } from "@/gi/camera";
 import {
   COMPARISON_MATRIX_CASES,
-  COMPARISON_MATRIX_RUN_ORDERS,
   type ComparisonMatrixProgress,
+  comparisonMatrixRuns,
   type LinearComparisonMatrixReport,
 } from "@/gi/comparison-matrix";
 import type { LinearComparisonReport } from "@/gi/comparison-session";
@@ -45,6 +45,7 @@ export type UseGiRenderer = {
   readonly runAutomaticComparisonMatrix: (
     referenceFrames: number,
     durationMs: number,
+    repeats: number,
     onProgress: (progress: ComparisonMatrixProgress) => void,
   ) => Promise<LinearComparisonMatrixReport>;
   readonly resetView: () => void;
@@ -501,6 +502,7 @@ export const useGiRenderer = (
     async (
       referenceFrames: number,
       durationMs: number,
+      repeats: number,
       onProgress: (progress: ComparisonMatrixProgress) => void,
     ): Promise<LinearComparisonMatrixReport> => {
       const renderer = rendererRef.current;
@@ -531,17 +533,15 @@ export const useGiRenderer = (
         renderer.renderFrame(camera);
       };
 
+      const runs = comparisonMatrixRuns(repeats);
       const cases: LinearComparisonMatrixReport["cases"][number][] = [];
-      for (const [caseOffset, entry] of COMPARISON_MATRIX_CASES.entries()) {
+      for (const [runOffset, entry] of runs.entries()) {
         try {
-          const caseIndex = caseOffset + 1;
-          const runOrder =
-            caseOffset % 2 === 0
-              ? COMPARISON_MATRIX_RUN_ORDERS[0]
-              : COMPARISON_MATRIX_RUN_ORDERS[1];
+          const runIndex = runOffset + 1;
+          const { runOrder } = entry;
           onProgress({
-            caseIndex,
-            totalCases: COMPARISON_MATRIX_CASES.length,
+            runIndex,
+            totalRuns: runs.length,
             entry,
             phase: "reference",
           });
@@ -555,8 +555,8 @@ export const useGiRenderer = (
           let pathTraced: LinearComparisonReport | null = null;
           for (const mode of runOrder) {
             onProgress({
-              caseIndex,
-              totalCases: COMPARISON_MATRIX_CASES.length,
+              runIndex,
+              totalRuns: runs.length,
               entry,
               phase: mode,
             });
@@ -577,7 +577,6 @@ export const useGiRenderer = (
           }
           cases.push({
             ...entry,
-            runOrder,
             comparisons: { restir, "path-traced": pathTraced },
           });
         } finally {
@@ -588,6 +587,7 @@ export const useGiRenderer = (
         kind: "comparison-matrix",
         requestedReferenceFrames: referenceFrames,
         requestedDurationMs: durationMs,
+        repeats: runs.length / COMPARISON_MATRIX_CASES.length,
         cases,
       };
     },
