@@ -308,7 +308,7 @@ describe("performance capture", () => {
     ).toBeNull();
   });
 
-  it("keeps only the supported a-trous selector in the report URL", () => {
+  it("keeps only supported benchmark selectors in the report URL", () => {
     expect(
       sanitizePerformanceReportUrl(
         "https://example.com/demo?atrous=fallback&token=secret#private",
@@ -319,5 +319,22 @@ describe("performance capture", () => {
         "https://example.com/demo?atrous=8&token=secret#private",
       ),
     ).toBe("https://example.com/demo");
+    expect(
+      sanitizePerformanceReportUrl(
+        "https://example.com/demo?preset=heavy&mode=path-traced&measure=auto&token=secret#private",
+      ),
+    ).toBe(
+      "https://example.com/demo?preset=heavy&mode=path-traced&measure=auto",
+    );
+    expect(
+      sanitizePerformanceReportUrl(
+        "https://example.com/demo?preset=heavy&compare=restir&mode=path-traced&measure=auto&token=secret",
+      ),
+    ).toBe("https://example.com/demo?preset=heavy&compare=restir");
+    expect(
+      sanitizePerformanceReportUrl(
+        "https://example.com/demo?preset=matrix&compare=restir&token=secret#private",
+      ),
+    ).toBe("https://example.com/demo?preset=matrix");
   });
 });

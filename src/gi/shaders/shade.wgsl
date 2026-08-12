@@ -8,9 +8,6 @@
 @group(1) @binding(3) var<storage, read> giReservoirs: array<GiReservoir>;
 @group(1) @binding(4) var outIllumination: texture_storage_2d<rgba16float, write>;
 
-/** Firefly guard; generous enough that it never clips the lit floor. */
-const MAX_ILLUMINATION: f32 = 200.0;
-
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3u) {
   let pixel = gid.xy;

@@ -29,6 +29,10 @@ const renderApp = (status: RendererStatus): void => {
     status,
     errorMessage: status === "error" ? "boom" : null,
     measurePerformance: vi.fn(),
+    saveComparisonReference: vi.fn(),
+    compareReferenceAfter: vi.fn(),
+    runAutomaticComparison: vi.fn(),
+    runAutomaticComparisonMatrix: vi.fn(),
     resetView: vi.fn(),
     retryRenderer: vi.fn(),
   });

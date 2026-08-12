@@ -8,9 +8,9 @@
 @group(1) @binding(2) var texEmission: texture_2d<f32>;
 @group(1) @binding(3) var outLinear: texture_storage_2d<rgba32float, write>;
 
-/** Mirrors `fsRestir` in `present.wgsl`, minus `display`. */
+/** Mirrors the demodulated present path, minus `display`. */
 @compute @workgroup_size(8, 8)
-fn restir(@builtin(global_invocation_id) gid: vec3u) {
+fn denoised(@builtin(global_invocation_id) gid: vec3u) {
   let pixel = gid.xy;
   if (pixel.x >= uni.resolution.x || pixel.y >= uni.resolution.y) {
     return;

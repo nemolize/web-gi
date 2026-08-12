@@ -1,4 +1,5 @@
 import {
+  autoComparisonMode,
   DEFAULT_SETTINGS,
   FLAG_DENOISE,
   FLAG_DI_ENABLED,
@@ -9,7 +10,85 @@ import {
   FLAG_GI_TEMPORAL,
   packFlags,
   requiresAccumulationReset,
+  sanitizedRenderQueryParams,
+  settingsFromSearch,
+  shouldAutoMeasure,
 } from "@/gi/settings";
+
+describe("render query", () => {
+  it("loads the heavy benchmark preset with a selected renderer", () => {
+    expect(
+      settingsFromSearch("?preset=heavy&mode=path-traced&measure=auto"),
+    ).toEqual({
+      ...DEFAULT_SETTINGS,
+      scene: "manyLights",
+      mode: "path-traced",
+      diCandidates: 32,
+      spatialSamples: 8,
+      maxBounces: 6,
+      resolutionScale: 0.75,
+    });
+    expect(
+      shouldAutoMeasure("?preset=heavy&mode=path-traced&measure=auto"),
+    ).toBe(true);
+  });
+
+  it("drops unsupported values and unrelated query data", () => {
+    expect(settingsFromSearch("?preset=other&mode=invalid")).toEqual(
+      DEFAULT_SETTINGS,
+    );
+    expect(
+      sanitizedRenderQueryParams(
+        "?preset=heavy&mode=restir&measure=auto&token=secret",
+      ).toString(),
+    ).toBe("preset=heavy&mode=restir&measure=auto");
+    expect(shouldAutoMeasure("?measure=1")).toBe(false);
+  });
+
+  it("starts automatic comparisons in reference mode", () => {
+    const search = "?preset=heavy&compare=path-traced";
+    expect(settingsFromSearch(search)).toEqual({
+      ...DEFAULT_SETTINGS,
+      scene: "manyLights",
+      mode: "reference",
+      diCandidates: 32,
+      spatialSamples: 8,
+      maxBounces: 6,
+      resolutionScale: 0.75,
+    });
+    expect(autoComparisonMode(search)).toBe("path-traced");
+    expect(sanitizedRenderQueryParams(search).toString()).toBe(
+      "preset=heavy&compare=path-traced",
+    );
+  });
+
+  it("does not combine automatic comparison and performance capture", () => {
+    const search = "?compare=restir&mode=path-traced&measure=auto";
+    expect(sanitizedRenderQueryParams(search).toString()).toBe(
+      "compare=restir",
+    );
+    expect(settingsFromSearch(search).mode).toBe("reference");
+    expect(shouldAutoMeasure(search)).toBe(false);
+    expect(autoComparisonMode("?compare=invalid")).toBeNull();
+  });
+
+  it("loads the paired comparison matrix as one self-contained preset", () => {
+    const search =
+      "?preset=matrix&compare=restir&mode=path-traced&measure=auto&token=secret";
+    expect(settingsFromSearch(search)).toEqual({
+      ...DEFAULT_SETTINGS,
+      scene: "manyLights",
+      mode: "reference",
+      diCandidates: 32,
+      spatialSamples: 8,
+      maxBounces: 6,
+      resolutionScale: 0.75,
+    });
+    expect(autoComparisonMode(search)).toBe("matrix");
+    expect(shouldAutoMeasure(search)).toBe(false);
+    expect(sanitizedRenderQueryParams(search).toString()).toBe("preset=matrix");
+  });
+});
 
 describe("packFlags", () => {
   it("sets every bit when all stages are on", () => {

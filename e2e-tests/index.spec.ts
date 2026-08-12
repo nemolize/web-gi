@@ -41,15 +41,135 @@ test("exposes the ReSTIR stages as independent toggles", async ({ page }) => {
   );
   await expect(spatialReuse).toBeEnabled();
 
-  // Reference path tracing bypasses resampling entirely.
+  // Denoised path tracing bypasses resampling but keeps the shared filter.
+  await page.getByRole("radio", { name: "Denoised PT" }).click();
+  await expect(spatialReuse).toBeDisabled();
+  await expect(page.getByLabel("À-trous filter")).toBeEnabled();
+
+  // Reference path tracing bypasses both resampling and filtering.
   await page.getByRole("radio", { name: "Reference PT" }).click();
   await expect(
     page.getByRole("radio", { name: "Reference PT" }),
   ).toHaveAttribute("aria-checked", "true");
   await expect(spatialReuse).toBeDisabled();
+  await expect(page.getByLabel("À-trous filter")).toBeDisabled();
 
   await page.getByRole("radio", { name: "ReSTIR" }).click();
   await expect(spatialReuse).toBeEnabled();
+});
+
+test("loads the heavy benchmark preset from a short query", async ({
+  page,
+}) => {
+  await page.goto("/?preset=heavy&mode=path-traced&measure=auto");
+
+  await expect(
+    page.getByRole("radio", { name: "Denoised PT" }),
+  ).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByLabel("Scene")).toHaveValue("manyLights");
+  await expect(page.getByLabel("RIS candidates")).toHaveValue("32");
+  await expect(page.getByLabel("Spatial neighbours")).toHaveValue("8");
+  await expect(page.getByLabel("Bounces")).toHaveValue("6");
+  await expect(page.getByLabel("Resolution scale")).toHaveValue("0.75");
+});
+
+test("starts an automatic comparison from the reference renderer", async ({
+  page,
+}) => {
+  await page.goto("/?preset=heavy&compare=path-traced");
+
+  await expect(
+    page.getByRole("radio", { name: "Reference PT" }),
+  ).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByLabel("Scene")).toHaveValue("manyLights");
+  await expect(page.getByLabel("Bounces")).toHaveValue("6");
+});
+
+test("loads the paired comparison matrix from one preset", async ({ page }) => {
+  await page.goto(
+    "/?preset=matrix&compare=restir&mode=path-traced&measure=auto",
+  );
+
+  await expect(page).toHaveURL(/\?preset=matrix/);
+  await expect(
+    page.getByRole("radio", { name: "Reference PT" }),
+  ).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByLabel("RIS candidates")).toHaveValue("32");
+  await expect(page.getByLabel("Spatial neighbours")).toHaveValue("8");
+  await expect(page.getByLabel("Bounces")).toHaveValue("6");
+});
+
+test("renders finite Denoised PT output when WebGPU is available", async ({
+  page,
+}) => {
+  const gpuErrors: string[] = [];
+  page.on("console", (message) => {
+    const text = message.text();
+    if (
+      message.type() === "error" &&
+      (text.includes("[wgsl]") || text.includes("uncaptured WebGPU error"))
+    ) {
+      gpuErrors.push(text);
+    }
+  });
+  await page.goto("/");
+
+  const notice = page.getByRole("alert");
+  const accumulated = page.getByTestId("stat-accumulated");
+  await expect
+    .poll(
+      async () => {
+        if ((await notice.count()) > 0) return "notice";
+        return Number((await accumulated.textContent()) ?? "0") >= 30
+          ? "ready"
+          : "pending";
+      },
+      { timeout: 20_000 },
+    )
+    .not.toBe("pending");
+  test.skip((await notice.count()) > 0, "requires a WebGPU adapter");
+
+  const before = Number((await accumulated.textContent()) ?? "0");
+  await page.getByRole("radio", { name: "Denoised PT" }).click();
+  await expect
+    .poll(async () => Number((await accumulated.textContent()) ?? "0"))
+    .toBeLessThan(before);
+  await expect
+    .poll(async () => Number((await accumulated.textContent()) ?? "0"))
+    .toBeGreaterThan(0);
+
+  const output = await page.evaluate(async () => {
+    const hooks: unknown = Reflect.get(globalThis, "__gi");
+    if (hooks === null || typeof hooks !== "object") return null;
+    const capture: unknown = Reflect.get(hooks, "capture");
+    if (typeof capture !== "function") return null;
+    const image: unknown = await Reflect.apply(capture, hooks, []);
+    if (image === null || typeof image !== "object") return null;
+    const data: unknown = Reflect.get(image, "data");
+    if (!(data instanceof Float32Array)) return null;
+    let energy = 0;
+    for (let index = 0; index < data.length; index += 4) {
+      const red = data[index];
+      const green = data[index + 1];
+      const blue = data[index + 2];
+      if (
+        red === undefined ||
+        green === undefined ||
+        blue === undefined ||
+        !Number.isFinite(red) ||
+        !Number.isFinite(green) ||
+        !Number.isFinite(blue)
+      ) {
+        return { finite: false, energy };
+      }
+      energy += red + green + blue;
+    }
+    return { finite: true, energy };
+  });
+  expect(output).not.toBeNull();
+  expect(output?.finite).toBe(true);
+  expect(output?.energy).toBeGreaterThan(0);
+  expect(gpuErrors).toEqual([]);
 });
 
 test("offers every scene and switches between them", async ({ page }) => {

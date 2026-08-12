@@ -24,6 +24,10 @@ image.
   carrying the radiance it reflects towards the visible point; that sample is
   reused temporally and spatially through the reconnection Jacobian, with a
   visibility ray guarding against light leaking between reused pixels.
+- **Denoised path tracer** — one path sample per visible surface is accumulated
+  temporally and filtered by the same à-trous chain as ReSTIR. It is the
+  equal-time comparison path: cheaper frames buy more independent samples,
+  while the filter sees the same albedo-demodulated illumination representation.
 - **Reference path tracer** — same scene, same light transport, no resampling
   and no denoiser. One path per pixel per frame, progressively averaged. Use it
   to check what ReSTIR is converging towards.
@@ -50,21 +54,56 @@ exposure, and switches between five scenes staged in the same unit-cube room:
 | **Cove light**  | An upward-facing emitter behind a lip: the room below it is lit by the bounce off the ceiling |
 | **Pillars**     | Nine pillars under a broad emitter — overlapping penumbrae and contact regions                |
 
+Repeatable benchmark runs can start from short query strings:
+
+- `?preset=heavy&mode=restir&measure=auto`
+- `?preset=heavy&mode=path-traced&measure=auto`
+
+`preset=heavy` selects 30 lights, 32 DI candidates, eight spatial neighbours,
+six bounces, and 75% resolution. `measure=auto` starts the standard three-by-five
+second capture as soon as the renderer is ready; the completed report remains
+available through `Copy result`.
+
+Equal-time linear-radiance comparisons use similarly short URLs:
+
+- `?preset=matrix`
+- `?preset=heavy&compare=restir`
+- `?preset=heavy&compare=path-traced`
+
+The matrix preset runs the Cornell box and 30-light scene from the front, left,
+and right-high views. It builds one exact 1,024-frame, GPU-completion-paced
+`Reference PT` oracle per view and compares both ReSTIR and Denoised PT against
+that shared image for five seconds each, alternating their run order between
+views to reduce systematic thermal-order bias. The individual URLs run the same
+process for one renderer at the default view. Reports include the camera basis,
+settings, a-trous variant, frame counts, actual durations, and linear-radiance
+error metrics, and remain available through `Copy result`. Keep the page visible
+and unchanged while the several-minute matrix is running. The automatic
+1,024-frame reference is the mobile default: at 691×1,445, the target-device
+matrix completed its measured phases in 188 seconds and preserved the
+2,048-frame sweep's decisions. ReSTIR had lower Relative L2 in all six cases;
+Denoised PT had lower mean absolute error and fewer outliers in all six, plus
+lower absolute luminance error in four. A 512-frame run was rejected after it
+changed one Relative L2 winner. Higher-confidence one-off validation can still
+use the development controls to save a longer reference, with the actual frame
+count retained in the report.
+
 ## Pipeline
 
 One frame, in dispatch order (`src/gi/renderer.ts`):
 
-| Pass                                  | File                             | Output                                   |
-| ------------------------------------- | -------------------------------- | ---------------------------------------- |
-| G-buffer                              | `shaders/gbuffer.wgsl`           | world position, normal, albedo, emission |
-| DI candidates + temporal reuse        | `shaders/restir-di.wgsl`         | DI reservoir                             |
-| DI spatial reuse                      | `shaders/restir-di-spatial.wgsl` | DI reservoir                             |
-| GI sample generation + temporal reuse | `shaders/restir-gi.wgsl`         | GI reservoir                             |
-| GI spatial reuse                      | `shaders/restir-gi-spatial.wgsl` | GI reservoir                             |
-| Shading                               | `shaders/shade.wgsl`             | albedo-demodulated illumination          |
-| Temporal accumulation                 | `shaders/denoise-temporal.wgsl`  | accumulated illumination                 |
-| À-trous filter (×3)                   | `shaders/denoise-atrous.wgsl`    | filtered illumination                    |
-| Resolve                               | `shaders/present.wgsl`           | tone-mapped frame                        |
+| Pass                                  | File                             | Output                          |
+| ------------------------------------- | -------------------------------- | ------------------------------- |
+| G-buffer                              | `shaders/gbuffer.wgsl`           | depth, normal, albedo, emission |
+| DI candidates + temporal reuse        | `shaders/restir-di.wgsl`         | DI reservoir                    |
+| DI spatial reuse                      | `shaders/restir-di-spatial.wgsl` | DI reservoir                    |
+| GI sample generation + temporal reuse | `shaders/restir-gi.wgsl`         | GI reservoir                    |
+| GI spatial reuse                      | `shaders/restir-gi-spatial.wgsl` | GI reservoir                    |
+| Shading                               | `shaders/shade.wgsl`             | albedo-demodulated illumination |
+| 1 spp path tracing (alternative)      | `shaders/path-trace.wgsl`        | albedo-demodulated illumination |
+| Temporal accumulation                 | `shaders/denoise-temporal.wgsl`  | accumulated illumination        |
+| À-trous filter (×3)                   | `shaders/denoise-atrous.wgsl`    | filtered illumination           |
+| Resolve                               | `shaders/present.wgsl`           | tone-mapped frame               |
 
 `shaders/common.wgsl` holds the data layouts, RNG, sampling and reservoir
 helpers; `shaders/scene.wgsl` holds the bindings, ray tracing and light
@@ -72,9 +111,9 @@ sampling. Both are prepended to every compute shader, so group 0 is identical
 across passes and one explicit bind group layout is reused.
 
 Because the scene is entirely Lambertian, accumulated irradiance does not
-depend on the eye: ReSTIR keeps its history across camera motion and only drops
-it on disocclusion. The reference path tracer averages full radiance per pixel,
-so it does restart when the camera moves.
+depend on the eye: ReSTIR and the denoised path tracer keep their history across
+camera motion and only drop it on disocclusion. The reference path tracer
+averages full radiance per pixel, so it does restart when the camera moves.
 
 The scene is a small set of parallelograms with perpendicular edges, which lets
 the shader invert the barycentric solve with two dot products and skips the need
@@ -127,6 +166,13 @@ asset serving and the hashed production bundle locally.
 WGSL compile errors are reported to the console with the shader name and
 `line:column`; without that they only surface as invalid-pipeline warnings at
 dispatch time.
+
+Development builds add `Save ref` and `Compare 5 s` to the stats overlay. Save
+a converged `Reference PT`, switch renderers, then compare: the accumulator is
+reset, each submitted frame is allowed to finish, and the result is captured
+after at least five seconds of completed rendering work. The linear-radiance
+error is shown without copying the full float image out of the page. The
+underlying `window.__gi` hooks remain available for scripted experiments.
 
 ## Deployment
 

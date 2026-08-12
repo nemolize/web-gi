@@ -1,5 +1,10 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import type {
+  ComparisonMatrixProgress,
+  LinearComparisonMatrixReport,
+} from "@/gi/comparison-matrix";
+import type { LinearComparisonReport } from "@/gi/comparison-session";
 import {
   aggregatePerformanceMeasurements,
   formatPerformanceReport,
@@ -11,32 +16,81 @@ import {
   sanitizePerformanceReportUrl,
 } from "@/gi/performance";
 import type { RendererStats } from "@/gi/renderer";
-import type { RenderSettings } from "@/gi/settings";
+import type {
+  AutoComparisonMode,
+  ComparisonMode,
+  RenderSettings,
+} from "@/gi/settings";
 
 export type StatsOverlayProps = {
   readonly stats: RendererStats;
   readonly settings: RenderSettings;
   readonly measurePerformance: () => Promise<PerformanceMeasurement>;
+  readonly saveComparisonReference: () => Promise<boolean>;
+  readonly compareReferenceAfter: (
+    label: string,
+    durationMs: number,
+  ) => Promise<LinearComparisonReport | null>;
+  readonly runAutomaticComparison: (
+    mode: ComparisonMode,
+    referenceFrames: number,
+    durationMs: number,
+  ) => Promise<LinearComparisonReport | null>;
+  readonly runAutomaticComparisonMatrix: (
+    referenceFrames: number,
+    durationMs: number,
+    onProgress: (progress: ComparisonMatrixProgress) => void,
+  ) => Promise<LinearComparisonMatrixReport>;
+  readonly autoMeasure?: boolean;
+  readonly autoCompareMode?: AutoComparisonMode | null;
 };
 
 type CaptureStatus =
   "idle" | "measuring" | "ready" | "copied" | "capture-error" | "copy-error";
 
-const createReportContext = (
-  settings: RenderSettings,
-): PerformanceReportContext => ({
+export const COMPARISON_DURATION_MS = 5_000;
+export const AUTO_COMPARISON_REFERENCE_FRAMES = 1_024;
+
+type EnvironmentReportContext = Omit<PerformanceReportContext, "settings">;
+
+const createEnvironmentReportContext = (): EnvironmentReportContext => ({
   capturedAt: new Date().toISOString(),
   url: sanitizePerformanceReportUrl(window.location.href),
   viewport: { width: window.innerWidth, height: window.innerHeight },
   devicePixelRatio: window.devicePixelRatio,
-  settings,
   userAgent: navigator.userAgent,
 });
+
+const createReportContext = (
+  settings: RenderSettings,
+): PerformanceReportContext => ({
+  ...createEnvironmentReportContext(),
+  settings,
+});
+
+const formatLinearComparisonReport = (
+  comparison: LinearComparisonReport | LinearComparisonMatrixReport,
+): string =>
+  JSON.stringify(
+    {
+      schemaVersion: 1,
+      ...createEnvironmentReportContext(),
+      ...comparison,
+    },
+    null,
+    2,
+  );
 
 export const StatsOverlay = ({
   stats,
   settings,
   measurePerformance,
+  saveComparisonReference,
+  compareReferenceAfter,
+  runAutomaticComparison,
+  runAutomaticComparisonMatrix,
+  autoMeasure = false,
+  autoCompareMode = null,
 }: StatsOverlayProps) => {
   const fps = stats.frameMs > 0 ? 1000 / stats.frameMs : 0;
   const [captureStatus, setCaptureStatus] = useState<CaptureStatus>("idle");
@@ -44,9 +98,29 @@ export const StatsOverlay = ({
   const [activeRun, setActiveRun] = useState(0);
   const [report, setReport] = useState<string | null>(null);
   const [captureError, setCaptureError] = useState<string | null>(null);
+  const comparisonSettingsKey = JSON.stringify(settings);
+  const [comparisonStatus, setComparisonStatus] = useState<{
+    readonly settingsKey: string;
+    readonly text: string;
+  } | null>(null);
+  const [autoComparisonStatus, setAutoComparisonStatus] = useState<
+    string | null
+  >(null);
+  const [isComparing, setIsComparing] = useState(false);
   const primaryButtonRef = useRef<HTMLButtonElement>(null);
+  const autoMeasureStateRef = useRef<"idle" | "scheduled" | "started">("idle");
+  const autoComparisonStateRef = useRef<"idle" | "scheduled" | "started">(
+    "idle",
+  );
 
-  const startCapture = async (): Promise<void> => {
+  const showComparisonStatus = useCallback(
+    (text: string): void => {
+      setComparisonStatus({ settingsKey: comparisonSettingsKey, text });
+    },
+    [comparisonSettingsKey],
+  );
+
+  const startCapture = useCallback(async (): Promise<void> => {
     setCaptureStatus("measuring");
     setCapture(null);
     setReport(null);
@@ -69,7 +143,107 @@ export const StatsOverlay = ({
       setCaptureError(error instanceof Error ? error.message : String(error));
       setCaptureStatus("capture-error");
     }
-  };
+  }, [measurePerformance, settings]);
+
+  useEffect(() => {
+    if (!autoMeasure || autoMeasureStateRef.current !== "idle") return;
+    autoMeasureStateRef.current = "scheduled";
+    const timeoutId = window.setTimeout(() => {
+      autoMeasureStateRef.current = "started";
+      void startCapture();
+    }, 0);
+    return () => {
+      window.clearTimeout(timeoutId);
+      if (autoMeasureStateRef.current === "scheduled") {
+        autoMeasureStateRef.current = "idle";
+      }
+    };
+  }, [autoMeasure, startCapture]);
+
+  useEffect(() => {
+    if (
+      autoCompareMode === null ||
+      settings.mode !== "reference" ||
+      stats.accumFrames <= 0 ||
+      autoComparisonStateRef.current !== "idle"
+    ) {
+      return;
+    }
+    autoComparisonStateRef.current = "scheduled";
+    const timeoutId = window.setTimeout(() => {
+      autoComparisonStateRef.current = "started";
+      setIsComparing(true);
+      setCapture(null);
+      setReport(null);
+      setCaptureError(null);
+      setCaptureStatus("idle");
+      setAutoComparisonStatus(
+        autoCompareMode === "matrix"
+          ? "Starting the comparison matrix…"
+          : `Building ${String(AUTO_COMPARISON_REFERENCE_FRAMES)}-frame reference, then comparing ${autoCompareMode} for ${String(COMPARISON_DURATION_MS / 1_000)} seconds…`,
+      );
+      const comparisonPromise =
+        autoCompareMode === "matrix"
+          ? runAutomaticComparisonMatrix(
+              AUTO_COMPARISON_REFERENCE_FRAMES,
+              COMPARISON_DURATION_MS,
+              ({ caseIndex, totalCases, entry, phase }) => {
+                const action =
+                  phase === "reference"
+                    ? `building ${String(AUTO_COMPARISON_REFERENCE_FRAMES)}-frame reference`
+                    : `comparing ${phase} for ${String(COMPARISON_DURATION_MS / 1_000)} seconds`;
+                setAutoComparisonStatus(
+                  `${String(caseIndex)}/${String(totalCases)} · ${entry.label} · ${action}…`,
+                );
+              },
+            )
+          : runAutomaticComparison(
+              autoCompareMode,
+              AUTO_COMPARISON_REFERENCE_FRAMES,
+              COMPARISON_DURATION_MS,
+            );
+      void comparisonPromise
+        .then((comparison) => {
+          if (comparison === null) {
+            throw new Error("The comparison did not produce a capture.");
+          }
+          setReport(formatLinearComparisonReport(comparison));
+          setCaptureStatus("ready");
+          setIsComparing(false);
+          setAutoComparisonStatus(
+            "kind" in comparison
+              ? `${String(comparison.cases.length)} cases · ${String(
+                  comparison.cases.reduce(
+                    (total, entry) =>
+                      total + Object.keys(entry.comparisons).length,
+                    0,
+                  ),
+                )} comparisons complete`
+              : `${comparison.mode} · relative L2 ${comparison.relativeL2.toFixed(4)} · mean absolute ${comparison.meanAbsolute.toFixed(4)} · ${String(comparison.targetFrames)} frames in ${(comparison.actualDurationMs / 1_000).toFixed(2)} s`,
+          );
+        })
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          setIsComparing(false);
+          setCaptureError(message);
+          setCaptureStatus("capture-error");
+          setAutoComparisonStatus(`${message} Reload this URL to retry.`);
+        });
+    }, 0);
+    return () => {
+      window.clearTimeout(timeoutId);
+      if (autoComparisonStateRef.current === "scheduled") {
+        autoComparisonStateRef.current = "idle";
+      }
+    };
+  }, [
+    autoCompareMode,
+    runAutomaticComparison,
+    runAutomaticComparisonMatrix,
+    settings.mode,
+    stats.accumFrames,
+  ]);
 
   const copyReport = async (): Promise<void> => {
     if (report === null) return;
@@ -89,7 +263,7 @@ export const StatsOverlay = ({
   };
 
   const runPrimaryAction = (): void => {
-    if (captureStatus === "measuring") return;
+    if (captureStatus === "measuring" || isComparing) return;
     if (report === null) {
       void startCapture();
     } else {
@@ -97,8 +271,9 @@ export const StatsOverlay = ({
     }
   };
 
-  const primaryLabel =
-    captureStatus === "measuring"
+  const primaryLabel = isComparing
+    ? "Comparing…"
+    : captureStatus === "measuring"
       ? `Measuring ${String(activeRun)}/${String(PERFORMANCE_CAPTURE_RUN_COUNT)}…`
       : report === null
         ? `Measure ${String(PERFORMANCE_CAPTURE_RUN_COUNT)}×${String(PERFORMANCE_CAPTURE_DURATION_MS / 1_000)} s`
@@ -106,10 +281,53 @@ export const StatsOverlay = ({
           ? "Copy again"
           : "Copy result";
 
+  const saveReference = async (): Promise<void> => {
+    setIsComparing(true);
+    setComparisonStatus(null);
+    try {
+      const saved = await saveComparisonReference();
+      showComparisonStatus(
+        saved ? "Reference saved." : "No stable frame to save.",
+      );
+    } catch (error) {
+      showComparisonStatus(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setIsComparing(false);
+    }
+  };
+
+  const compareReference = async (): Promise<void> => {
+    setIsComparing(true);
+    setComparisonStatus(null);
+    try {
+      const comparison = await compareReferenceAfter(
+        settings.mode,
+        COMPARISON_DURATION_MS,
+      );
+      const capturedView =
+        comparison === null
+          ? null
+          : `${String(comparison.context.width)}×${String(comparison.context.height)} eye ${comparison.context.camera.pos.x.toFixed(3)},${comparison.context.camera.pos.y.toFixed(3)},${comparison.context.camera.pos.z.toFixed(3)}`;
+      showComparisonStatus(
+        comparison === null
+          ? "Save a reference first."
+          : `${comparison.mode} · saved ${capturedView ?? "view"} · relative L2 ${comparison.relativeL2.toFixed(4)} · mean absolute ${comparison.meanAbsolute.toFixed(4)} · ${String(comparison.targetFrames)} frames in ${(comparison.actualDurationMs / 1_000).toFixed(2)} s`,
+      );
+    } catch (error) {
+      showComparisonStatus(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setIsComparing(false);
+    }
+  };
+
   return (
     <section
       aria-label="Stats"
-      aria-busy={captureStatus === "measuring"}
+      aria-busy={captureStatus === "measuring" || isComparing}
       className="absolute top-3 left-3 z-20 max-w-[calc(100vw-7rem)] rounded-lg bg-neutral-950/80 px-3 py-2 backdrop-blur"
     >
       <dl className="grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 font-mono text-xs text-neutral-400">
@@ -135,6 +353,48 @@ export const StatsOverlay = ({
           {stats.accumFrames}
         </dd>
       </dl>
+      {(import.meta.env.DEV || autoCompareMode !== null) && (
+        <div className="mt-2 border-t border-neutral-700 pt-2">
+          {import.meta.env.DEV && (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={
+                  isComparing ||
+                  captureStatus === "measuring" ||
+                  settings.mode !== "reference"
+                }
+                className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+                onClick={() => void saveReference()}
+              >
+                Save ref
+              </button>
+              <button
+                type="button"
+                disabled={
+                  isComparing ||
+                  captureStatus === "measuring" ||
+                  settings.mode === "reference"
+                }
+                className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+                onClick={() => void compareReference()}
+              >
+                {isComparing ? "Comparing…" : "Compare 5 s"}
+              </button>
+            </div>
+          )}
+          <p
+            aria-live="polite"
+            className="mt-1 font-mono text-xs text-neutral-400"
+          >
+            {autoCompareMode !== null
+              ? autoComparisonStatus
+              : comparisonStatus?.settingsKey === comparisonSettingsKey
+                ? comparisonStatus.text
+                : null}
+          </p>
+        </div>
+      )}
       <div className="mt-2 border-t border-neutral-700 pt-2">
         {capture !== null && (
           <div className="mb-2 font-mono text-xs">
@@ -154,9 +414,9 @@ export const StatsOverlay = ({
           <button
             ref={primaryButtonRef}
             type="button"
-            aria-disabled={captureStatus === "measuring"}
+            aria-disabled={captureStatus === "measuring" || isComparing}
             className={`min-h-11 grow rounded border px-3 py-2 text-xs font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400 ${
-              captureStatus === "measuring"
+              captureStatus === "measuring" || isComparing
                 ? "cursor-wait border-neutral-700 bg-neutral-900 text-neutral-400"
                 : "border-sky-700 bg-sky-950 text-sky-100 hover:bg-sky-900"
             }`}
@@ -164,10 +424,11 @@ export const StatsOverlay = ({
           >
             {primaryLabel}
           </button>
-          {report !== null && (
+          {capture !== null && report !== null && (
             <button
               type="button"
               aria-label="Measure again"
+              disabled={isComparing}
               className="min-h-11 rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-xs text-neutral-300 hover:bg-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400"
               onClick={() => {
                 primaryButtonRef.current?.focus();
@@ -182,7 +443,9 @@ export const StatsOverlay = ({
           {captureStatus === "measuring"
             ? `Measuring run ${String(activeRun)} of ${String(PERFORMANCE_CAPTURE_RUN_COUNT)} for ${String(PERFORMANCE_CAPTURE_DURATION_MS / 1_000)} seconds.`
             : captureStatus === "ready"
-              ? "Measurement complete. Copy result is ready."
+              ? capture === null
+                ? "Comparison complete. Copy result is ready."
+                : "Measurement complete. Copy result is ready."
               : captureStatus === "copied"
                 ? "Result copied to clipboard."
                 : captureError}

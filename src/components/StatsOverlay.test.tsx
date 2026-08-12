@@ -5,9 +5,11 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StatsOverlay } from "@/components/StatsOverlay";
+import { DEFAULT_CAMERA } from "@/gi/camera";
 import type { PerformanceMeasurement } from "@/gi/performance";
 import { DEFAULT_SETTINGS } from "@/gi/settings";
 
@@ -42,10 +44,55 @@ const measurement: PerformanceMeasurement = {
   renderResolution: { width: 1080, height: 2208 },
 };
 
+const comparisonReport = {
+  luminanceRatio: 1,
+  relativeL2: 0.01234,
+  meanAbsolute: 0.05678,
+  maxAbsolute: 0.5,
+  outliers: 2,
+  pixels: 100,
+  label: "path-traced",
+  mode: "path-traced" as const,
+  requestedDurationMs: 5_000,
+  actualDurationMs: 5_012,
+  targetFrames: 240,
+  referenceFrames: 2_048,
+  referenceActualDurationMs: 25_600,
+  context: {
+    atrousVariant: "tiled-16" as const,
+    scene: "classic" as const,
+    maxBounces: 3,
+    width: 640,
+    height: 480,
+    camera: {
+      pos: { x: 0, y: 0, z: 2 },
+      forward: { x: 0, y: 0, z: -1 },
+      right: { x: 1, y: 0, z: 0 },
+      up: { x: 0, y: 1, z: 0 },
+      tanHalfFov: 0.25,
+      aspect: 4 / 3,
+    },
+    settings: { ...DEFAULT_SETTINGS, mode: "path-traced" as const },
+  },
+};
+
+const inertComparisonProps = () => ({
+  saveComparisonReference: vi.fn().mockResolvedValue(false),
+  compareReferenceAfter: vi.fn().mockResolvedValue(null),
+  runAutomaticComparison: vi.fn().mockResolvedValue(null),
+  runAutomaticComparisonMatrix: vi.fn().mockResolvedValue({
+    kind: "comparison-matrix",
+    requestedReferenceFrames: 2_048,
+    requestedDurationMs: 5_000,
+    cases: [],
+  }),
+});
+
 describe("StatsOverlay performance capture", () => {
   const writeText = vi.fn<(text: string) => Promise<void>>();
 
   beforeEach(() => {
+    writeText.mockReset();
     writeText.mockResolvedValue();
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -62,6 +109,7 @@ describe("StatsOverlay performance capture", () => {
     const measurePerformance = vi.fn().mockResolvedValue(measurement);
     render(
       <StatsOverlay
+        {...inertComparisonProps()}
         stats={{
           width: 1080,
           height: 2208,
@@ -110,6 +158,247 @@ describe("StatsOverlay performance capture", () => {
     expect(measureButton).toHaveFocus();
   });
 
+  it("starts one three-run capture when automatic measurement is requested", async () => {
+    const measurePerformance = vi.fn().mockResolvedValue(measurement);
+    const props = {
+      ...inertComparisonProps(),
+      stats: {
+        width: 1080,
+        height: 2208,
+        accumFrames: 42,
+        frameMs: 33.1,
+        atrousVariant: "fallback" as const,
+      },
+      settings: DEFAULT_SETTINGS,
+      measurePerformance,
+      autoMeasure: true,
+    };
+    const { rerender } = render(
+      <StrictMode>
+        <StatsOverlay {...props} />
+      </StrictMode>,
+    );
+
+    await screen.findByText(/33.10 ms GPU median run/);
+    expect(measurePerformance).toHaveBeenCalledTimes(3);
+    rerender(
+      <StrictMode>
+        <StatsOverlay {...props} />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(measurePerformance).toHaveBeenCalledTimes(3));
+  });
+
+  it("saves and compares linear development captures", async () => {
+    const saveReference = vi.fn().mockResolvedValue(true);
+    const compareReferenceAfter = vi.fn().mockResolvedValue(comparisonReport);
+    const stats = {
+      width: 640,
+      height: 480,
+      accumFrames: 42,
+      frameMs: 16,
+      atrousVariant: "tiled-16" as const,
+    };
+    const measurePerformance = vi.fn();
+    const { rerender } = render(
+      <StatsOverlay
+        saveComparisonReference={saveReference}
+        compareReferenceAfter={compareReferenceAfter}
+        runAutomaticComparison={vi.fn().mockResolvedValue(null)}
+        runAutomaticComparisonMatrix={vi.fn()}
+        stats={stats}
+        settings={{ ...DEFAULT_SETTINGS, mode: "reference" }}
+        measurePerformance={measurePerformance}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Compare 5 s" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save ref" }));
+    expect(await screen.findByText("Reference saved.")).toBeVisible();
+    rerender(
+      <StatsOverlay
+        saveComparisonReference={saveReference}
+        compareReferenceAfter={compareReferenceAfter}
+        runAutomaticComparison={vi.fn().mockResolvedValue(null)}
+        runAutomaticComparisonMatrix={vi.fn()}
+        stats={stats}
+        settings={{ ...DEFAULT_SETTINGS, mode: "path-traced" }}
+        measurePerformance={measurePerformance}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Save ref" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Compare 5 s" }));
+    expect(
+      await screen.findByText(
+        "path-traced · saved 640×480 eye 0.000,0.000,2.000 · relative L2 0.0123 · mean absolute 0.0568 · 240 frames in 5.01 s",
+      ),
+    ).toBeVisible();
+    expect(compareReferenceAfter).toHaveBeenCalledWith("path-traced", 5_000);
+  });
+
+  it("automates a fixed-size reference and equal-time comparison once", async () => {
+    const automaticComparisonReport = {
+      ...comparisonReport,
+      referenceFrames: 1_024,
+      referenceActualDurationMs: 12_800,
+    };
+    const runAutomaticComparison = vi
+      .fn()
+      .mockResolvedValue(automaticComparisonReport);
+    render(
+      <StrictMode>
+        <StatsOverlay
+          {...inertComparisonProps()}
+          runAutomaticComparison={runAutomaticComparison}
+          measurePerformance={vi.fn()}
+          autoCompareMode="path-traced"
+          stats={{
+            width: 640,
+            height: 480,
+            accumFrames: 1,
+            frameMs: 12,
+            atrousVariant: "tiled-16",
+          }}
+          settings={{ ...DEFAULT_SETTINGS, mode: "reference" }}
+        />
+      </StrictMode>,
+    );
+
+    expect(
+      await screen.findByText(/path-traced · relative L2 0.0123/),
+    ).toBeVisible();
+    expect(runAutomaticComparison).toHaveBeenCalledOnce();
+    expect(runAutomaticComparison).toHaveBeenCalledWith(
+      "path-traced",
+      1_024,
+      5_000,
+    );
+    expect(screen.queryByRole("button", { name: "Measure again" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy result" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+    const copied = JSON.parse(writeText.mock.calls[0]?.[0] ?? "");
+    expect(copied).toMatchObject({
+      schemaVersion: 1,
+      mode: "path-traced",
+      referenceFrames: 1_024,
+      targetFrames: 240,
+      relativeL2: 0.01234,
+    });
+  });
+
+  it("keeps automatic comparison failures visible after renderer state changes", async () => {
+    const runAutomaticComparison = vi
+      .fn()
+      .mockRejectedValue(new Error("Render settings changed"));
+    render(
+      <StatsOverlay
+        {...inertComparisonProps()}
+        runAutomaticComparison={runAutomaticComparison}
+        measurePerformance={vi.fn()}
+        autoCompareMode="restir"
+        stats={{
+          width: 640,
+          height: 480,
+          accumFrames: 1,
+          frameMs: 16,
+          atrousVariant: "tiled-16",
+        }}
+        settings={{ ...DEFAULT_SETTINGS, mode: "reference" }}
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        "Render settings changed Reload this URL to retry.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByText("Render settings changed")).toBeVisible();
+  });
+
+  it("automates and copies the paired comparison matrix once", async () => {
+    const pathTracedReport = {
+      ...comparisonReport,
+      referenceFrames: 1_024,
+      referenceActualDurationMs: 12_800,
+    };
+    const restirReport = {
+      ...pathTracedReport,
+      label: "restir",
+      mode: "restir" as const,
+      context: {
+        ...comparisonReport.context,
+        settings: { ...DEFAULT_SETTINGS, mode: "restir" as const },
+      },
+    };
+    const matrixReport = {
+      kind: "comparison-matrix" as const,
+      requestedReferenceFrames: 1_024,
+      requestedDurationMs: 5_000,
+      cases: [
+        {
+          label: "classic/front",
+          scene: "classic" as const,
+          cameraLabel: "front",
+          camera: DEFAULT_CAMERA,
+          runOrder: ["restir", "path-traced"] as const,
+          comparisons: {
+            restir: restirReport,
+            "path-traced": pathTracedReport,
+          },
+        },
+      ],
+    };
+    const runAutomaticComparisonMatrix = vi
+      .fn()
+      .mockImplementation(async (_frames, _duration, onProgress) => {
+        onProgress({
+          caseIndex: 1,
+          totalCases: 1,
+          entry: matrixReport.cases[0],
+          phase: "reference",
+        });
+        return matrixReport;
+      });
+
+    render(
+      <StatsOverlay
+        {...inertComparisonProps()}
+        runAutomaticComparisonMatrix={runAutomaticComparisonMatrix}
+        measurePerformance={vi.fn()}
+        autoCompareMode="matrix"
+        stats={{
+          width: 640,
+          height: 480,
+          accumFrames: 1,
+          frameMs: 12,
+          atrousVariant: "tiled-16",
+        }}
+        settings={{ ...DEFAULT_SETTINGS, mode: "reference" }}
+      />,
+    );
+
+    expect(
+      await screen.findByText("1 cases · 2 comparisons complete"),
+    ).toBeVisible();
+    expect(runAutomaticComparisonMatrix).toHaveBeenCalledOnce();
+    expect(runAutomaticComparisonMatrix).toHaveBeenCalledWith(
+      1_024,
+      5_000,
+      expect.any(Function),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy result" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+    const copied = JSON.parse(writeText.mock.calls[0]?.[0] ?? "");
+    expect(copied).toMatchObject({
+      schemaVersion: 1,
+      kind: "comparison-matrix",
+      requestedReferenceFrames: 1_024,
+      cases: [{ label: "classic/front" }],
+    });
+  });
+
   it("allows retrying after capture failure", async () => {
     const measurePerformance = vi
       .fn()
@@ -117,6 +406,7 @@ describe("StatsOverlay performance capture", () => {
       .mockResolvedValue(measurement);
     render(
       <StatsOverlay
+        {...inertComparisonProps()}
         stats={{
           width: 640,
           height: 480,
@@ -140,6 +430,7 @@ describe("StatsOverlay performance capture", () => {
     writeText.mockRejectedValueOnce(new Error("permission denied"));
     render(
       <StatsOverlay
+        {...inertComparisonProps()}
         stats={{
           width: 640,
           height: 480,
@@ -182,6 +473,7 @@ describe("StatsOverlay performance capture", () => {
       .mockReturnValueOnce(third);
     render(
       <StatsOverlay
+        {...inertComparisonProps()}
         stats={{
           width: 640,
           height: 480,

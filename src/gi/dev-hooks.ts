@@ -1,15 +1,14 @@
-/**
- * Development-only handle for the linear-capture instrumentation. Vite strips
- * the installer's body from a production build, so this costs the shipped
- * bundle nothing — the capture has no user-facing surface and exists to let a
- * measurement harness read the render back and score it against the reference.
- */
+/** Development-only global access to the renderer's comparison session. */
 import type { LinearImage } from "@/gi/compare";
 import { compareLinear } from "@/gi/compare";
+import type { ComparisonSession } from "@/gi/comparison-session";
 
 export type DevHooks = {
   readonly capture: () => Promise<LinearImage | null>;
   readonly compare: typeof compareLinear;
+  readonly saveReference: ComparisonSession["saveReference"];
+  readonly compareReference: ComparisonSession["compareReference"];
+  readonly compareReferenceAfter: ComparisonSession["compareReferenceAfter"];
 };
 
 declare global {
@@ -18,7 +17,14 @@ declare global {
 
 export const installDevHooks = (
   capture: () => Promise<LinearImage | null>,
+  comparison: ComparisonSession,
 ): void => {
   if (!import.meta.env.DEV) return;
-  globalThis.__gi = { capture, compare: compareLinear };
+  globalThis.__gi = {
+    capture,
+    compare: compareLinear,
+    saveReference: comparison.saveReference,
+    compareReference: comparison.compareReference,
+    compareReferenceAfter: comparison.compareReferenceAfter,
+  };
 };

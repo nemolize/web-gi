@@ -7,6 +7,8 @@ const INV_PI: f32 = 0.31830988618;
 const RAY_EPS: f32 = 1e-4;
 const SURFACE_EPS: f32 = 1e-3;
 const T_FAR: f32 = 1e20;
+/** Firefly guard; generous enough that it never clips the lit floor. */
+const MAX_ILLUMINATION: f32 = 200.0;
 
 /**
  * vec4f throughout: a `vec3f` followed by a scalar packs that scalar into the
