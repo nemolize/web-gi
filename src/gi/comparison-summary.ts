@@ -1,6 +1,6 @@
 /** Per-case and per-scene verdicts over a comparison matrix. */
 import type {
-  ComparisonMatrixCaseReport,
+  ComparisonMatrixRunReport,
   LinearComparisonMatrixReport,
 } from "@/gi/comparison-matrix";
 import { COMPARISON_MATRIX_MODES } from "@/gi/comparison-matrix";
@@ -32,12 +32,11 @@ export type MetricSamples = {
   readonly median: number;
   readonly min: number;
   readonly max: number;
-  readonly samples: number;
+  readonly count: number;
 };
 
 export type MetricVerdict = {
-  readonly values: Readonly<Record<ComparisonMode, number>>;
-  readonly spread: Readonly<Record<ComparisonMode, MetricSamples>>;
+  readonly samples: Readonly<Record<ComparisonMode, MetricSamples>>;
   /** Null when the two renderers tie, or when either value is not finite. */
   readonly winner: ComparisonMode | null;
   /**
@@ -67,6 +66,8 @@ export type ScopeSummary = {
   /** `"all"` for the whole matrix, otherwise the scene these cases share. */
   readonly scope: SceneVariant | "all";
   readonly cases: number;
+  /** False when no case here was repeated, so separation was never measurable. */
+  readonly separable: boolean;
   readonly tallies: Readonly<Record<ComparisonMetric, MetricTally>>;
 };
 
@@ -86,7 +87,6 @@ const byMetric = <T>(
   luminanceError: build("luminanceError"),
 });
 
-/** NaN for an empty sample set, which `verdictFor` reports as an unusable metric. */
 const summarizeSamples = (values: readonly number[]): MetricSamples => {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = sorted.length >> 1;
@@ -100,15 +100,15 @@ const summarizeSamples = (values: readonly number[]): MetricSamples => {
     median,
     min: sorted[0] ?? Number.NaN,
     max: sorted[sorted.length - 1] ?? Number.NaN,
-    samples: sorted.length,
+    count: sorted.length,
   };
 };
 
 const verdictFor = (
-  runs: readonly ComparisonMatrixCaseReport[],
+  runs: readonly ComparisonMatrixRunReport[],
   metric: ComparisonMetric,
 ): MetricVerdict => {
-  const spread = {
+  const samples = {
     restir: summarizeSamples(
       runs.map((run) => metricValue(run.comparisons.restir, metric)),
     ),
@@ -116,8 +116,8 @@ const verdictFor = (
       runs.map((run) => metricValue(run.comparisons["path-traced"], metric)),
     ),
   };
-  const restir = spread.restir.median;
-  const pathTraced = spread["path-traced"].median;
+  const restir = samples.restir.median;
+  const pathTraced = samples["path-traced"].median;
   // A NaN loses every comparison, so `<` would hand the win to the other side
   // rather than reporting that the metric is unusable.
   const comparable =
@@ -133,15 +133,14 @@ const verdictFor = (
         ? "restir"
         : "path-traced";
   return {
-    values: { restir, "path-traced": pathTraced },
-    spread,
+    samples,
     winner,
     separated:
       winner !== null &&
       runs.length > 1 &&
       (winner === "restir"
-        ? spread.restir.max < spread["path-traced"].min
-        : spread["path-traced"].max < spread.restir.min),
+        ? samples.restir.max < samples["path-traced"].min
+        : samples["path-traced"].max < samples.restir.min),
   };
 };
 
@@ -151,6 +150,7 @@ const summarize = (
 ): ScopeSummary => ({
   scope,
   cases: cases.length,
+  separable: cases.some((entry) => entry.repeats > 1),
   tallies: byMetric((metric) => {
     let restir = 0;
     let pathTraced = 0;
@@ -171,13 +171,12 @@ export const summarizeComparisonMatrix = (
   report: LinearComparisonMatrixReport,
 ): ComparisonMatrixSummary => {
   // Repeats of a case are spread through the run list, so group by label rather
-  // than chunking; insertion order keeps the first-measured case first. Keying
-  // on the first run keeps the group non-empty by construction.
+  // than chunking.
   const runsByCase = new Map<
     string,
-    { first: ComparisonMatrixCaseReport; runs: ComparisonMatrixCaseReport[] }
+    { first: ComparisonMatrixRunReport; runs: ComparisonMatrixRunReport[] }
   >();
-  for (const run of report.cases) {
+  for (const run of report.runs) {
     const existing = runsByCase.get(run.label);
     if (existing === undefined) {
       runsByCase.set(run.label, { first: run, runs: [run] });
@@ -239,7 +238,11 @@ const formatScope = (scope: ScopeSummary): string =>
         `${MODE_LABELS["path-traced"]} ${String(tally.wins["path-traced"])}/${String(scope.cases)}`,
       ];
       if (tally.ties > 0) parts.push(`ties ${String(tally.ties)}`);
-      parts.push(`separated ${String(tally.separated)}/${String(scope.cases)}`);
+      if (scope.separable) {
+        parts.push(
+          `separated ${String(tally.separated)}/${String(scope.cases)}`,
+        );
+      }
       return `- ${METRIC_LABELS[metric]}: ${parts.join(" · ")}`;
     }),
   ].join("\n");
@@ -252,15 +255,15 @@ export const formatComparisonMatrixSummary = (
     metric: ComparisonMetric,
     samples: MetricSamples,
   ): string =>
-    samples.samples < 2
+    samples.count < 2
       ? formatValue(metric, samples.median)
       : `${formatValue(metric, samples.median)} (${formatValue(metric, samples.min)}–${formatValue(metric, samples.max)})`;
 
   const rows = summary.cases.flatMap((entry) =>
     COMPARISON_METRICS.map((metric) => {
       const verdict = entry.metrics[metric];
-      const restir = formatSpread(metric, verdict.spread.restir);
-      const pathTraced = formatSpread(metric, verdict.spread["path-traced"]);
+      const restir = formatSpread(metric, verdict.samples.restir);
+      const pathTraced = formatSpread(metric, verdict.samples["path-traced"]);
       const winner =
         verdict.winner === null
           ? "tie"

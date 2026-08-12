@@ -146,7 +146,7 @@ describe("development comparison hooks", () => {
       requestedReferenceFrames: 1_024,
       requestedDurationMs: 5_000,
       repeats: 0,
-      cases: [],
+      runs: [],
     });
     expect(summary.overall.cases).toBe(0);
     expect(hooks.formatMatrixSummary(summary)).toContain("## Per-scene");

@@ -533,15 +533,15 @@ export const useGiRenderer = (
         renderer.renderFrame(camera);
       };
 
-      const runs = comparisonMatrixRuns(repeats);
-      const cases: LinearComparisonMatrixReport["cases"][number][] = [];
-      for (const [runOffset, entry] of runs.entries()) {
+      const schedule = comparisonMatrixRuns(repeats);
+      const runs: LinearComparisonMatrixReport["runs"][number][] = [];
+      for (const [runOffset, entry] of schedule.entries()) {
         try {
           const runIndex = runOffset + 1;
           const { runOrder } = entry;
           onProgress({
             runIndex,
-            totalRuns: runs.length,
+            totalRuns: schedule.length,
             entry,
             phase: "reference",
           });
@@ -556,7 +556,7 @@ export const useGiRenderer = (
           for (const mode of runOrder) {
             onProgress({
               runIndex,
-              totalRuns: runs.length,
+              totalRuns: schedule.length,
               entry,
               phase: mode,
             });
@@ -575,7 +575,7 @@ export const useGiRenderer = (
           if (restir === null || pathTraced === null) {
             throw new Error("The comparison matrix is incomplete.");
           }
-          cases.push({
+          runs.push({
             ...entry,
             comparisons: { restir, "path-traced": pathTraced },
           });
@@ -587,8 +587,8 @@ export const useGiRenderer = (
         kind: "comparison-matrix",
         requestedReferenceFrames: referenceFrames,
         requestedDurationMs: durationMs,
-        repeats: runs.length / COMPARISON_MATRIX_CASES.length,
-        cases,
+        repeats: schedule.length / COMPARISON_MATRIX_CASES.length,
+        runs,
       };
     },
     [],

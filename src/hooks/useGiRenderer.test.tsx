@@ -18,14 +18,14 @@ import type { LinearComparisonReport } from "@/gi/comparison-session";
 import type { DeviceLossInfo, RendererStats } from "@/gi/renderer";
 import { DEFAULT_SETTINGS } from "@/gi/settings";
 import type { RendererFactory, RendererHandle } from "@/hooks/useGiRenderer";
-
-/** Even, so the run-order balance the schedule promises is observable here. */
-const MATRIX_TEST_REPEATS = 2;
-const MATRIX_TEST_RUNS = comparisonMatrixRuns(MATRIX_TEST_REPEATS);
 import {
   PERFORMANCE_CAPTURE_TIMEOUT_MS,
   useGiRenderer,
 } from "@/hooks/useGiRenderer";
+
+/** Even, so the run-order balance the schedule promises is observable here. */
+const MATRIX_TEST_REPEATS = 2;
+const MATRIX_TEST_RUNS = comparisonMatrixRuns(MATRIX_TEST_REPEATS);
 
 type FakeRenderer = {
   readonly renderer: RendererHandle;
@@ -119,6 +119,7 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
   const [matrixCases, setMatrixCases] = useState<number | null>(null);
   const [matrixReport, setMatrixReport] =
     useState<LinearComparisonMatrixReport | null>(null);
+  const [matrixProgress, setMatrixProgress] = useState<string | null>(null);
 
   return (
     <>
@@ -148,14 +149,20 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
       <button
         type="button"
         onClick={() => {
+          const progress: string[] = [];
           void runAutomaticComparisonMatrix(
             2_048,
             5_000,
             MATRIX_TEST_REPEATS,
-            () => undefined,
+            ({ runIndex, totalRuns, entry, phase }) => {
+              progress.push(
+                `${String(runIndex)}/${String(totalRuns)} ${entry.label}#${String(entry.repeat)} ${phase}`,
+              );
+            },
           ).then((report) => {
-            setMatrixCases(report.cases.length);
+            setMatrixCases(report.runs.length);
             setMatrixReport(report);
+            setMatrixProgress(progress.join("\n"));
           });
         }}
       >
@@ -180,6 +187,7 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
       <output data-testid="captured-callbacks">{capturedCallbacks}</output>
       <output data-testid="capture-error">{captureError}</output>
       <output data-testid="matrix-cases">{matrixCases}</output>
+      <output data-testid="matrix-progress">{matrixProgress}</output>
       <output data-testid="matrix-report">
         {matrixReport === null ? null : JSON.stringify(matrixReport)}
       </output>
@@ -623,10 +631,25 @@ describe("useGiRenderer", () => {
     expect(fake.renderer.compareReferenceAfter).toHaveBeenCalledTimes(
       MATRIX_TEST_RUNS.length * 2,
     );
+    // Pinned literally: deriving every expectation from the schedule would let a
+    // regression in it mirror itself on both sides of the assertion.
+    expect(fake.compareReferenceAfter.mock.calls.slice(0, 2)).toEqual([
+      ["restir", 5_000],
+      ["path-traced", 5_000],
+    ]);
     expect(fake.compareReferenceAfter.mock.calls).toEqual(
       MATRIX_TEST_RUNS.flatMap((run) =>
         run.runOrder.map((mode) => [mode, 5_000]),
       ),
+    );
+    // Counts the runs from 1 and reports each run's three phases in order.
+    expect(screen.getByTestId("matrix-progress")).toHaveTextContent(
+      MATRIX_TEST_RUNS.flatMap((run, index) =>
+        ["reference", ...run.runOrder].map(
+          (phase) =>
+            `${String(index + 1)}/${String(MATRIX_TEST_RUNS.length)} ${run.label}#${String(run.repeat)} ${phase}`,
+        ),
+      ).join(" "),
     );
 
     const saves = vi.mocked(fake.renderer.saveComparisonReferenceAfterFrames)
@@ -650,7 +673,7 @@ describe("useGiRenderer", () => {
     );
     expect(matrix).toMatchObject({
       repeats: MATRIX_TEST_REPEATS,
-      cases: MATRIX_TEST_RUNS.map((entry) => ({
+      runs: MATRIX_TEST_RUNS.map((entry) => ({
         label: entry.label,
         scene: entry.scene,
         camera: entry.camera,

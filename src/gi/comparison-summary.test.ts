@@ -1,6 +1,6 @@
 import { DEFAULT_CAMERA } from "@/gi/camera";
 import type {
-  ComparisonMatrixCaseReport,
+  ComparisonMatrixRunReport,
   LinearComparisonMatrixReport,
 } from "@/gi/comparison-matrix";
 import type { LinearComparisonReport } from "@/gi/comparison-session";
@@ -58,7 +58,7 @@ const matrixCase = (
   restir: Partial<LinearComparisonReport>,
   pathTraced: Partial<LinearComparisonReport>,
   repeat = 0,
-): ComparisonMatrixCaseReport => ({
+): ComparisonMatrixRunReport => ({
   label: `${scene}/${cameraLabel}`,
   scene,
   cameraLabel,
@@ -73,13 +73,13 @@ const matrixCase = (
 });
 
 const matrix = (
-  cases: readonly ComparisonMatrixCaseReport[],
+  runs: readonly ComparisonMatrixRunReport[],
 ): LinearComparisonMatrixReport => ({
   kind: "comparison-matrix",
   requestedReferenceFrames: 1_024,
   requestedDurationMs: 5_000,
-  repeats: new Set(cases.map(({ repeat }) => repeat)).size,
-  cases,
+  repeats: new Set(runs.map(({ repeat }) => repeat)).size,
+  runs,
 });
 
 describe("metricValue", () => {
@@ -244,12 +244,11 @@ describe("summarizeComparisonMatrix", () => {
     expect(summary.cases[0]?.repeats).toBe(3);
     const verdict = summary.cases[0]?.metrics.relativeL2;
     expect(verdict?.winner).toBe("restir");
-    expect(verdict?.values["path-traced"]).toBe(2);
-    expect(verdict?.spread["path-traced"]).toEqual({
+    expect(verdict?.samples["path-traced"]).toEqual({
       median: 2,
       min: 2,
       max: 90,
-      samples: 3,
+      count: 3,
     });
   });
 
@@ -260,7 +259,9 @@ describe("summarizeComparisonMatrix", () => {
         matrixCase("classic", "front", { relativeL2: 4 }, { relativeL2: 1 }, 1),
       ]),
     );
-    expect(summary.cases[0]?.metrics.relativeL2.spread.restir.median).toBe(2.5);
+    expect(summary.cases[0]?.metrics.relativeL2.samples.restir.median).toBe(
+      2.5,
+    );
   });
 
   it("never calls a single-repeat win separated", () => {
@@ -305,6 +306,36 @@ describe("summarizeComparisonMatrix", () => {
     expect(verdict?.winner).toBe("restir");
     expect(verdict?.separated).toBe(true);
     expect(summary.overall.tallies.relativeL2.separated).toBe(1);
+  });
+
+  it("separates a path-traced win the same way", () => {
+    // The winner decides which way the ranges are compared, so both arms need
+    // pinning; a one-sided test lets the other invert undetected.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 5 }, { relativeL2: 1 }, 0),
+        matrixCase("classic", "front", { relativeL2: 6 }, { relativeL2: 2 }, 1),
+      ]),
+    );
+
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.winner).toBe("path-traced");
+    expect(verdict?.separated).toBe(true);
+  });
+
+  it("does not separate repeats that merely touch", () => {
+    // Ranges sharing an endpoint overlap at that point, so the measurement has
+    // not told the two renderers apart.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 3 }, 0),
+        matrixCase("classic", "front", { relativeL2: 3 }, { relativeL2: 5 }, 1),
+      ]),
+    );
+
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.winner).toBe("restir");
+    expect(verdict?.separated).toBe(false);
   });
 
   it("refuses a verdict when any single repeat is not finite", () => {

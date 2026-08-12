@@ -73,9 +73,10 @@ Equal-time linear-radiance comparisons use similarly short URLs:
 The matrix preset runs the Cornell box and 30-light scene from the front, left,
 and right-high views. It builds one exact 1,024-frame, GPU-completion-paced
 `Reference PT` oracle per view and compares both ReSTIR and Denoised PT against
-that shared image for five seconds each. The whole six-case sweep repeats three
-times, repeats outermost, so a case's measurements are spread across the session
-rather than taken back to back in one thermal state. The individual URLs run the
+that shared image for five seconds each. The whole six-case sweep repeats — three
+times by default — with repeats outermost, so a case's measurements are spread
+across the session rather than taken back to back in one thermal state. The
+individual URLs run the
 same process for one renderer at the default view. Reports include the camera
 basis, settings, a-trous variant, frame counts, actual durations, and
 linear-radiance error metrics, and remain available through `Copy result`. Keep
@@ -95,6 +96,10 @@ repeats are folded into one verdict on their **median**, so a single thermal
 outlier cannot flip a case the way a mean would, and the per-case table carries
 the min–max range beside it.
 
+The per-scene split is the part worth reading — an even overall tally can be two
+opposite sweeps, and which scene a renderer wins is what decides whether a
+hybrid is worth building (#43).
+
 Each verdict also reports whether it is **separated** — whether the winner's
 repeats sit entirely clear of the loser's. Margins here have been observed as
 narrow as 3%, which a single pass cannot distinguish from drift, so an
@@ -111,8 +116,8 @@ all six, plus lower absolute luminance error in four. A 512-frame run was
 rejected after it changed one Relative L2 winner. Those figures are aggregates
 from a single unrepeated pass, recorded before the summary existed, so they say
 neither how the six cases split by scene nor which of those wins clear
-run-to-run spread; a fresh matrix run reports both directly. Budget roughly
-three times the single-pass duration for the repeated sweep. Higher-confidence
+run-to-run spread; a fresh matrix run reports both directly. Budget the
+single-pass duration times the repeat count. Higher-confidence
 one-off validation can still use the development controls to save a longer
 reference, with the actual frame count retained in the report.
 

@@ -99,13 +99,13 @@ const describeSceneVerdicts = (
 ): string =>
   summary.byScene
     .map((scope) => {
-      const { wins, ties, separated } = scope.tallies[metric];
+      const { wins, ties } = scope.tallies[metric];
       const parts = [
         `${MODE_LABELS.restir} ${String(wins.restir)}`,
         `${MODE_LABELS["path-traced"]} ${String(wins["path-traced"])}`,
       ];
       if (ties > 0) parts.push(`ties ${String(ties)}`);
-      return `${scope.scope} ${parts.join("/")} (${String(separated)}/${String(scope.cases)} clear of spread)`;
+      return `${scope.scope} ${parts.join("/")}`;
     })
     .join(" · ");
 
@@ -239,8 +239,13 @@ export const StatsOverlay = ({
           if ("kind" in comparison) {
             const summary = summarizeComparisonMatrix(comparison);
             setReport(formatLinearComparisonReport(comparison, summary));
+            const { separated } = summary.overall.tallies.relativeL2;
             setAutoComparisonStatus(
-              `${String(summary.cases.length)} cases × ${String(comparison.repeats)} repeats · relative L2 wins by scene: ${describeSceneVerdicts(summary, "relativeL2")}`,
+              `${String(summary.cases.length)} cases × ${String(comparison.repeats)} repeats · relative L2 wins by scene: ${describeSceneVerdicts(summary, "relativeL2")}${
+                summary.overall.separable
+                  ? ` · ${String(separated)}/${String(summary.overall.cases)} clear of spread`
+                  : ""
+              }`,
             );
           } else {
             setReport(formatLinearComparisonReport(comparison, null));

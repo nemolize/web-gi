@@ -85,7 +85,8 @@ const inertComparisonProps = () => ({
     kind: "comparison-matrix",
     requestedReferenceFrames: 2_048,
     requestedDurationMs: 5_000,
-    cases: [],
+    repeats: 0,
+    runs: [],
   }),
 });
 
@@ -340,7 +341,7 @@ describe("StatsOverlay performance capture", () => {
       requestedReferenceFrames: 1_024,
       requestedDurationMs: 5_000,
       repeats: 1,
-      cases: [
+      runs: [
         {
           label: "classic/front",
           scene: "classic" as const,
@@ -362,7 +363,7 @@ describe("StatsOverlay performance capture", () => {
         onProgress({
           runIndex: 1,
           totalRuns: 1,
-          entry: matrixReport.cases[0],
+          entry: matrixReport.runs[0],
           phase: "reference",
         });
         return matrixReport;
@@ -387,7 +388,7 @@ describe("StatsOverlay performance capture", () => {
 
     expect(
       await screen.findByText(
-        "1 cases × 1 repeats · relative L2 wins by scene: classic ReSTIR 1/Denoised PT 0 (0/1 clear of spread)",
+        "1 cases × 1 repeats · relative L2 wins by scene: classic ReSTIR 1/Denoised PT 0",
       ),
     ).toBeVisible();
     expect(runAutomaticComparisonMatrix).toHaveBeenCalledOnce();
@@ -405,7 +406,7 @@ describe("StatsOverlay performance capture", () => {
       schemaVersion: 1,
       kind: "comparison-matrix",
       requestedReferenceFrames: 1_024,
-      cases: [{ label: "classic/front" }],
+      runs: [{ label: "classic/front" }],
     });
     expect(copied.summary.byScene).toHaveLength(1);
     expect(copied.summary.byScene[0].scope).toBe("classic");

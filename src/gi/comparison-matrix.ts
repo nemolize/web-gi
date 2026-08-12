@@ -58,7 +58,7 @@ export const COMPARISON_MATRIX_CASES: readonly ComparisonMatrixCase[] =
 export const DEFAULT_COMPARISON_MATRIX_REPEATS = 3;
 
 export type ComparisonMatrixRun = ComparisonMatrixCase & {
-  /** 0-based position among this case's repeats. */
+  /** 0-based. */
   readonly repeat: number;
   readonly runOrder: readonly [ComparisonMode, ComparisonMode];
 };
@@ -82,9 +82,7 @@ export const comparisonMatrixRuns = (
     })),
   ).flat();
 
-export type ComparisonMatrixCaseReport = ComparisonMatrixCase & {
-  readonly repeat: number;
-  readonly runOrder: readonly [ComparisonMode, ComparisonMode];
+export type ComparisonMatrixRunReport = ComparisonMatrixRun & {
   readonly comparisons: Readonly<
     Record<ComparisonMode, LinearComparisonReport>
   >;
@@ -95,8 +93,7 @@ export type LinearComparisonMatrixReport = {
   readonly requestedReferenceFrames: number;
   readonly requestedDurationMs: number;
   readonly repeats: number;
-  /** One entry per measured run: `repeats` of each case, in execution order. */
-  readonly cases: readonly ComparisonMatrixCaseReport[];
+  readonly runs: readonly ComparisonMatrixRunReport[];
 };
 
 export type ComparisonMatrixProgress = {
