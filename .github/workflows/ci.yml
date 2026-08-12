@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     container:
-      image: mcr.microsoft.com/playwright:v1.61.1-noble
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
       # Without --ipc=host chromium can run out of memory and crash.
       options: --init --ipc=host
 
