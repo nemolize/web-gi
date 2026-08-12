@@ -488,6 +488,7 @@ export const useGiRenderer = (
         settingsRef.current = targetSettings;
         renderer.setSettings(targetSettings);
         setSettings(targetSettings);
+        renderer.renderFrame(cameraRef.current);
         return await renderer.compareReferenceAfter(mode, durationMs);
       } finally {
         renderer.releaseComparisonResources();

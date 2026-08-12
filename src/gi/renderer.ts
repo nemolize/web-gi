@@ -228,20 +228,22 @@ type Layouts = {
   readonly capture: GPUBindGroupLayout;
 };
 
-type Pipelines = {
-  readonly gbuffer: GPUComputePipeline;
-  readonly di: GPUComputePipeline;
-  readonly diSpatial: GPUComputePipeline;
-  readonly gi: GPUComputePipeline;
-  readonly giSpatial: GPUComputePipeline;
-  readonly shade: GPUComputePipeline;
-  readonly pathTrace: GPUComputePipeline;
-  readonly reference: GPUComputePipeline;
-  readonly temporal: GPUComputePipeline;
-  readonly atrous: GPUComputePipeline;
-  readonly presentRestir: GPURenderPipeline;
-  readonly presentReference: GPURenderPipeline;
+type RendererPipelines<TCompute extends object, TRender extends object> = {
+  readonly gbuffer: TCompute;
+  readonly di: TCompute;
+  readonly diSpatial: TCompute;
+  readonly gi: TCompute;
+  readonly giSpatial: TCompute;
+  readonly shade: TCompute;
+  readonly getPathTracePipeline: () => TCompute;
+  readonly reference: TCompute;
+  readonly temporal: TCompute;
+  readonly atrous: TCompute;
+  readonly presentRestir: TRender;
+  readonly presentReference: TRender;
 };
+
+type Pipelines = RendererPipelines<GPUComputePipeline, GPURenderPipeline>;
 
 /** Everything whose size depends on the render resolution. */
 type Targets = {
@@ -293,6 +295,71 @@ const at = <T>(items: readonly T[], index: number): T => {
     throw new Error(`Missing resource at index ${String(index)}`);
   }
   return value;
+};
+
+type PipelineAssemblyLayouts<TLayout extends object> = {
+  readonly gbuffer: TLayout;
+  readonly resample: TLayout;
+  readonly spatial: TLayout;
+  readonly shade: TLayout;
+  readonly pathTrace: TLayout;
+  readonly reference: TLayout;
+  readonly temporal: TLayout;
+  readonly atrous: TLayout;
+  readonly presentRestir: TLayout;
+  readonly presentReference: TLayout;
+};
+
+type ComputePipelineFactory<
+  TLayout extends object,
+  TPipeline extends object,
+> = (label: string, body: string, passLayout: TLayout) => TPipeline;
+
+type PresentPipelineFactory<
+  TLayout extends object,
+  TPipeline extends object,
+> = (label: string, entryPoint: string, passLayout: TLayout) => TPipeline;
+
+export const assembleRendererPipelines = <
+  TLayout extends object,
+  TCompute extends object,
+  TRender extends object,
+>(
+  layouts: PipelineAssemblyLayouts<TLayout>,
+  tiledAtrous: boolean,
+  compute: ComputePipelineFactory<TLayout, TCompute>,
+  present: PresentPipelineFactory<TLayout, TRender>,
+): RendererPipelines<TCompute, TRender> => {
+  let pathTracePipeline: TCompute | null = null;
+  return {
+    gbuffer: compute("gbuffer", gbufferWgsl, layouts.gbuffer),
+    di: compute("restir-di", diWgsl, layouts.resample),
+    diSpatial: compute("restir-di-spatial", diSpatialWgsl, layouts.spatial),
+    gi: compute("restir-gi", giWgsl, layouts.resample),
+    giSpatial: compute("restir-gi-spatial", giSpatialWgsl, layouts.spatial),
+    shade: compute("shade", shadeWgsl, layouts.shade),
+    getPathTracePipeline: () => {
+      pathTracePipeline ??= compute(
+        "path-trace",
+        pathTraceWgsl,
+        layouts.pathTrace,
+      );
+      return pathTracePipeline;
+    },
+    reference: compute("reference", referenceWgsl, layouts.reference),
+    temporal: compute("denoise-temporal", temporalWgsl, layouts.temporal),
+    atrous: compute(
+      `denoise-atrous-${tiledAtrous ? "tiled" : "fallback"}`,
+      `${atrousCommonWgsl}\n${tiledAtrous ? atrousWgsl : atrousFallbackWgsl}`,
+      layouts.atrous,
+    ),
+    presentRestir: present("present", "fsRestir", layouts.presentRestir),
+    presentReference: present(
+      "present-reference",
+      "fsReference",
+      layouts.presentReference,
+    ),
+  };
 };
 
 const camerasEqual = (a: OrbitCamera, b: OrbitCamera): boolean =>
@@ -687,28 +754,7 @@ export class GiRenderer {
         primitive: { topology: "triangle-list" },
       });
 
-    return {
-      gbuffer: compute("gbuffer", gbufferWgsl, layouts.gbuffer),
-      di: compute("restir-di", diWgsl, layouts.resample),
-      diSpatial: compute("restir-di-spatial", diSpatialWgsl, layouts.spatial),
-      gi: compute("restir-gi", giWgsl, layouts.resample),
-      giSpatial: compute("restir-gi-spatial", giSpatialWgsl, layouts.spatial),
-      shade: compute("shade", shadeWgsl, layouts.shade),
-      pathTrace: compute("path-trace", pathTraceWgsl, layouts.pathTrace),
-      reference: compute("reference", referenceWgsl, layouts.reference),
-      temporal: compute("denoise-temporal", temporalWgsl, layouts.temporal),
-      atrous: compute(
-        `denoise-atrous-${tiledAtrous ? "tiled" : "fallback"}`,
-        `${atrousCommonWgsl}\n${tiledAtrous ? atrousWgsl : atrousFallbackWgsl}`,
-        layouts.atrous,
-      ),
-      presentRestir: present("present", "fsRestir", layouts.presentRestir),
-      presentReference: present(
-        "present-reference",
-        "fsReference",
-        layouts.presentReference,
-      ),
-    };
+    return assembleRendererPipelines(layouts, tiledAtrous, compute, present);
   }
 
   private uploadScene(scene: Scene): {
@@ -1214,7 +1260,7 @@ export class GiRenderer {
       dispatch(this.pipelines.gbuffer, at(targets.gbuffer, parity), "gbuffer");
       if (this.settings.mode === "path-traced") {
         dispatch(
-          this.pipelines.pathTrace,
+          this.pipelines.getPathTracePipeline(),
           at(targets.pathTrace, parity),
           "pathTrace",
         );

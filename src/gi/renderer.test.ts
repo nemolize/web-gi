@@ -1,6 +1,42 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { runCompletionBatches } from "@/gi/renderer";
+import { assembleRendererPipelines, runCompletionBatches } from "@/gi/renderer";
+
+describe("optional renderer pipelines", () => {
+  it("defers the path-trace pipeline until its getter is requested", () => {
+    const layouts = {
+      gbuffer: { label: "gbuffer" },
+      resample: { label: "resample" },
+      spatial: { label: "spatial" },
+      shade: { label: "shade" },
+      pathTrace: { label: "path-trace" },
+      reference: { label: "reference" },
+      temporal: { label: "temporal" },
+      atrous: { label: "atrous" },
+      presentRestir: { label: "present-restir" },
+      presentReference: { label: "present-reference" },
+    };
+    const compute = vi.fn((label: string) => ({ label }));
+    const present = vi.fn((label: string) => ({ label }));
+    const pipelines = assembleRendererPipelines(
+      layouts,
+      true,
+      compute,
+      present,
+    );
+
+    expect(compute).not.toHaveBeenCalledWith(
+      "path-trace",
+      expect.any(String),
+      expect.anything(),
+    );
+    expect(pipelines.getPathTracePipeline()).toEqual({ label: "path-trace" });
+    expect(pipelines.getPathTracePipeline()).toEqual({ label: "path-trace" });
+    expect(
+      compute.mock.calls.filter(([label]) => label === "path-trace"),
+    ).toHaveLength(1);
+  });
+});
 
 describe("reference completion batching", () => {
   it("renders exact partial batches and drains once per batch", async () => {

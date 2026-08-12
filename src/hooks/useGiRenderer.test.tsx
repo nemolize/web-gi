@@ -544,9 +544,13 @@ describe("useGiRenderer", () => {
     expect(fake.renderer.setSettings).toHaveBeenCalledWith(
       expect.objectContaining({ mode: "path-traced" }),
     );
+    expect(fake.renderer.renderFrame).toHaveBeenCalledWith(DEFAULT_CAMERA);
     expect(fake.renderer.compareReferenceAfter).toHaveBeenCalledWith(
       "path-traced",
       5_000,
+    );
+    expect(vi.mocked(fake.renderer.renderFrame)).toHaveBeenCalledBefore(
+      fake.compareReferenceAfter,
     );
     expect(fake.renderer.releaseComparisonResources).toHaveBeenCalledOnce();
   });
