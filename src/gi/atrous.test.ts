@@ -52,11 +52,15 @@ describe("supportsTiledAtrous", () => {
 });
 
 describe("selectTiledAtrous", () => {
-  it("uses the tiled path by default when the device supports it", () => {
-    expect(selectTiledAtrous(limits(), "")).toBe(true);
+  it("keeps the texture-backed filter by default on a capable device", () => {
+    expect(selectTiledAtrous(limits(), "")).toBe(false);
   });
 
-  it("allows a preview to force the texture-backed A/B baseline", () => {
+  it("allows a preview to opt into the tiled path", () => {
+    expect(selectTiledAtrous(limits(), "?atrous=tiled")).toBe(true);
+  });
+
+  it("treats the retired fallback value as the default it now matches", () => {
     expect(selectTiledAtrous(limits(), "?atrous=fallback")).toBe(false);
   });
 

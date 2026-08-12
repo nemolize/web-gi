@@ -30,10 +30,10 @@ export const supportsTiledAtrous = (limits: AtrousLimits): boolean =>
   limits.maxComputeWorkgroupSizeY >= TILED_ATROUS_WORKGROUP_SIZE &&
   limits.maxComputeWorkgroupStorageSize >= TILED_ATROUS_STORAGE_BYTES;
 
-/** `?atrous=fallback` keeps preview A/B measurements on one deployment. */
+/** Tiling measured ~3x slower on the target device (#42), so it is opt-in. */
 export const selectTiledAtrous = (
   limits: AtrousLimits,
   search: string,
 ): boolean =>
   supportsTiledAtrous(limits) &&
-  new URLSearchParams(search).get("atrous") !== "fallback";
+  new URLSearchParams(search).get("atrous") === "tiled";
