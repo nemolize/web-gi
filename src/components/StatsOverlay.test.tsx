@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StatsOverlay } from "@/components/StatsOverlay";
 import { DEFAULT_CAMERA } from "@/gi/camera";
+import { DEFAULT_COMPARISON_MATRIX_REPEATS } from "@/gi/comparison-matrix";
 import type { PerformanceMeasurement } from "@/gi/performance";
 import { DEFAULT_SETTINGS } from "@/gi/settings";
 
@@ -84,7 +85,8 @@ const inertComparisonProps = () => ({
     kind: "comparison-matrix",
     requestedReferenceFrames: 2_048,
     requestedDurationMs: 5_000,
-    cases: [],
+    repeats: 0,
+    runs: [],
   }),
 });
 
@@ -338,12 +340,15 @@ describe("StatsOverlay performance capture", () => {
       kind: "comparison-matrix" as const,
       requestedReferenceFrames: 1_024,
       requestedDurationMs: 5_000,
-      cases: [
+      repeats: 1,
+      runs: [
         {
           label: "classic/front",
           scene: "classic" as const,
           cameraLabel: "front",
+          cameraIndex: 0,
           camera: DEFAULT_CAMERA,
+          repeat: 0,
           runOrder: ["restir", "path-traced"] as const,
           comparisons: {
             restir: restirReport,
@@ -354,11 +359,11 @@ describe("StatsOverlay performance capture", () => {
     };
     const runAutomaticComparisonMatrix = vi
       .fn()
-      .mockImplementation(async (_frames, _duration, onProgress) => {
+      .mockImplementation(async (_frames, _duration, _repeats, onProgress) => {
         onProgress({
-          caseIndex: 1,
-          totalCases: 1,
-          entry: matrixReport.cases[0],
+          runIndex: 1,
+          totalRuns: 1,
+          entry: matrixReport.runs[0],
           phase: "reference",
         });
         return matrixReport;
@@ -383,13 +388,14 @@ describe("StatsOverlay performance capture", () => {
 
     expect(
       await screen.findByText(
-        "1 cases · relative L2 wins by scene: classic ReSTIR 1/Denoised PT 0",
+        "1 cases × 1 repeats · relative L2 wins by scene: classic ReSTIR 1/Denoised PT 0",
       ),
     ).toBeVisible();
     expect(runAutomaticComparisonMatrix).toHaveBeenCalledOnce();
     expect(runAutomaticComparisonMatrix).toHaveBeenCalledWith(
       1_024,
       5_000,
+      DEFAULT_COMPARISON_MATRIX_REPEATS,
       expect.any(Function),
     );
 
@@ -400,7 +406,7 @@ describe("StatsOverlay performance capture", () => {
       schemaVersion: 1,
       kind: "comparison-matrix",
       requestedReferenceFrames: 1_024,
-      cases: [{ label: "classic/front" }],
+      runs: [{ label: "classic/front" }],
     });
     expect(copied.summary.byScene).toHaveLength(1);
     expect(copied.summary.byScene[0].scope).toBe("classic");

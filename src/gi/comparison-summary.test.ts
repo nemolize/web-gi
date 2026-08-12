@@ -1,6 +1,6 @@
 import { DEFAULT_CAMERA } from "@/gi/camera";
 import type {
-  ComparisonMatrixCaseReport,
+  ComparisonMatrixRunReport,
   LinearComparisonMatrixReport,
 } from "@/gi/comparison-matrix";
 import type { LinearComparisonReport } from "@/gi/comparison-session";
@@ -57,11 +57,14 @@ const matrixCase = (
   cameraLabel: string,
   restir: Partial<LinearComparisonReport>,
   pathTraced: Partial<LinearComparisonReport>,
-): ComparisonMatrixCaseReport => ({
+  repeat = 0,
+): ComparisonMatrixRunReport => ({
   label: `${scene}/${cameraLabel}`,
   scene,
   cameraLabel,
+  cameraIndex: 0,
   camera: DEFAULT_CAMERA,
+  repeat,
   runOrder: ["restir", "path-traced"],
   comparisons: {
     restir: report("restir", restir),
@@ -70,12 +73,13 @@ const matrixCase = (
 });
 
 const matrix = (
-  cases: readonly ComparisonMatrixCaseReport[],
+  runs: readonly ComparisonMatrixRunReport[],
 ): LinearComparisonMatrixReport => ({
   kind: "comparison-matrix",
   requestedReferenceFrames: 1_024,
   requestedDurationMs: 5_000,
-  cases,
+  repeats: new Set(runs.map(({ repeat }) => repeat)).size,
+  runs,
 });
 
 describe("metricValue", () => {
@@ -215,7 +219,186 @@ describe("summarizeComparisonMatrix", () => {
     expect(summary.overall.tallies.relativeL2).toEqual({
       wins: { restir: 0, "path-traced": 0 },
       ties: 2,
+      separated: 0,
     });
+  });
+
+  it("folds a case's repeats into one verdict on the median", () => {
+    // The middle repeat is what decides it; a single slow outlier in the last
+    // repeat must not flip the case the way a mean would.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 2 }, 0),
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 2 }, 1),
+        matrixCase(
+          "classic",
+          "front",
+          { relativeL2: 1 },
+          { relativeL2: 90 },
+          2,
+        ),
+      ]),
+    );
+
+    expect(summary.cases).toHaveLength(1);
+    expect(summary.cases[0]?.repeats).toBe(3);
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.winner).toBe("restir");
+    expect(verdict?.samples["path-traced"]).toEqual({
+      median: 2,
+      min: 2,
+      max: 90,
+      count: 3,
+    });
+  });
+
+  it("averages the two middle repeats when the repeat count is even", () => {
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 1 }, 0),
+        matrixCase("classic", "front", { relativeL2: 4 }, { relativeL2: 1 }, 1),
+      ]),
+    );
+    expect(summary.cases[0]?.metrics.relativeL2.samples.restir.median).toBe(
+      2.5,
+    );
+  });
+
+  it("never calls a single-repeat win separated", () => {
+    // One sample has min === max, so every win would trivially clear a spread
+    // that was never measured.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 90 }),
+      ]),
+    );
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.winner).toBe("restir");
+    expect(verdict?.separated).toBe(false);
+  });
+
+  it("marks a win inside run-to-run spread as unseparated", () => {
+    // ReSTIR's median is lower, but its repeats straddle path tracing's — the
+    // measurement has not separated them, however consistent the medians look.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 3 }, 0),
+        matrixCase("classic", "front", { relativeL2: 2 }, { relativeL2: 3 }, 1),
+        matrixCase("classic", "front", { relativeL2: 9 }, { relativeL2: 3 }, 2),
+      ]),
+    );
+
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.winner).toBe("restir");
+    expect(verdict?.separated).toBe(false);
+    expect(summary.overall.tallies.relativeL2.separated).toBe(0);
+  });
+
+  it("marks a win clear of spread as separated", () => {
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 5 }, 0),
+        matrixCase("classic", "front", { relativeL2: 2 }, { relativeL2: 6 }, 1),
+      ]),
+    );
+
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.winner).toBe("restir");
+    expect(verdict?.separated).toBe(true);
+    expect(summary.overall.tallies.relativeL2.separated).toBe(1);
+  });
+
+  it("separates a path-traced win the same way", () => {
+    // The winner decides which way the ranges are compared, so both arms need
+    // pinning; a one-sided test lets the other invert undetected.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 5 }, { relativeL2: 1 }, 0),
+        matrixCase("classic", "front", { relativeL2: 6 }, { relativeL2: 2 }, 1),
+      ]),
+    );
+
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.winner).toBe("path-traced");
+    expect(verdict?.separated).toBe(true);
+  });
+
+  it("separates identical renderers at the rate the doc comment claims", () => {
+    // Every interleaving of three-versus-three exchangeable samples, so the
+    // 10% the doc comment and README quote cannot drift from the predicate.
+    const orderings: boolean[][] = [];
+    const walk = (taken: boolean[]): void => {
+      if (taken.length === 6) {
+        orderings.push(taken);
+        return;
+      }
+      const restirLeft = 3 - taken.filter(Boolean).length;
+      if (restirLeft > 0) walk([...taken, true]);
+      if (taken.length - taken.filter(Boolean).length < 3) {
+        walk([...taken, false]);
+      }
+    };
+    walk([]);
+    expect(orderings).toHaveLength(20);
+
+    const separated = orderings.filter((isRestir) => {
+      // Each rank belongs to one renderer, so read the ranks off per side and
+      // pair them up: a run carries one sample for each.
+      const ranksOf = (mine: boolean): number[] =>
+        isRestir.flatMap((restirWins, rank) =>
+          restirWins === mine ? [rank] : [],
+        );
+      const restirRanks = ranksOf(true);
+      const pathTracedRanks = ranksOf(false);
+      const runs = restirRanks.map((restirRank, repeat) =>
+        matrixCase(
+          "classic",
+          "front",
+          { relativeL2: restirRank },
+          { relativeL2: pathTracedRanks[repeat] ?? Number.NaN },
+          repeat,
+        ),
+      );
+      return (
+        summarizeComparisonMatrix(matrix(runs)).cases[0]?.metrics.relativeL2
+          .separated === true
+      );
+    }).length;
+
+    expect(separated / orderings.length).toBeCloseTo(0.1, 10);
+  });
+
+  it("does not separate repeats that merely touch", () => {
+    // Ranges sharing an endpoint overlap at that point, so the measurement has
+    // not told the two renderers apart.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 3 }, 0),
+        matrixCase("classic", "front", { relativeL2: 3 }, { relativeL2: 5 }, 1),
+      ]),
+    );
+
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.winner).toBe("restir");
+    expect(verdict?.separated).toBe(false);
+  });
+
+  it("refuses a verdict when any single repeat is not finite", () => {
+    // A NaN in one repeat is an unusable measurement; the median could hide it.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 2 }, 0),
+        matrixCase(
+          "classic",
+          "front",
+          { relativeL2: Number.NaN },
+          { relativeL2: 2 },
+          1,
+        ),
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 2 }, 2),
+      ]),
+    );
+    expect(summary.cases[0]?.metrics.relativeL2.winner).toBeNull();
   });
 
   it("keeps scenes in the order they were measured", () => {
