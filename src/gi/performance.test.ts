@@ -311,9 +311,16 @@ describe("performance capture", () => {
   it("keeps only supported benchmark selectors in the report URL", () => {
     expect(
       sanitizePerformanceReportUrl(
+        "https://example.com/demo?atrous=tiled&token=secret#private",
+      ),
+    ).toBe("https://example.com/demo?atrous=tiled");
+    // Dropped rather than echoed: it now selects the same path as no parameter
+    // at all, so keeping it would imply the report came from an A/B arm.
+    expect(
+      sanitizePerformanceReportUrl(
         "https://example.com/demo?atrous=fallback&token=secret#private",
       ),
-    ).toBe("https://example.com/demo?atrous=fallback");
+    ).toBe("https://example.com/demo");
     expect(
       sanitizePerformanceReportUrl(
         "https://example.com/demo?atrous=8&token=secret#private",

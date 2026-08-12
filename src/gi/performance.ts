@@ -581,7 +581,7 @@ export const sanitizePerformanceReportUrl = (url: string): string => {
     sanitized.searchParams.set(key, value);
   }
   const atrous = source.searchParams.get("atrous");
-  if (atrous === "fallback") {
+  if (atrous === "tiled") {
     sanitized.searchParams.set("atrous", atrous);
   }
   return sanitized.toString();
