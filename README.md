@@ -78,15 +78,26 @@ views to reduce systematic thermal-order bias. The individual URLs run the same
 process for one renderer at the default view. Reports include the camera basis,
 settings, a-trous variant, frame counts, actual durations, and linear-radiance
 error metrics, and remain available through `Copy result`. Keep the page visible
-and unchanged while the several-minute matrix is running. The automatic
-1,024-frame reference is the mobile default: at 691×1,445, the target-device
-matrix completed its measured phases in 188 seconds and preserved the
-2,048-frame sweep's decisions. ReSTIR had lower Relative L2 in all six cases;
-Denoised PT had lower mean absolute error and fewer outliers in all six, plus
-lower absolute luminance error in four. A 512-frame run was rejected after it
-changed one Relative L2 winner. Higher-confidence one-off validation can still
-use the development controls to save a longer reference, with the actual frame
-count retained in the report.
+and unchanged while the several-minute matrix is running.
+
+A matrix report also carries a derived `summary`: the winner of each metric on
+each case, tallied both overall and **per scene**. Luminance is scored as
+`|ratio - 1|`, since a ratio of 0.9 and one of 1.1 are equally biased. The
+per-scene split is the part worth reading — an even overall tally can be two
+opposite sweeps, and which scene a renderer wins is what decides whether a
+hybrid is worth building (#43). The completion line shows the relative-L2 split
+by scene without opening the JSON.
+
+The automatic 1,024-frame reference is the mobile default: at 691×1,445, the
+target-device matrix completed its measured phases in 188 seconds and preserved
+the 2,048-frame sweep's decisions. ReSTIR had lower Relative L2 in all six
+cases; Denoised PT had lower mean absolute error and fewer outliers in all six,
+plus lower absolute luminance error in four. A 512-frame run was rejected after
+it changed one Relative L2 winner. Those figures are aggregates recorded before
+the summary existed, so they do not say how the six cases split by scene; a
+fresh matrix run now reports that directly. Higher-confidence one-off validation
+can still use the development controls to save a longer reference, with the
+actual frame count retained in the report.
 
 ## Pipeline
 

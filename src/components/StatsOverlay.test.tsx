@@ -326,6 +326,9 @@ describe("StatsOverlay performance capture", () => {
       ...pathTracedReport,
       label: "restir",
       mode: "restir" as const,
+      // Lower than the path-traced side, so the derived verdict is a win rather
+      // than the tie two identical fixtures would produce.
+      relativeL2: pathTracedReport.relativeL2 / 2,
       context: {
         ...comparisonReport.context,
         settings: { ...DEFAULT_SETTINGS, mode: "restir" as const },
@@ -379,7 +382,9 @@ describe("StatsOverlay performance capture", () => {
     );
 
     expect(
-      await screen.findByText("1 cases · 2 comparisons complete"),
+      await screen.findByText(
+        "1 cases · relative L2 wins by scene: classic ReSTIR 1/1",
+      ),
     ).toBeVisible();
     expect(runAutomaticComparisonMatrix).toHaveBeenCalledOnce();
     expect(runAutomaticComparisonMatrix).toHaveBeenCalledWith(
@@ -397,6 +402,15 @@ describe("StatsOverlay performance capture", () => {
       requestedReferenceFrames: 1_024,
       cases: [{ label: "classic/front" }],
     });
+    // The per-scene split travels with the raw numbers, so the breakdown
+    // survives being pasted somewhere rather than being recomputed by hand.
+    expect(copied.summary.byScene).toHaveLength(1);
+    expect(copied.summary.byScene[0].scope).toBe("classic");
+    expect(
+      copied.summary.byScene[0].tallies.find(
+        (tally: { metric: string }) => tally.metric === "relativeL2",
+      ).wins,
+    ).toEqual({ restir: 1, "path-traced": 0 });
   });
 
   it("allows retrying after capture failure", async () => {

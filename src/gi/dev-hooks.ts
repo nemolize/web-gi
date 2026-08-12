@@ -2,6 +2,10 @@
 import type { LinearImage } from "@/gi/compare";
 import { compareLinear } from "@/gi/compare";
 import type { ComparisonSession } from "@/gi/comparison-session";
+import {
+  formatComparisonMatrixSummary,
+  summarizeComparisonMatrix,
+} from "@/gi/comparison-summary";
 
 export type DevHooks = {
   readonly capture: () => Promise<LinearImage | null>;
@@ -9,6 +13,9 @@ export type DevHooks = {
   readonly saveReference: ComparisonSession["saveReference"];
   readonly compareReference: ComparisonSession["compareReference"];
   readonly compareReferenceAfter: ComparisonSession["compareReferenceAfter"];
+  readonly summarizeMatrix: typeof summarizeComparisonMatrix;
+  /** Markdown for pasting a matrix run into an issue or the README. */
+  readonly formatMatrixSummary: typeof formatComparisonMatrixSummary;
 };
 
 declare global {
@@ -26,5 +33,7 @@ export const installDevHooks = (
     saveReference: comparison.saveReference,
     compareReference: comparison.compareReference,
     compareReferenceAfter: comparison.compareReferenceAfter,
+    summarizeMatrix: summarizeComparisonMatrix,
+    formatMatrixSummary: formatComparisonMatrixSummary,
   };
 };

@@ -5,6 +5,11 @@ import type {
   LinearComparisonMatrixReport,
 } from "@/gi/comparison-matrix";
 import type { LinearComparisonReport } from "@/gi/comparison-session";
+import type {
+  ComparisonMatrixSummary,
+  ComparisonMetric,
+} from "@/gi/comparison-summary";
+import { summarizeComparisonMatrix, tallyFor } from "@/gi/comparison-summary";
 import {
   aggregatePerformanceMeasurements,
   formatPerformanceReport,
@@ -70,16 +75,33 @@ const createReportContext = (
 
 const formatLinearComparisonReport = (
   comparison: LinearComparisonReport | LinearComparisonMatrixReport,
+  summary: ComparisonMatrixSummary | null,
 ): string =>
   JSON.stringify(
     {
       schemaVersion: 1,
       ...createEnvironmentReportContext(),
       ...comparison,
+      // A matrix carries six cases across five metrics, so the verdicts it
+      // implies are what a reader actually wants; deriving them by hand is how
+      // an aggregate claim ends up recorded without its per-scene breakdown.
+      ...(summary === null ? {} : { summary }),
     },
     null,
     2,
   );
+
+/** One line per scene, so a split verdict is visible without opening the JSON. */
+const describeSceneVerdicts = (
+  summary: ComparisonMatrixSummary,
+  metric: ComparisonMetric,
+): string =>
+  summary.byScene
+    .map((scope) => {
+      const tally = tallyFor(scope, metric);
+      return `${scope.scope} ReSTIR ${String(tally.wins.restir)}/${String(tally.cases)}`;
+    })
+    .join(" · ");
 
 export const StatsOverlay = ({
   stats,
@@ -207,20 +229,20 @@ export const StatsOverlay = ({
           if (comparison === null) {
             throw new Error("The comparison did not produce a capture.");
           }
-          setReport(formatLinearComparisonReport(comparison));
+          if ("kind" in comparison) {
+            const summary = summarizeComparisonMatrix(comparison);
+            setReport(formatLinearComparisonReport(comparison, summary));
+            setAutoComparisonStatus(
+              `${String(comparison.cases.length)} cases · relative L2 wins by scene: ${describeSceneVerdicts(summary, "relativeL2")}`,
+            );
+          } else {
+            setReport(formatLinearComparisonReport(comparison, null));
+            setAutoComparisonStatus(
+              `${comparison.mode} · relative L2 ${comparison.relativeL2.toFixed(4)} · mean absolute ${comparison.meanAbsolute.toFixed(4)} · ${String(comparison.targetFrames)} frames in ${(comparison.actualDurationMs / 1_000).toFixed(2)} s`,
+            );
+          }
           setCaptureStatus("ready");
           setIsComparing(false);
-          setAutoComparisonStatus(
-            "kind" in comparison
-              ? `${String(comparison.cases.length)} cases · ${String(
-                  comparison.cases.reduce(
-                    (total, entry) =>
-                      total + Object.keys(entry.comparisons).length,
-                    0,
-                  ),
-                )} comparisons complete`
-              : `${comparison.mode} · relative L2 ${comparison.relativeL2.toFixed(4)} · mean absolute ${comparison.meanAbsolute.toFixed(4)} · ${String(comparison.targetFrames)} frames in ${(comparison.actualDurationMs / 1_000).toFixed(2)} s`,
-          );
         })
         .catch((error: unknown) => {
           const message =
