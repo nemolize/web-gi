@@ -130,6 +130,27 @@ describe("development comparison hooks", () => {
     expect(captureAfter).toHaveBeenCalledWith(5_000);
   });
 
+  it("exposes the matrix summary so a run can be pasted somewhere", () => {
+    installComparisonHooks(
+      vi.fn<() => Promise<LinearImage | null>>().mockResolvedValue(null),
+      vi.fn<() => Promise<CompletionWindowCapture | null>>(),
+      () => null,
+    );
+
+    const hooks = globalThis.__gi;
+    expect(hooks).toBeDefined();
+    if (hooks === undefined) return;
+
+    const summary = hooks.summarizeMatrix({
+      kind: "comparison-matrix",
+      requestedReferenceFrames: 1_024,
+      requestedDurationMs: 5_000,
+      cases: [],
+    });
+    expect(summary.overall.cases).toBe(0);
+    expect(hooks.formatMatrixSummary(summary)).toContain("## Per-scene");
+  });
+
   it("only saves Reference PT frames", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const context = comparisonContext("path-traced", "path-traced-run");

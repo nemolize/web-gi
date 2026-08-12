@@ -5,6 +5,14 @@ import type {
   LinearComparisonMatrixReport,
 } from "@/gi/comparison-matrix";
 import type { LinearComparisonReport } from "@/gi/comparison-session";
+import type {
+  ComparisonMatrixSummary,
+  ComparisonMetric,
+} from "@/gi/comparison-summary";
+import {
+  MODE_LABELS,
+  summarizeComparisonMatrix,
+} from "@/gi/comparison-summary";
 import {
   aggregatePerformanceMeasurements,
   formatPerformanceReport,
@@ -70,16 +78,34 @@ const createReportContext = (
 
 const formatLinearComparisonReport = (
   comparison: LinearComparisonReport | LinearComparisonMatrixReport,
+  summary: ComparisonMatrixSummary | null,
 ): string =>
   JSON.stringify(
     {
       schemaVersion: 1,
       ...createEnvironmentReportContext(),
       ...comparison,
+      ...(summary === null ? {} : { summary }),
     },
     null,
     2,
   );
+
+const describeSceneVerdicts = (
+  summary: ComparisonMatrixSummary,
+  metric: ComparisonMetric,
+): string =>
+  summary.byScene
+    .map((scope) => {
+      const { wins, ties } = scope.tallies[metric];
+      const parts = [
+        `${MODE_LABELS.restir} ${String(wins.restir)}`,
+        `${MODE_LABELS["path-traced"]} ${String(wins["path-traced"])}`,
+      ];
+      if (ties > 0) parts.push(`ties ${String(ties)}`);
+      return `${scope.scope} ${parts.join("/")}`;
+    })
+    .join(" · ");
 
 export const StatsOverlay = ({
   stats,
@@ -207,20 +233,20 @@ export const StatsOverlay = ({
           if (comparison === null) {
             throw new Error("The comparison did not produce a capture.");
           }
-          setReport(formatLinearComparisonReport(comparison));
+          if ("kind" in comparison) {
+            const summary = summarizeComparisonMatrix(comparison);
+            setReport(formatLinearComparisonReport(comparison, summary));
+            setAutoComparisonStatus(
+              `${String(comparison.cases.length)} cases · relative L2 wins by scene: ${describeSceneVerdicts(summary, "relativeL2")}`,
+            );
+          } else {
+            setReport(formatLinearComparisonReport(comparison, null));
+            setAutoComparisonStatus(
+              `${comparison.mode} · relative L2 ${comparison.relativeL2.toFixed(4)} · mean absolute ${comparison.meanAbsolute.toFixed(4)} · ${String(comparison.targetFrames)} frames in ${(comparison.actualDurationMs / 1_000).toFixed(2)} s`,
+            );
+          }
           setCaptureStatus("ready");
           setIsComparing(false);
-          setAutoComparisonStatus(
-            "kind" in comparison
-              ? `${String(comparison.cases.length)} cases · ${String(
-                  comparison.cases.reduce(
-                    (total, entry) =>
-                      total + Object.keys(entry.comparisons).length,
-                    0,
-                  ),
-                )} comparisons complete`
-              : `${comparison.mode} · relative L2 ${comparison.relativeL2.toFixed(4)} · mean absolute ${comparison.meanAbsolute.toFixed(4)} · ${String(comparison.targetFrames)} frames in ${(comparison.actualDurationMs / 1_000).toFixed(2)} s`,
-          );
         })
         .catch((error: unknown) => {
           const message =
