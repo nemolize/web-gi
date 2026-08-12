@@ -239,8 +239,8 @@ describe("StatsOverlay performance capture", () => {
   it("automates a fixed-size reference and equal-time comparison once", async () => {
     const automaticComparisonReport = {
       ...comparisonReport,
-      referenceFrames: 512,
-      referenceActualDurationMs: 6_400,
+      referenceFrames: 1_024,
+      referenceActualDurationMs: 12_800,
     };
     const runAutomaticComparison = vi
       .fn()
@@ -270,7 +270,7 @@ describe("StatsOverlay performance capture", () => {
     expect(runAutomaticComparison).toHaveBeenCalledOnce();
     expect(runAutomaticComparison).toHaveBeenCalledWith(
       "path-traced",
-      512,
+      1_024,
       5_000,
     );
     expect(screen.queryByRole("button", { name: "Measure again" })).toBeNull();
@@ -281,7 +281,7 @@ describe("StatsOverlay performance capture", () => {
     expect(copied).toMatchObject({
       schemaVersion: 1,
       mode: "path-traced",
-      referenceFrames: 512,
+      referenceFrames: 1_024,
       targetFrames: 240,
       relativeL2: 0.01234,
     });
@@ -319,8 +319,8 @@ describe("StatsOverlay performance capture", () => {
   it("automates and copies the paired comparison matrix once", async () => {
     const pathTracedReport = {
       ...comparisonReport,
-      referenceFrames: 512,
-      referenceActualDurationMs: 6_400,
+      referenceFrames: 1_024,
+      referenceActualDurationMs: 12_800,
     };
     const restirReport = {
       ...pathTracedReport,
@@ -333,7 +333,7 @@ describe("StatsOverlay performance capture", () => {
     };
     const matrixReport = {
       kind: "comparison-matrix" as const,
-      requestedReferenceFrames: 512,
+      requestedReferenceFrames: 1_024,
       requestedDurationMs: 5_000,
       cases: [
         {
@@ -383,7 +383,7 @@ describe("StatsOverlay performance capture", () => {
     ).toBeVisible();
     expect(runAutomaticComparisonMatrix).toHaveBeenCalledOnce();
     expect(runAutomaticComparisonMatrix).toHaveBeenCalledWith(
-      512,
+      1_024,
       5_000,
       expect.any(Function),
     );
@@ -394,7 +394,7 @@ describe("StatsOverlay performance capture", () => {
     expect(copied).toMatchObject({
       schemaVersion: 1,
       kind: "comparison-matrix",
-      requestedReferenceFrames: 512,
+      requestedReferenceFrames: 1_024,
       cases: [{ label: "classic/front" }],
     });
   });
