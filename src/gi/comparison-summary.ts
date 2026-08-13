@@ -3,7 +3,6 @@ import type {
   ComparisonMatrixRunReport,
   LinearComparisonMatrixReport,
 } from "@/gi/comparison-matrix";
-import { COMPARISON_MATRIX_MODES } from "@/gi/comparison-matrix";
 import type { LinearComparisonReport } from "@/gi/comparison-session";
 import type { SceneVariant } from "@/gi/scene";
 import type { ComparisonMode } from "@/gi/settings";
@@ -18,6 +17,20 @@ export const COMPARISON_METRICS = [
 
 export type ComparisonMetric = (typeof COMPARISON_METRICS)[number];
 
+/**
+ * The metric a verdict is read off. Named up front so a run is not scored by
+ * whichever of the five came out favourably; the rest describe how the images
+ * differ and can disagree with it.
+ */
+export const PRIMARY_COMPARISON_METRIC =
+  "relativeL2" satisfies ComparisonMetric;
+
+/**
+ * Provisional tie tolerance, not a calibrated perceptual bound. Primary metric
+ * only: on a count like `outliers`, 0-vs-1 is 200% and 100-vs-101 is under 1%.
+ */
+export const MINIMUM_PRACTICAL_DIFFERENCE = 0.01;
+
 /** Every metric is lower-is-better once luminance is read as |ratio - 1|. */
 export const metricValue = (
   report: LinearComparisonReport,
@@ -28,7 +41,7 @@ export const metricValue = (
     : report[metric];
 
 export type MetricSamples = {
-  /** Median across repeats; the value the verdict is decided on. */
+  /** Descriptive only — the verdict is decided on the paired differences. */
   readonly median: number;
   readonly min: number;
   readonly max: number;
@@ -37,14 +50,26 @@ export type MetricSamples = {
 
 export type MetricVerdict = {
   readonly samples: Readonly<Record<ComparisonMode, MetricSamples>>;
-  /** Null when the two renderers tie, or when either value is not finite. */
+  /**
+   * Symmetric relative difference per repeat, positive where ReSTIR is lower.
+   * Paired within a repeat, which cancels that repeat's conditions; separate
+   * medians would draw the two sides from different repeats.
+   */
+  readonly differences: readonly number[];
+  readonly medianDifference: number;
+  /** Repeats where each renderer's error is lower; exact ties count for neither. */
+  readonly lowerErrorRepeats: Readonly<Record<ComparisonMode, number>>;
+  /**
+   * Null on a tie — including a median difference under
+   * `MINIMUM_PRACTICAL_DIFFERENCE` — or when any repeat is unusable.
+   */
   readonly winner: ComparisonMode | null;
   /**
-   * Winner's repeats entirely clear of the loser's. A screen, not significance:
-   * on identical renderers it still fires at `2·(n!)²/(2n)!` — 10% at three
-   * repeats. Discards overlapping wins; never establishes a separated one.
+   * Every repeat put the winner lower. A direction-consistency diagnostic, not
+   * an inferential gate: `2/2ⁿ` of null runs are unanimous by chance, so across
+   * six cases at four repeats one is likelier than not.
    */
-  readonly separated: boolean;
+  readonly unanimous: boolean;
 };
 
 export type CaseVerdict = {
@@ -58,16 +83,16 @@ export type CaseVerdict = {
 export type MetricTally = {
   readonly wins: Readonly<Record<ComparisonMode, number>>;
   readonly ties: number;
-  /** Of the wins above, how many clear run-to-run spread. */
-  readonly separated: number;
+  /** Of the wins above, how many every repeat agreed on. */
+  readonly unanimous: number;
 };
 
 export type ScopeSummary = {
   /** `"all"` for the whole matrix, otherwise the scene these cases share. */
   readonly scope: SceneVariant | "all";
   readonly cases: number;
-  /** False when no case here was repeated, so separation was never measurable. */
-  readonly separable: boolean;
+  /** False when no case here was repeated, so unanimity was never measurable. */
+  readonly repeated: boolean;
   readonly tallies: Readonly<Record<ComparisonMetric, MetricTally>>;
 };
 
@@ -104,6 +129,12 @@ const summarizeSamples = (values: readonly number[]): MetricSamples => {
   };
 };
 
+/** Positive where ReSTIR is lower; 0 when both are, so a dead heat is a tie. */
+const relativeDifference = (restir: number, pathTraced: number): number => {
+  const total = pathTraced + restir;
+  return total === 0 ? 0 : (2 * (pathTraced - restir)) / total;
+};
+
 const verdictFor = (
   runs: readonly ComparisonMatrixRunReport[],
   metric: ComparisonMetric,
@@ -116,31 +147,44 @@ const verdictFor = (
       runs.map((run) => metricValue(run.comparisons["path-traced"], metric)),
     ),
   };
-  const restir = samples.restir.median;
-  const pathTraced = samples["path-traced"].median;
-  // A NaN loses every comparison, so `<` would hand the win to the other side
+  const differences = runs.map((run) =>
+    relativeDifference(
+      metricValue(run.comparisons.restir, metric),
+      metricValue(run.comparisons["path-traced"], metric),
+    ),
+  );
+  const lowerErrorRepeats = {
+    restir: differences.filter((value) => value > 0).length,
+    "path-traced": differences.filter((value) => value < 0).length,
+  };
+  // A NaN loses every comparison, so a `<` would hand the win to the other side
   // rather than reporting that the metric is unusable.
   const comparable =
-    runs.every((run) =>
-      COMPARISON_MATRIX_MODES.every((mode) =>
-        Number.isFinite(metricValue(run.comparisons[mode], metric)),
-      ),
-    ) && runs.length > 0;
-  const winner =
-    !comparable || restir === pathTraced
-      ? null
-      : restir < pathTraced
-        ? "restir"
-        : "path-traced";
+    runs.length > 0 && differences.every((value) => Number.isFinite(value));
+  const medianDifference = comparable
+    ? summarizeSamples(differences).median
+    : Number.NaN;
+  // Only the primary metric carries the tie tolerance; see its doc comment.
+  const decisive =
+    comparable &&
+    (metric === PRIMARY_COMPARISON_METRIC
+      ? Math.abs(medianDifference) >= MINIMUM_PRACTICAL_DIFFERENCE
+      : medianDifference !== 0);
+  const winner = !decisive
+    ? null
+    : medianDifference > 0
+      ? "restir"
+      : "path-traced";
   return {
     samples,
+    differences,
+    medianDifference,
+    lowerErrorRepeats,
     winner,
-    separated:
+    unanimous:
       winner !== null &&
       runs.length > 1 &&
-      (winner === "restir"
-        ? samples.restir.max < samples["path-traced"].min
-        : samples["path-traced"].max < samples.restir.min),
+      lowerErrorRepeats[winner] === differences.length,
   };
 };
 
@@ -150,20 +194,20 @@ const summarize = (
 ): ScopeSummary => ({
   scope,
   cases: cases.length,
-  separable: cases.some((entry) => entry.repeats > 1),
+  repeated: cases.some((entry) => entry.repeats > 1),
   tallies: byMetric((metric) => {
     let restir = 0;
     let pathTraced = 0;
     let ties = 0;
-    let separated = 0;
+    let unanimous = 0;
     for (const entry of cases) {
       const verdict = entry.metrics[metric];
       if (verdict.winner === null) ties++;
       else if (verdict.winner === "restir") restir++;
       else pathTraced++;
-      if (verdict.separated) separated++;
+      if (verdict.unanimous) unanimous++;
     }
-    return { wins: { restir, "path-traced": pathTraced }, ties, separated };
+    return { wins: { restir, "path-traced": pathTraced }, ties, unanimous };
   }),
 });
 
@@ -217,7 +261,7 @@ export const MODE_LABELS: Readonly<Record<ComparisonMode, string>> = {
   "path-traced": "Denoised PT",
 };
 
-const METRIC_LABELS: Readonly<Record<ComparisonMetric, string>> = {
+export const METRIC_LABELS: Readonly<Record<ComparisonMetric, string>> = {
   relativeL2: "relative L2",
   meanAbsolute: "mean absolute",
   maxAbsolute: "max absolute",
@@ -238,12 +282,16 @@ const formatScope = (scope: ScopeSummary): string =>
         `${MODE_LABELS["path-traced"]} ${String(tally.wins["path-traced"])}/${String(scope.cases)}`,
       ];
       if (tally.ties > 0) parts.push(`ties ${String(tally.ties)}`);
-      if (scope.separable) {
+      if (scope.repeated) {
         parts.push(
-          `separated ${String(tally.separated)}/${String(scope.cases)}`,
+          `unanimous ${String(tally.unanimous)}/${String(scope.cases)}`,
         );
       }
-      return `- ${METRIC_LABELS[metric]}: ${parts.join(" · ")}`;
+      const role =
+        metric === PRIMARY_COMPARISON_METRIC
+          ? " **(primary)**"
+          : " (diagnostic)";
+      return `- ${METRIC_LABELS[metric]}${role}: ${parts.join(" · ")}`;
     }),
   ].join("\n");
 
@@ -264,11 +312,15 @@ export const formatComparisonMatrixSummary = (
       const verdict = entry.metrics[metric];
       const restir = formatSpread(metric, verdict.samples.restir);
       const pathTraced = formatSpread(metric, verdict.samples["path-traced"]);
+      const difference = Number.isFinite(verdict.medianDifference)
+        ? `${verdict.medianDifference >= 0 ? "+" : ""}${(100 * verdict.medianDifference).toFixed(2)}%`
+        : "n/a";
+      const lowerIn = `${String(verdict.lowerErrorRepeats.restir)}:${String(verdict.lowerErrorRepeats["path-traced"])}`;
       const winner =
         verdict.winner === null
           ? "tie"
-          : `${MODE_LABELS[verdict.winner]}${verdict.separated ? "" : " (overlapping)"}`;
-      return `| ${entry.label} | ${METRIC_LABELS[metric]} | ${restir} | ${pathTraced} | ${winner} |`;
+          : `${MODE_LABELS[verdict.winner]}${verdict.unanimous ? "" : " (not unanimous)"}`;
+      return `| ${entry.label} | ${METRIC_LABELS[metric]} | ${restir} | ${pathTraced} | ${difference} | ${lowerIn} | ${winner} |`;
     }),
   );
 
@@ -276,8 +328,10 @@ export const formatComparisonMatrixSummary = (
   return [
     `## Per-case (median over ${String(repeats)} repeats, min–max in brackets)`,
     "",
-    `| case | metric | ${MODE_LABELS.restir} | ${MODE_LABELS["path-traced"]} | winner |`,
-    "| --- | --- | --- | --- | --- |",
+    `Verdicts come from the paired per-repeat difference, positive where ${MODE_LABELS.restir} is lower. Wins under ${String(100 * MINIMUM_PRACTICAL_DIFFERENCE)}% are ties. ${METRIC_LABELS[PRIMARY_COMPARISON_METRIC]} is the primary metric; the others correlate with it and are diagnostic.`,
+    "",
+    `| case | metric | ${MODE_LABELS.restir} | ${MODE_LABELS["path-traced"]} | paired diff | repeats lower | winner |`,
+    "| --- | --- | --- | --- | --- | --- | --- |",
     ...rows,
     "",
     "## Per-scene",

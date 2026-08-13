@@ -3,6 +3,7 @@ import {
   COMPARISON_MATRIX_MODES,
   COMPARISON_MATRIX_RUN_ORDERS,
   comparisonMatrixRuns,
+  DEFAULT_COMPARISON_MATRIX_REPEATS,
 } from "@/gi/comparison-matrix";
 
 describe("comparison matrix", () => {
@@ -54,6 +55,52 @@ describe("comparisonMatrixRuns", () => {
     expect(
       runs.slice(COMPARISON_MATRIX_CASES.length).map(({ repeat }) => repeat),
     ).toEqual(COMPARISON_MATRIX_CASES.map(() => 1));
+  });
+
+  it("rotates the case order so a scene does not sit at one point of the sweep", () => {
+    // A fixed order puts classic early and manyLights late in every sweep, so
+    // scene and thermal state stay correlated however many repeats are run.
+    const size = COMPARISON_MATRIX_CASES.length;
+    const runs = comparisonMatrixRuns(DEFAULT_COMPARISON_MATRIX_REPEATS);
+    for (const { label } of COMPARISON_MATRIX_CASES) {
+      const positions = runs.flatMap((run, index) =>
+        run.label === label ? [index % size] : [],
+      );
+      expect(new Set(positions).size).toBeGreaterThan(1);
+    }
+  });
+
+  it("balances run order per scene at the default repeat count", () => {
+    const runs = comparisonMatrixRuns(DEFAULT_COMPARISON_MATRIX_REPEATS);
+    for (const scene of ["classic", "manyLights"] as const) {
+      const orders = runs
+        .filter((run) => run.scene === scene)
+        .map((run) => orderIndex(run.runOrder));
+      expect(orders.filter((order) => order === 0)).toHaveLength(
+        orders.length / 2,
+      );
+    }
+  });
+
+  it("keeps sweep position independent of run order", () => {
+    // An odd stride confounds all three at once: every classic run at an even
+    // sweep position would take one order, every manyLights run the other.
+    const size = COMPARISON_MATRIX_CASES.length;
+    const runs = comparisonMatrixRuns(DEFAULT_COMPARISON_MATRIX_REPEATS);
+    for (const scene of ["classic", "manyLights"] as const) {
+      const cells = [0, 1].flatMap((parity) =>
+        [0, 1].map(
+          (order) =>
+            runs.filter(
+              (run, index) =>
+                run.scene === scene &&
+                (index % size) % 2 === parity &&
+                orderIndex(run.runOrder) === order,
+            ).length,
+        ),
+      );
+      expect(cells.every((count) => count > 0)).toBe(true);
+    }
   });
 
   it("balances run order within each scene over an even repeat count", () => {

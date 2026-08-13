@@ -11,7 +11,9 @@ import type {
   ComparisonMetric,
 } from "@/gi/comparison-summary";
 import {
+  METRIC_LABELS,
   MODE_LABELS,
+  PRIMARY_COMPARISON_METRIC,
   summarizeComparisonMatrix,
 } from "@/gi/comparison-summary";
 import {
@@ -84,7 +86,7 @@ const formatLinearComparisonReport = (
 ): string =>
   JSON.stringify(
     {
-      schemaVersion: 1,
+      schemaVersion: 2,
       ...createEnvironmentReportContext(),
       ...comparison,
       ...(summary === null ? {} : { summary }),
@@ -239,11 +241,12 @@ export const StatsOverlay = ({
           if ("kind" in comparison) {
             const summary = summarizeComparisonMatrix(comparison);
             setReport(formatLinearComparisonReport(comparison, summary));
-            const { separated } = summary.overall.tallies.relativeL2;
+            const { unanimous } =
+              summary.overall.tallies[PRIMARY_COMPARISON_METRIC];
             setAutoComparisonStatus(
-              `${String(summary.cases.length)} cases × ${String(comparison.repeats)} repeats · relative L2 wins by scene: ${describeSceneVerdicts(summary, "relativeL2")}${
-                summary.overall.separable
-                  ? ` · ${String(separated)}/${String(summary.overall.cases)} clear of spread`
+              `${String(summary.cases.length)} cases × ${String(comparison.repeats)} repeats · ${METRIC_LABELS[PRIMARY_COMPARISON_METRIC]} wins by scene: ${describeSceneVerdicts(summary, PRIMARY_COMPARISON_METRIC)}${
+                summary.overall.repeated
+                  ? ` · ${String(unanimous)}/${String(summary.overall.cases)} unanimous`
                   : ""
               }`,
             );
