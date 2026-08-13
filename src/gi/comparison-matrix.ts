@@ -65,20 +65,24 @@ export type ComparisonMatrixRun = ComparisonMatrixCase & {
 };
 
 /**
- * Repeats outermost, each rotating the case order so a scene does not track
- * elapsed time. Run order alternates on `cameraIndex + repeat`, balanced per
- * scene at an even repeat count.
+ * Even: run order flips with `repeat`, so an odd stride would flip each case's
+ * sweep-position parity in step with it and lock position to run order.
+ */
+const ROTATION_STRIDE = 2;
+
+/**
+ * Repeats outermost, each rotating the case order so a scene does not sit at the
+ * same point of every sweep. Run order alternates on `cameraIndex + repeat`,
+ * balanced per scene at an even repeat count.
  */
 export const comparisonMatrixRuns = (
   repeats: number,
 ): readonly ComparisonMatrixRun[] =>
-  Array.from({ length: Math.max(1, Math.trunc(repeats)) }, (_, repeat) =>
-    [
-      ...COMPARISON_MATRIX_CASES.slice(repeat % COMPARISON_MATRIX_CASES.length),
-      ...COMPARISON_MATRIX_CASES.slice(
-        0,
-        repeat % COMPARISON_MATRIX_CASES.length,
-      ),
+  Array.from({ length: Math.max(1, Math.trunc(repeats)) }, (_, repeat) => {
+    const offset = (repeat * ROTATION_STRIDE) % COMPARISON_MATRIX_CASES.length;
+    return [
+      ...COMPARISON_MATRIX_CASES.slice(offset),
+      ...COMPARISON_MATRIX_CASES.slice(0, offset),
     ].map((entry) => ({
       ...entry,
       repeat,
@@ -86,8 +90,8 @@ export const comparisonMatrixRuns = (
         (entry.cameraIndex + repeat) % 2 === 0
           ? COMPARISON_MATRIX_RUN_ORDERS[0]
           : COMPARISON_MATRIX_RUN_ORDERS[1],
-    })),
-  ).flat();
+    }));
+  }).flat();
 
 export type ComparisonMatrixRunReport = ComparisonMatrixRun & {
   readonly comparisons: Readonly<

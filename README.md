@@ -107,25 +107,33 @@ contributes one symmetric relative difference,
 2 × (PT_error − ReSTIR_error) / (PT_error + ReSTIR_error)
 ```
 
-positive where ReSTIR is lower, and the verdict is the median of those. Pairing
-inside the repeat cancels whatever that repeat's conditions were, which comparing
-the two renderers' medians separately does not: those medians can come from
-different repeats, so `ReSTIR [1, 100, 101]` against `PT [2, 3, 200]` makes the
-median say PT while ReSTIR is in fact lower in two of the three head-to-heads.
+positive where ReSTIR is lower, and the verdict is the median of those. The two
+renderers run one after the other rather than simultaneously, so the pairing
+cancels what they share — the same oracle, the same repeat block, the same
+machine state at that point in the sweep — not order effects or drift within the
+pair. Comparing the two renderers' medians separately cancels none of it: those
+medians can come from different repeats, so `ReSTIR [1, 100, 101]` against
+`PT [2, 3, 200]` makes the median say PT while ReSTIR is in fact lower in two of
+the three head-to-heads.
 
-A median difference under **1%** is reported as a tie. Both renderers resolve the
-same image, so a sub-percent error gap is not one of them being better.
+A median difference under **1%** on the primary metric is reported as a tie. That
+is a provisional tolerance on a continuous error measure, not a calibrated
+perceptual bound, and it is deliberately not applied to the diagnostic metrics —
+on a count like `outliers`, 0 against 1 is a 200% difference while 100 against
+101 is under 1%, so one threshold cannot mean the same thing across all five.
 
-Each verdict also reports whether it is **unanimous** — whether every repeat
-agreed with the winner. Read that in one direction only: it is a sign test, so on
-renderers that do not differ at all it still fires at `2/2ⁿ`, which is p=0.25 at
-three repeats and 0.125 at four. A split verdict is genuinely not established; a
-unanimous one is only a candidate worth repeating at a higher count.
+Each verdict also reports whether it is **unanimous** — whether every repeat put
+the winner lower. Read it as a direction-consistency diagnostic, not as
+significance: `2/2ⁿ` of runs on renderers that do not differ are unanimous by
+chance, which at four repeats is one case in eight, so across six cases seeing at
+least one is likelier than not (about 55%). A split verdict is genuinely not
+established; a unanimous one is a candidate worth repeating at a higher count.
 
-Relative L2 is the **primary** metric and the report marks it as such. The other
-four correlate strongly with it, so a four-of-five metric sweep is one finding
-rather than four independent confirmations — treat them as diagnostic detail on
-the primary verdict.
+Relative L2 is the **primary** metric and the report marks it as such. The point
+is naming it before the run rather than after: with five metrics on offer, a
+verdict picked from whichever came out favourably is a verdict about the picking.
+The other four are diagnostic — they say _how_ the images differ and can run
+opposite to the primary one, as the recorded runs below do.
 
 The completion line shows the relative-L2 split by scene along with how many of
 those wins were unanimous, without opening the JSON.

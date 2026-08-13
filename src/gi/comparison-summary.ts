@@ -18,15 +18,16 @@ export const COMPARISON_METRICS = [
 export type ComparisonMetric = (typeof COMPARISON_METRICS)[number];
 
 /**
- * The metric a verdict should be read off. The others largely move with it, so
- * a four-of-five sweep is one finding rather than four independent ones.
+ * The metric a verdict is read off. Named up front so a run is not scored by
+ * whichever of the five came out favourably; the rest describe how the images
+ * differ and can disagree with it.
  */
-export const PRIMARY_COMPARISON_METRIC: ComparisonMetric = "relativeL2";
+export const PRIMARY_COMPARISON_METRIC =
+  "relativeL2" satisfies ComparisonMetric;
 
 /**
- * A win under this much symmetric relative difference is called a tie. Both
- * renderers resolve the same image, so a sub-percent error gap is not one of
- * them being better.
+ * Provisional tie tolerance, not a calibrated perceptual bound. Primary metric
+ * only: on a count like `outliers`, 0-vs-1 is 200% and 100-vs-101 is under 1%.
  */
 export const MINIMUM_PRACTICAL_DIFFERENCE = 0.01;
 
@@ -40,7 +41,7 @@ export const metricValue = (
     : report[metric];
 
 export type MetricSamples = {
-  /** Median across repeats; the value the verdict is decided on. */
+  /** Descriptive only — the verdict is decided on the paired differences. */
   readonly median: number;
   readonly min: number;
   readonly max: number;
@@ -55,19 +56,18 @@ export type MetricVerdict = {
    * medians would draw the two sides from different repeats.
    */
   readonly differences: readonly number[];
-  /** Median of `differences` — what the winner is decided on. */
-  readonly difference: number;
-  /** How many repeats each renderer wins outright. */
-  readonly directions: Readonly<Record<ComparisonMode, number>>;
+  readonly medianDifference: number;
+  /** Repeats where each renderer's error is lower; exact ties count for neither. */
+  readonly lowerErrorRepeats: Readonly<Record<ComparisonMode, number>>;
   /**
    * Null on a tie — including a median difference under
    * `MINIMUM_PRACTICAL_DIFFERENCE` — or when any repeat is unusable.
    */
   readonly winner: ComparisonMode | null;
   /**
-   * Every repeat agrees with the winner — a sign test, so on identical
-   * renderers it still fires at `2/2ⁿ`: p=0.25 at three repeats, 0.125 at four.
-   * Discards split verdicts; never establishes a unanimous one.
+   * Every repeat put the winner lower. A direction-consistency diagnostic, not
+   * an inferential gate: `2/2ⁿ` of null runs are unanimous by chance, so across
+   * six cases at four repeats one is likelier than not.
    */
   readonly unanimous: boolean;
 };
@@ -153,7 +153,7 @@ const verdictFor = (
       metricValue(run.comparisons["path-traced"], metric),
     ),
   );
-  const directions = {
+  const lowerErrorRepeats = {
     restir: differences.filter((value) => value > 0).length,
     "path-traced": differences.filter((value) => value < 0).length,
   };
@@ -161,22 +161,30 @@ const verdictFor = (
   // rather than reporting that the metric is unusable.
   const comparable =
     runs.length > 0 && differences.every((value) => Number.isFinite(value));
-  const difference = comparable
+  const medianDifference = comparable
     ? summarizeSamples(differences).median
     : Number.NaN;
+  // Only the primary metric carries the tie tolerance; see its doc comment.
   const decisive =
-    comparable && Math.abs(difference) >= MINIMUM_PRACTICAL_DIFFERENCE;
-  const winner = !decisive ? null : difference > 0 ? "restir" : "path-traced";
+    comparable &&
+    (metric === PRIMARY_COMPARISON_METRIC
+      ? Math.abs(medianDifference) >= MINIMUM_PRACTICAL_DIFFERENCE
+      : medianDifference !== 0);
+  const winner = !decisive
+    ? null
+    : medianDifference > 0
+      ? "restir"
+      : "path-traced";
   return {
     samples,
     differences,
-    difference,
-    directions,
+    medianDifference,
+    lowerErrorRepeats,
     winner,
     unanimous:
       winner !== null &&
       runs.length > 1 &&
-      directions[winner] === differences.length,
+      lowerErrorRepeats[winner] === differences.length,
   };
 };
 
@@ -304,15 +312,15 @@ export const formatComparisonMatrixSummary = (
       const verdict = entry.metrics[metric];
       const restir = formatSpread(metric, verdict.samples.restir);
       const pathTraced = formatSpread(metric, verdict.samples["path-traced"]);
-      const difference = Number.isFinite(verdict.difference)
-        ? `${verdict.difference >= 0 ? "+" : ""}${(100 * verdict.difference).toFixed(2)}%`
+      const difference = Number.isFinite(verdict.medianDifference)
+        ? `${verdict.medianDifference >= 0 ? "+" : ""}${(100 * verdict.medianDifference).toFixed(2)}%`
         : "n/a";
-      const direction = `${String(verdict.directions.restir)}:${String(verdict.directions["path-traced"])}`;
+      const lowerIn = `${String(verdict.lowerErrorRepeats.restir)}:${String(verdict.lowerErrorRepeats["path-traced"])}`;
       const winner =
         verdict.winner === null
           ? "tie"
-          : `${MODE_LABELS[verdict.winner]}${verdict.unanimous ? "" : " (split)"}`;
-      return `| ${entry.label} | ${METRIC_LABELS[metric]} | ${restir} | ${pathTraced} | ${difference} | ${direction} | ${winner} |`;
+          : `${MODE_LABELS[verdict.winner]}${verdict.unanimous ? "" : " (not unanimous)"}`;
+      return `| ${entry.label} | ${METRIC_LABELS[metric]} | ${restir} | ${pathTraced} | ${difference} | ${lowerIn} | ${winner} |`;
     }),
   );
 
@@ -322,7 +330,7 @@ export const formatComparisonMatrixSummary = (
     "",
     `Verdicts come from the paired per-repeat difference, positive where ${MODE_LABELS.restir} is lower. Wins under ${String(100 * MINIMUM_PRACTICAL_DIFFERENCE)}% are ties. ${METRIC_LABELS[PRIMARY_COMPARISON_METRIC]} is the primary metric; the others correlate with it and are diagnostic.`,
     "",
-    `| case | metric | ${MODE_LABELS.restir} | ${MODE_LABELS["path-traced"]} | paired diff | ${MODE_LABELS.restir}:${MODE_LABELS["path-traced"]} | winner |`,
+    `| case | metric | ${MODE_LABELS.restir} | ${MODE_LABELS["path-traced"]} | paired diff | repeats lower | winner |`,
     "| --- | --- | --- | --- | --- | --- | --- |",
     ...rows,
     "",

@@ -8,6 +8,7 @@ import {
   COMPARISON_METRICS,
   formatComparisonMatrixSummary,
   metricValue,
+  MINIMUM_PRACTICAL_DIFFERENCE,
   summarizeComparisonMatrix,
 } from "@/gi/comparison-summary";
 import type { SceneVariant } from "@/gi/scene";
@@ -291,7 +292,7 @@ describe("summarizeComparisonMatrix", () => {
     const verdict = summary.cases[0]?.metrics.relativeL2;
     expect(verdict?.samples.restir.median).toBe(100);
     expect(verdict?.samples["path-traced"].median).toBe(3);
-    expect(verdict?.directions).toEqual({ restir: 2, "path-traced": 1 });
+    expect(verdict?.lowerErrorRepeats).toEqual({ restir: 2, "path-traced": 1 });
     expect(verdict?.winner).toBe("restir");
   });
 
@@ -332,7 +333,7 @@ describe("summarizeComparisonMatrix", () => {
     );
 
     const verdict = summary.cases[0]?.metrics.relativeL2;
-    expect(verdict?.directions.restir).toBe(2);
+    expect(verdict?.lowerErrorRepeats.restir).toBe(2);
     expect(verdict?.winner).toBeNull();
     expect(summary.overall.tallies.relativeL2.ties).toBe(1);
   });
@@ -360,7 +361,7 @@ describe("summarizeComparisonMatrix", () => {
 
     const verdict = summary.cases[0]?.metrics.relativeL2;
     expect(verdict?.winner).toBe("restir");
-    expect(verdict?.directions).toEqual({ restir: 2, "path-traced": 1 });
+    expect(verdict?.lowerErrorRepeats).toEqual({ restir: 2, "path-traced": 1 });
     expect(verdict?.unanimous).toBe(false);
     expect(summary.overall.tallies.relativeL2.unanimous).toBe(0);
   });
@@ -389,7 +390,7 @@ describe("summarizeComparisonMatrix", () => {
     );
 
     const verdict = summary.cases[0]?.metrics.relativeL2;
-    expect(verdict?.difference).toBeLessThan(0);
+    expect(verdict?.medianDifference).toBeLessThan(0);
     expect(verdict?.winner).toBe("path-traced");
     expect(verdict?.unanimous).toBe(true);
   });
@@ -445,21 +446,55 @@ describe("summarizeComparisonMatrix", () => {
   });
 
   it("refuses a verdict when any single repeat is not finite", () => {
-    // A NaN in one repeat is an unusable measurement; the median could hide it.
+    // The NaN must sit off the median: sort leaves it in place, so a middle NaN
+    // becomes the median and nulls the verdict even with the guard removed.
+    for (const position of [0, 1, 2]) {
+      const summary = summarizeComparisonMatrix(
+        matrix(
+          [0, 1, 2].map((repeat) =>
+            matrixCase(
+              "classic",
+              "front",
+              { relativeL2: repeat === position ? Number.NaN : 1 },
+              { relativeL2: 2 },
+              repeat,
+            ),
+          ),
+        ),
+      );
+      expect(summary.cases[0]?.metrics.relativeL2.winner).toBeNull();
+    }
+  });
+
+  it("puts the tie boundary at the tolerance", () => {
+    // Straddles it from both sides; the exact value is not representable, so
+    // the pin is that a hair above decides and a hair below does not.
+    const pathTracedFor = (difference: number): number =>
+      (2 + difference) / (2 - difference);
+    const winnerAt = (difference: number): ComparisonMode | null | undefined =>
+      summarizeComparisonMatrix(
+        matrix([
+          matrixCase(
+            "classic",
+            "front",
+            { relativeL2: 1 },
+            { relativeL2: pathTracedFor(difference) },
+          ),
+        ]),
+      ).cases[0]?.metrics.relativeL2.winner;
+
+    expect(winnerAt(MINIMUM_PRACTICAL_DIFFERENCE * 1.001)).toBe("restir");
+    expect(winnerAt(MINIMUM_PRACTICAL_DIFFERENCE * 0.999)).toBeNull();
+  });
+
+  it("leaves the diagnostic metrics without the tie tolerance", () => {
+    // outliers is a count: 100 against 101 is under 1% but still a real gap.
     const summary = summarizeComparisonMatrix(
       matrix([
-        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 2 }, 0),
-        matrixCase(
-          "classic",
-          "front",
-          { relativeL2: Number.NaN },
-          { relativeL2: 2 },
-          1,
-        ),
-        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 2 }, 2),
+        matrixCase("classic", "front", { outliers: 100 }, { outliers: 101 }),
       ]),
     );
-    expect(summary.cases[0]?.metrics.relativeL2.winner).toBeNull();
+    expect(summary.cases[0]?.metrics.outliers.winner).toBe("restir");
   });
 
   it("keeps scenes in the order they were measured", () => {
