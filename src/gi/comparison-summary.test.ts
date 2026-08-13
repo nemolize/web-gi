@@ -219,7 +219,7 @@ describe("summarizeComparisonMatrix", () => {
     expect(summary.overall.tallies.relativeL2).toEqual({
       wins: { restir: 0, "path-traced": 0 },
       ties: 2,
-      separated: 0,
+      unanimous: 0,
     });
   });
 
@@ -264,9 +264,81 @@ describe("summarizeComparisonMatrix", () => {
     );
   });
 
-  it("never calls a single-repeat win separated", () => {
-    // One sample has min === max, so every win would trivially clear a spread
-    // that was never measured.
+  it("decides on paired repeats, not on each renderer's median", () => {
+    // The medians come from different repeats, so they can disagree with what
+    // happened inside every repeat: median says path-traced, yet ReSTIR is
+    // lower in two of the three head-to-heads.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 2 }, 0),
+        matrixCase(
+          "classic",
+          "front",
+          { relativeL2: 100 },
+          { relativeL2: 3 },
+          1,
+        ),
+        matrixCase(
+          "classic",
+          "front",
+          { relativeL2: 101 },
+          { relativeL2: 200 },
+          2,
+        ),
+      ]),
+    );
+
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.samples.restir.median).toBe(100);
+    expect(verdict?.samples["path-traced"].median).toBe(3);
+    expect(verdict?.directions).toEqual({ restir: 2, "path-traced": 1 });
+    expect(verdict?.winner).toBe("restir");
+  });
+
+  it("cancels a repeat's conditions inside the pair", () => {
+    // Both renderers are twice as slow in the second repeat. The paired
+    // difference is unchanged by that; the raw values are not.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 2 }, 0),
+        matrixCase("classic", "front", { relativeL2: 2 }, { relativeL2: 4 }, 1),
+      ]),
+    );
+
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.differences).toEqual([2 / 3, 2 / 3]);
+    expect(verdict?.winner).toBe("restir");
+  });
+
+  it("calls a win under the practical difference a tie", () => {
+    // Half a percent apart is the same image, not one renderer being better.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase(
+          "classic",
+          "front",
+          { relativeL2: 1 },
+          { relativeL2: 1.005 },
+          0,
+        ),
+        matrixCase(
+          "classic",
+          "front",
+          { relativeL2: 1 },
+          { relativeL2: 1.005 },
+          1,
+        ),
+      ]),
+    );
+
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.directions.restir).toBe(2);
+    expect(verdict?.winner).toBeNull();
+    expect(summary.overall.tallies.relativeL2.ties).toBe(1);
+  });
+
+  it("never calls a single-repeat win unanimous", () => {
+    // One repeat cannot agree with itself about anything.
     const summary = summarizeComparisonMatrix(
       matrix([
         matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 90 }),
@@ -274,27 +346,26 @@ describe("summarizeComparisonMatrix", () => {
     );
     const verdict = summary.cases[0]?.metrics.relativeL2;
     expect(verdict?.winner).toBe("restir");
-    expect(verdict?.separated).toBe(false);
+    expect(verdict?.unanimous).toBe(false);
   });
 
-  it("marks a win inside run-to-run spread as unseparated", () => {
-    // ReSTIR's median is lower, but its repeats straddle path tracing's — the
-    // measurement has not separated them, however consistent the medians look.
+  it("marks a split verdict as not unanimous", () => {
     const summary = summarizeComparisonMatrix(
       matrix([
         matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 3 }, 0),
-        matrixCase("classic", "front", { relativeL2: 2 }, { relativeL2: 3 }, 1),
+        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 3 }, 1),
         matrixCase("classic", "front", { relativeL2: 9 }, { relativeL2: 3 }, 2),
       ]),
     );
 
     const verdict = summary.cases[0]?.metrics.relativeL2;
     expect(verdict?.winner).toBe("restir");
-    expect(verdict?.separated).toBe(false);
-    expect(summary.overall.tallies.relativeL2.separated).toBe(0);
+    expect(verdict?.directions).toEqual({ restir: 2, "path-traced": 1 });
+    expect(verdict?.unanimous).toBe(false);
+    expect(summary.overall.tallies.relativeL2.unanimous).toBe(0);
   });
 
-  it("marks a win clear of spread as separated", () => {
+  it("marks a win every repeat agrees on as unanimous", () => {
     const summary = summarizeComparisonMatrix(
       matrix([
         matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 5 }, 0),
@@ -304,13 +375,12 @@ describe("summarizeComparisonMatrix", () => {
 
     const verdict = summary.cases[0]?.metrics.relativeL2;
     expect(verdict?.winner).toBe("restir");
-    expect(verdict?.separated).toBe(true);
-    expect(summary.overall.tallies.relativeL2.separated).toBe(1);
+    expect(verdict?.unanimous).toBe(true);
+    expect(summary.overall.tallies.relativeL2.unanimous).toBe(1);
   });
 
-  it("separates a path-traced win the same way", () => {
-    // The winner decides which way the ranges are compared, so both arms need
-    // pinning; a one-sided test lets the other invert undetected.
+  it("reads a path-traced win the same way", () => {
+    // The sign of the difference decides, so both directions need pinning.
     const summary = summarizeComparisonMatrix(
       matrix([
         matrixCase("classic", "front", { relativeL2: 5 }, { relativeL2: 1 }, 0),
@@ -319,68 +389,59 @@ describe("summarizeComparisonMatrix", () => {
     );
 
     const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.difference).toBeLessThan(0);
     expect(verdict?.winner).toBe("path-traced");
-    expect(verdict?.separated).toBe(true);
+    expect(verdict?.unanimous).toBe(true);
   });
 
-  it("separates identical renderers at the rate the doc comment claims", () => {
-    // Every interleaving of three-versus-three exchangeable samples, so the
-    // 10% the doc comment and README quote cannot drift from the predicate.
-    const orderings: boolean[][] = [];
+  it("calls two identical renderers a tie rather than a win", () => {
+    // Every difference is exactly zero, including where both errors are.
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", { relativeL2: 0 }, { relativeL2: 0 }, 0),
+        matrixCase("classic", "front", { relativeL2: 4 }, { relativeL2: 4 }, 1),
+      ]),
+    );
+
+    const verdict = summary.cases[0]?.metrics.relativeL2;
+    expect(verdict?.differences).toEqual([0, 0]);
+    expect(verdict?.winner).toBeNull();
+    expect(verdict?.unanimous).toBe(false);
+  });
+
+  it("calls a unanimous run at the rate the doc comment claims", () => {
+    // Unanimity is a sign test, so on renderers that do not differ it fires at
+    // 2/2^n. Enumerate every direction pattern of three repeats to pin the
+    // p=0.25 the doc comment and README quote.
+    const patterns: boolean[][] = [];
     const walk = (taken: boolean[]): void => {
-      if (taken.length === 6) {
-        orderings.push(taken);
+      if (taken.length === 3) {
+        patterns.push(taken);
         return;
       }
-      const restirLeft = 3 - taken.filter(Boolean).length;
-      if (restirLeft > 0) walk([...taken, true]);
-      if (taken.length - taken.filter(Boolean).length < 3) {
-        walk([...taken, false]);
-      }
+      walk([...taken, true]);
+      walk([...taken, false]);
     };
     walk([]);
-    expect(orderings).toHaveLength(20);
+    expect(patterns).toHaveLength(8);
 
-    const separated = orderings.filter((isRestir) => {
-      // Each rank belongs to one renderer, so read the ranks off per side and
-      // pair them up: a run carries one sample for each.
-      const ranksOf = (mine: boolean): number[] =>
-        isRestir.flatMap((restirWins, rank) =>
-          restirWins === mine ? [rank] : [],
-        );
-      const restirRanks = ranksOf(true);
-      const pathTracedRanks = ranksOf(false);
-      const runs = restirRanks.map((restirRank, repeat) =>
+    const unanimous = patterns.filter((restirWins) => {
+      const runs = restirWins.map((restirLower, repeat) =>
         matrixCase(
           "classic",
           "front",
-          { relativeL2: restirRank },
-          { relativeL2: pathTracedRanks[repeat] ?? Number.NaN },
+          { relativeL2: restirLower ? 1 : 2 },
+          { relativeL2: restirLower ? 2 : 1 },
           repeat,
         ),
       );
       return (
         summarizeComparisonMatrix(matrix(runs)).cases[0]?.metrics.relativeL2
-          .separated === true
+          .unanimous === true
       );
     }).length;
 
-    expect(separated / orderings.length).toBeCloseTo(0.1, 10);
-  });
-
-  it("does not separate repeats that merely touch", () => {
-    // Ranges sharing an endpoint overlap at that point, so the measurement has
-    // not told the two renderers apart.
-    const summary = summarizeComparisonMatrix(
-      matrix([
-        matrixCase("classic", "front", { relativeL2: 1 }, { relativeL2: 3 }, 0),
-        matrixCase("classic", "front", { relativeL2: 3 }, { relativeL2: 5 }, 1),
-      ]),
-    );
-
-    const verdict = summary.cases[0]?.metrics.relativeL2;
-    expect(verdict?.winner).toBe("restir");
-    expect(verdict?.separated).toBe(false);
+    expect(unanimous / patterns.length).toBeCloseTo(0.25, 10);
   });
 
   it("refuses a verdict when any single repeat is not finite", () => {
@@ -445,13 +506,19 @@ describe("formatComparisonMatrixSummary", () => {
 
     expect(text).toContain("### classic (1 cases)");
     expect(text).toContain("### manyLights (1 cases)");
-    expect(text).toContain("relative L2: ReSTIR 0/1 · Denoised PT 1/1");
-    expect(text).toContain("relative L2: ReSTIR 1/1 · Denoised PT 0/1");
+    expect(text).toContain(
+      "relative L2 **(primary)**: ReSTIR 0/1 · Denoised PT 1/1",
+    );
+    expect(text).toContain(
+      "relative L2 **(primary)**: ReSTIR 1/1 · Denoised PT 0/1",
+    );
     expect(text).toContain("| classic/front | relative L2 |");
     // Counts, not radiance, so an integer metric must not gain six decimals.
-    expect(text).toContain("| outliers | 1 | 1 | tie |");
+    expect(text).toContain("| outliers | 1 | 1 | +0.00% | 0:0 | tie |");
     // A tie is its own outcome; without it the two win counts read as the whole
     // story and the remainder looks like the other renderer's.
-    expect(text).toContain("outliers: ReSTIR 0/2 · Denoised PT 0/2 · ties 2");
+    expect(text).toContain(
+      "outliers (diagnostic): ReSTIR 0/2 · Denoised PT 0/2 · ties 2",
+    );
   });
 });

@@ -3,6 +3,7 @@ import {
   COMPARISON_MATRIX_MODES,
   COMPARISON_MATRIX_RUN_ORDERS,
   comparisonMatrixRuns,
+  DEFAULT_COMPARISON_MATRIX_REPEATS,
 } from "@/gi/comparison-matrix";
 
 describe("comparison matrix", () => {
@@ -54,6 +55,23 @@ describe("comparisonMatrixRuns", () => {
     expect(
       runs.slice(COMPARISON_MATRIX_CASES.length).map(({ repeat }) => repeat),
     ).toEqual(COMPARISON_MATRIX_CASES.map(() => 1));
+  });
+
+  it("rotates the case order so a scene does not track elapsed time", () => {
+    // A fixed order puts classic early and manyLights late in every sweep, so
+    // scene and thermal state stay correlated however many repeats are run.
+    const size = COMPARISON_MATRIX_CASES.length;
+    const runs = comparisonMatrixRuns(size);
+    for (const { label } of COMPARISON_MATRIX_CASES) {
+      const positions = runs.flatMap((run, index) =>
+        run.label === label ? [index % size] : [],
+      );
+      expect(new Set(positions).size).toBe(size);
+    }
+  });
+
+  it("defaults to an even repeat count so run order balances", () => {
+    expect(DEFAULT_COMPARISON_MATRIX_REPEATS % 2).toBe(0);
   });
 
   it("balances run order within each scene over an even repeat count", () => {

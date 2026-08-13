@@ -73,49 +73,62 @@ Equal-time linear-radiance comparisons use similarly short URLs:
 The matrix preset runs the Cornell box and 30-light scene from the front, left,
 and right-high views. It builds one exact 1,024-frame, GPU-completion-paced
 `Reference PT` oracle per view and compares both ReSTIR and Denoised PT against
-that shared image for five seconds each. The whole six-case sweep repeats — three
+that shared image for five seconds each. The whole six-case sweep repeats — four
 times by default — with repeats outermost, so a case's measurements are spread
 across the session rather than taken back to back in one thermal state. The
-individual URLs run the
-same process for one renderer at the default view. Reports include the camera
-basis, settings, a-trous variant, frame counts, actual durations, and
-linear-radiance error metrics, and remain available through `Copy result`. Keep
-the page visible and unchanged while the several-minute matrix is running.
+individual URLs run the same process for one renderer at the default view.
+Reports include the camera basis, settings, a-trous variant, frame counts, actual
+durations, and linear-radiance error metrics, and remain available through
+`Copy result`. Keep the page visible and unchanged while the several-minute
+matrix is running.
 
-Run order alternates on the camera index plus the repeat number, which keeps each
-scene's split of the two orders balanced over an even repeat count. Alternating
-on position in the flattened case list instead — as this did before — gives one
-scene `[A,B,A]` and the other `[B,A,B]`, a 2:1 split per scene in opposite
-directions, which biases exactly the per-scene comparison the matrix exists to
-make.
+Two things vary across repeats so the schedule does not bake in what it is trying
+to measure. Run order alternates on the camera index plus the repeat number,
+which balances each scene's split of the two orders at an even repeat count —
+hence the even default. And each repeat rotates the case order by one, so a scene
+does not sit at the same point of every sweep and track elapsed time along with
+it.
 
 A matrix report also carries a derived `summary`: the winner of each metric on
 each case, tallied both overall and **per scene**. Luminance is scored as
-`|ratio - 1|`, since a ratio of 0.9 and one of 1.1 are equally biased. A case's
-repeats are folded into one verdict on their **median**, so a single thermal
-outlier cannot flip a case the way a mean would, and the per-case table carries
-the min–max range beside it.
+`|ratio - 1|`, since a ratio of 0.9 and one of 1.1 are equally biased.
 
 The per-scene split is the part worth reading — an even overall tally can be two
 opposite sweeps, and which scene a renderer wins is what decides whether a
 hybrid is worth building (#43).
 
-Each verdict also reports whether it is **separated** — whether the winner's
-repeats sit entirely clear of the loser's. Margins here have been observed as
-narrow as 3%, which a single pass cannot distinguish from drift, so an
-unseparated win is a win the measurement did not establish.
+### How a verdict is decided
 
-Read that flag in one direction only. It is a screen, not a significance test:
-for two renderers that do not differ at all, the chance that `n` repeats of one
-land entirely below `n` of the other is `2·(n!)²/(2n)!` — **10% at three
-repeats**, so a 30-verdict run should be expected to show about three separated
-wins on noise alone. An unseparated win is genuinely not established; a
-separated one is only a candidate worth repeating at a higher count. Raising the
-repeats is what sharpens it (2.9% at four, 0.8% at five). A verdict from fewer
-than two repeats is never counted as separated.
+Within one repeat, both renderers meet the _same_ oracle at the _same_ point in
+the session, which makes their two errors a matched pair. Each repeat therefore
+contributes one symmetric relative difference,
+
+```
+2 × (PT_error − ReSTIR_error) / (PT_error + ReSTIR_error)
+```
+
+positive where ReSTIR is lower, and the verdict is the median of those. Pairing
+inside the repeat cancels whatever that repeat's conditions were, which comparing
+the two renderers' medians separately does not: those medians can come from
+different repeats, so `ReSTIR [1, 100, 101]` against `PT [2, 3, 200]` makes the
+median say PT while ReSTIR is in fact lower in two of the three head-to-heads.
+
+A median difference under **1%** is reported as a tie. Both renderers resolve the
+same image, so a sub-percent error gap is not one of them being better.
+
+Each verdict also reports whether it is **unanimous** — whether every repeat
+agreed with the winner. Read that in one direction only: it is a sign test, so on
+renderers that do not differ at all it still fires at `2/2ⁿ`, which is p=0.25 at
+three repeats and 0.125 at four. A split verdict is genuinely not established; a
+unanimous one is only a candidate worth repeating at a higher count.
+
+Relative L2 is the **primary** metric and the report marks it as such. The other
+four correlate strongly with it, so a four-of-five metric sweep is one finding
+rather than four independent confirmations — treat them as diagnostic detail on
+the primary verdict.
 
 The completion line shows the relative-L2 split by scene along with how many of
-those wins clear spread, without opening the JSON.
+those wins were unanimous, without opening the JSON.
 
 The automatic 1,024-frame reference is the mobile default: at 691×1,445, the
 target-device matrix completed one pass of its measured phases in 188 seconds
@@ -123,12 +136,13 @@ and preserved the 2,048-frame sweep's decisions. ReSTIR had lower Relative L2 in
 all six cases; Denoised PT had lower mean absolute error and fewer outliers in
 all six, plus lower absolute luminance error in four. A 512-frame run was
 rejected after it changed one Relative L2 winner. Those figures are aggregates
-from a single unrepeated pass, recorded before the summary existed, so they say
-neither how the six cases split by scene nor which of those wins clear
-run-to-run spread; a fresh matrix run reports both directly. Budget the
-single-pass duration times the repeat count. Higher-confidence
-one-off validation can still use the development controls to save a longer
-reference, with the actual frame count retained in the report.
+from a single unrepeated pass, recorded before the summary existed, and they were
+read off each renderer's own errors rather than the paired difference — so they
+say neither how the six cases split by scene nor which verdicts every repeat
+agreed on. A fresh matrix run reports both directly. Budget the single-pass
+duration times the repeat count. Higher-confidence one-off validation can still
+use the development controls to save a longer reference, with the actual frame
+count retained in the report.
 
 A desktop pass recorded before repeats existed found the opposite direction:
 Denoised PT ahead on relative L2, mean absolute, and outliers in all six cases,
