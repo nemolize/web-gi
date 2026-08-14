@@ -94,8 +94,9 @@ each case, tallied both overall and **per scene**. Luminance is scored as
 `|ratio - 1|`, since a ratio of 0.9 and one of 1.1 are equally biased.
 
 The per-scene split is the part worth reading — an even overall tally can be two
-opposite sweeps, and which scene a renderer wins is what decides whether a
-hybrid is worth building (#43).
+opposite sweeps. It is also what a hybrid would have to exploit: on the recorded
+runs below neither scene splits from the other, so there is no scene-dependent
+pattern to build one around (#43).
 
 ### How a verdict is decided
 
@@ -152,13 +153,34 @@ duration times the repeat count. Higher-confidence one-off validation can still
 use the development controls to save a longer reference, with the actual frame
 count retained in the report.
 
-A desktop pass recorded before repeats existed found the opposite direction:
-Denoised PT ahead on relative L2, mean absolute, and outliers in all six cases,
-with ReSTIR ahead only on luminance bias, and margins of roughly 3–20%. That
-reading and the mobile one are consistent under an equal-time model — the faster
-the machine, the more path tracing's larger frame count outweighs what
-resampling buys — but the crossover point is not measured, so any claim about
-which renderer wins has to name the device it was measured on.
+A desktop run points the other way. On an Apple silicon laptop in Chrome 150 at
+1,128×885, four repeats of the six cases put Denoised PT lower on relative L2 in
+all six, every one of them unanimous, by paired median differences of 2.9%,
+12.9%, 16.4%, 19.2%, 28.7% and 30.6%. Mean absolute and outliers agree in all
+six; max absolute agrees in five with one exact tie, none unanimous. Path
+tracing got almost exactly twice the frames in the same five seconds (1.93× to
+2.14×), which is the whole of the effect: at this speed the extra samples
+outweigh what resampling buys.
+
+Luminance is the one metric that does not follow, and it splits 3:3 with no case
+unanimous. Its direction is nonetheless perfectly consistent — ReSTIR came out
+brighter than the oracle in all 24 runs and Denoised PT darker in all 24 — so
+the bias is structural in sign and buried in noise in magnitude. The earlier
+unrepeated desktop pass read this as a clean ReSTIR win; four repeats do not
+support that.
+
+The two devices disagree, and consistently so under an equal-time model: the
+faster the machine, the more path tracing's larger frame count outweighs
+resampling. The crossover point is still not measured, so any claim about which
+renderer wins has to name the device. Note also that this run used the default
+à-trous filter, while the earlier desktop pass predates tiling becoming opt-in
+and used `tiled-16`.
+
+One caveat on the run itself: oracle generation slowed by 15–18% from the first
+sweep to the last (3,267→3,890 ms on `classic`, 5,428→6,077 ms on `manyLights`),
+so the machine was heating over the session. Pairing absorbs it for the verdicts
+— both renderers share one oracle per repeat — but the absolute frame counts are
+lower late in the run than early.
 
 ## Pipeline
 
