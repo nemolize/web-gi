@@ -69,6 +69,7 @@ available through `Copy result`.
 Equal-time linear-radiance comparisons use similarly short URLs:
 
 - `?preset=matrix`
+- `?preset=matrix&scale=0.4`
 - `?preset=heavy&compare=restir`
 - `?preset=heavy&compare=path-traced`
 
@@ -83,6 +84,16 @@ Reports include the camera basis, settings, a-trous variant, frame counts, actua
 durations, and linear-radiance error metrics, and remain available through
 `Copy result`. Keep the page visible and unchanged while the several-minute
 matrix is running.
+
+`scale` throttles the matrix to a lower resolution, which raises both renderers'
+frame rates without touching anything else in the preset. It accepts `0.25`,
+`0.3`, `0.35`, `0.4`, `0.5`, `0.6`, `0.75` (the preset's own scale) and `1`;
+anything else is ignored and the run proceeds at `0.75`. The value it ran at is
+recorded in the report's `url`, so two runs at different scales stay
+distinguishable afterwards. This is the throttle #80 asks for — the equal-time
+verdict is a function of achievable frame rate, so lowering the resolution on one
+machine tests the model that predicts the crossover without needing a second
+device. It cannot rule out a device-specific cause on its own.
 
 Two things vary across repeats so the schedule does not bake in what it is trying
 to measure. Run order alternates on the camera index plus the repeat number,

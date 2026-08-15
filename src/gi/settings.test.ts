@@ -8,6 +8,7 @@ import {
   FLAG_GI_ENABLED,
   FLAG_GI_SPATIAL,
   FLAG_GI_TEMPORAL,
+  MATRIX_RESOLUTION_SCALES,
   packFlags,
   requiresAccumulationReset,
   sanitizedRenderQueryParams,
@@ -87,6 +88,62 @@ describe("render query", () => {
     expect(autoComparisonMode(search)).toBe("matrix");
     expect(shouldAutoMeasure(search)).toBe(false);
     expect(sanitizedRenderQueryParams(search).toString()).toBe("preset=matrix");
+  });
+
+  it("throttles the matrix to an allowlisted resolution scale", () => {
+    const search = "?preset=matrix&scale=0.4";
+    expect(settingsFromSearch(search)).toEqual({
+      ...DEFAULT_SETTINGS,
+      scene: "manyLights",
+      mode: "reference",
+      diCandidates: 32,
+      spatialSamples: 8,
+      maxBounces: 6,
+      resolutionScale: 0.4,
+    });
+    expect(autoComparisonMode(search)).toBe("matrix");
+    expect(sanitizedRenderQueryParams(search).toString()).toBe(
+      "preset=matrix&scale=0.4",
+    );
+  });
+
+  it("keeps every allowlisted scale a number the renderer can use", () => {
+    for (const scale of MATRIX_RESOLUTION_SCALES) {
+      const resolved = settingsFromSearch(
+        `?preset=matrix&scale=${scale}`,
+      ).resolutionScale;
+      expect(resolved).toBe(Number(scale));
+      expect(resolved).toBeGreaterThan(0);
+      expect(resolved).toBeLessThanOrEqual(1);
+    }
+  });
+
+  // An unrecognised scale must not read as a run at the preset's own scale, so
+  // it leaves the URL the report records rather than silently rounding (#80).
+  it("ignores a scale outside the allowlist", () => {
+    for (const search of [
+      "?preset=matrix&scale=0.42",
+      "?preset=matrix&scale=0.4x",
+      "?preset=matrix&scale=abc",
+      "?preset=matrix&scale=",
+      "?preset=matrix&scale=2",
+      "?preset=matrix&scale=-0.4",
+    ]) {
+      expect(settingsFromSearch(search).resolutionScale).toBe(0.75);
+      expect(sanitizedRenderQueryParams(search).toString()).toBe(
+        "preset=matrix",
+      );
+    }
+  });
+
+  it("does not accept a scale outside the matrix preset", () => {
+    expect(settingsFromSearch("?scale=0.4").resolutionScale).toBe(0.75);
+    expect(settingsFromSearch("?preset=heavy&scale=0.4").resolutionScale).toBe(
+      0.75,
+    );
+    expect(
+      sanitizedRenderQueryParams("?preset=heavy&scale=0.4").toString(),
+    ).toBe("preset=heavy");
   });
 });
 

@@ -344,4 +344,24 @@ describe("performance capture", () => {
       ),
     ).toBe("https://example.com/demo?preset=matrix");
   });
+
+  // The scale is what tells one throttled run from another after the fact, so a
+  // report that omitted it would not identify its own arm (#80).
+  it("records the matrix resolution scale in the report URL", () => {
+    expect(
+      sanitizePerformanceReportUrl(
+        "https://example.com/demo?preset=matrix&scale=0.4&token=secret#private",
+      ),
+    ).toBe("https://example.com/demo?preset=matrix&scale=0.4");
+    expect(
+      sanitizePerformanceReportUrl(
+        "https://example.com/demo?preset=matrix&scale=0.4&atrous=tiled",
+      ),
+    ).toBe("https://example.com/demo?preset=matrix&scale=0.4&atrous=tiled");
+    expect(
+      sanitizePerformanceReportUrl(
+        "https://example.com/demo?preset=matrix&scale=0.42",
+      ),
+    ).toBe("https://example.com/demo?preset=matrix");
+  });
 });

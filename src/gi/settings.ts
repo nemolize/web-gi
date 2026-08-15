@@ -56,6 +56,22 @@ const HEAVY_SETTINGS: Partial<RenderSettings> = {
   resolutionScale: 0.75,
 };
 
+/**
+ * Allowlisted rather than parsed as a float: the scale is what tells two
+ * throttled runs apart in the recorded `url`, so an unrecognised one must drop
+ * out of the URL instead of rounding to a scale nobody chose (#80).
+ */
+export const MATRIX_RESOLUTION_SCALES = [
+  "0.25",
+  "0.3",
+  "0.35",
+  "0.4",
+  "0.5",
+  "0.6",
+  "0.75",
+  "1",
+] as const;
+
 const enumValue = <T extends string>(
   params: URLSearchParams,
   key: string,
@@ -72,6 +88,8 @@ export const sanitizedRenderQueryParams = (search: string): URLSearchParams => {
   const sanitized = new URLSearchParams();
   if (source.get("preset") === "matrix") {
     sanitized.set("preset", "matrix");
+    const scale = enumValue(source, "scale", MATRIX_RESOLUTION_SCALES);
+    if (scale !== undefined) sanitized.set("scale", scale);
     return sanitized;
   }
   if (source.get("preset") === "heavy") {
@@ -98,8 +116,11 @@ export const settingsFromSearch = (search: string): RenderSettings => {
     preset === "heavy" || preset === "matrix"
       ? { ...DEFAULT_SETTINGS, ...HEAVY_SETTINGS }
       : { ...DEFAULT_SETTINGS };
+  // `params` is already sanitized, so a surviving `scale` is allowlisted.
+  const scale = params.get("scale");
   return {
     ...base,
+    ...(scale === null ? {} : { resolutionScale: Number(scale) }),
     mode:
       autoComparisonMode(params) === null
         ? (enumValue(params, "mode", RENDER_MODES) ?? base.mode)
