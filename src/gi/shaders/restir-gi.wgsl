@@ -29,7 +29,12 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   }
 
   let x = surfacePosition(uni.cam, pixel, depth);
-  let n = textureLoad(texNormal, pixel, 0).xyz;
+  let packedNormal = textureLoad(texNormal, pixel, 0);
+  if (abs(packedNormal.w) > 0.5) {
+    outReservoirs[index] = giReservoirEmpty();
+    return;
+  }
+  let n = packedNormal.xyz;
   let albedo = textureLoad(texAlbedo, pixel, 0).xyz;
   rngInit(pixel, uni.frame, 4u);
 
@@ -38,10 +43,18 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let dir = cosineSampleHemisphere(n, rand(), rand());
   let cosTheta = dot(n, dir);
   let hit = traceScene(x + n * SURFACE_EPS, dir);
-  if (hit.hit && cosTheta > 0.0) {
+  if (hit.hit && hit.materialIndex == 0u && cosTheta > 0.0) {
     // Emissive hits contribute nothing: direct light is ReSTIR DI's job, so
     // counting it again here would double the first bounce.
-    let radiance = pathRadiance(hit.pos, hit.normal, hit.albedo, uni.maxBounces);
+    let radiance = pathRadiance(
+      hit.pos,
+      hit.normal,
+      hit.albedo,
+      hit.materialIndex,
+      hit.frontFace,
+      dir,
+      uni.maxBounces,
+    );
     let candidate = giReservoirSample(hit.pos, hit.normal, radiance);
     let targetPdf = giTargetPdf(x, n, albedo, candidate);
     let sourcePdf = cosTheta * INV_PI;

@@ -6,7 +6,7 @@
  * the error, and the 8-bit sRGB encode quantises what is left.
  */
 
-/** Linear RGB, one RGBA quad per pixel, row-major. Alpha is ignored. */
+/** Linear RGB, one RGBA quad per pixel, row-major. Comparisons ignore alpha. */
 export type LinearImage = {
   readonly width: number;
   readonly height: number;

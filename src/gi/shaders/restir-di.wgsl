@@ -30,7 +30,12 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   }
 
   let x = surfacePosition(uni.cam, pixel, depth);
-  let n = textureLoad(texNormal, pixel, 0).xyz;
+  let packedNormal = textureLoad(texNormal, pixel, 0);
+  if (abs(packedNormal.w) > 0.5) {
+    outReservoirs[index] = diReservoirEmpty();
+    return;
+  }
+  let n = packedNormal.xyz;
   let albedo = textureLoad(texAlbedo, pixel, 0).xyz;
   rngInit(pixel, uni.frame, 2u);
 

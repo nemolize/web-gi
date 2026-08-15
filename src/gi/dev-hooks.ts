@@ -1,4 +1,4 @@
-/** Development-only global access to the renderer's comparison session. */
+/** Global access to diagnostics in development and explicitly enabled E2E builds. */
 import type { LinearImage } from "@/gi/compare";
 import { compareLinear } from "@/gi/compare";
 import type { ComparisonSession } from "@/gi/comparison-session";
@@ -25,7 +25,9 @@ export const installDevHooks = (
   capture: () => Promise<LinearImage | null>,
   comparison: ComparisonSession,
 ): void => {
-  if (!import.meta.env.DEV) return;
+  if (!import.meta.env.DEV && import.meta.env["VITE_E2E_CAPTURE"] !== "1") {
+    return;
+  }
   globalThis.__gi = {
     capture,
     compare: compareLinear,

@@ -12,9 +12,11 @@ import {
   packClusters,
   packLights,
   packQuads,
+  packSpheres,
   QUAD_STRIDE_BYTES,
   quadCorners,
   SCENE_VARIANTS,
+  SPHERE_STRIDE_BYTES,
 } from "@/gi/scene";
 
 const NO_EMISSION = { albedo: vec3(1, 1, 1), emission: vec3(0, 0, 0) };
@@ -115,6 +117,23 @@ describe("buildScene", () => {
     }
   });
 
+  it("stages one clear dielectric sphere inside the glass scene", () => {
+    const scene = buildScene("glassSphere");
+    expect(scene.spheres).toHaveLength(1);
+    const sphere = requireAt(scene.spheres, 0);
+    expect(sphere.ior).toBeCloseTo(1.52);
+    expect(sphere.tint.x).toBeGreaterThan(0.9);
+    for (const axis of ["x", "y", "z"] as const) {
+      expect(sphere.center[axis] - sphere.radius).toBeGreaterThanOrEqual(0);
+      expect(sphere.center[axis] + sphere.radius).toBeLessThanOrEqual(1);
+    }
+    for (const variant of SCENE_VARIANTS.filter(
+      (candidate) => candidate !== "glassSphere",
+    )) {
+      expect(buildScene(variant).spheres).toEqual([]);
+    }
+  });
+
   // The cove emitter is the one that does not face the room: it points at the
   // ceiling, and a flipped normal would light nothing a shadow ray can reach.
   it("aims the cove emitter at the ceiling", () => {
@@ -206,6 +225,18 @@ describe("GPU packing", () => {
     expect(view.getFloat32(12, true)).toBeCloseTo(first.area);
     expect(view.getFloat32(48, true)).toBeCloseTo(first.normal.x);
     expect(view.getFloat32(52, true)).toBeCloseTo(first.normal.y);
+  });
+
+  it("writes sphere fields at the offsets the shader reads", () => {
+    const sphereScene = buildScene("glassSphere");
+    const sphere = requireAt(sphereScene.spheres, 0);
+    const view = new DataView(packSpheres(sphereScene));
+    expect(view.byteLength).toBe(SPHERE_STRIDE_BYTES);
+    expect(view.getFloat32(0, true)).toBeCloseTo(sphere.center.x);
+    expect(view.getFloat32(12, true)).toBeCloseTo(sphere.radius);
+    expect(view.getFloat32(16, true)).toBeCloseTo(sphere.tint.x);
+    expect(view.getFloat32(28, true)).toBeCloseTo(sphere.ior);
+    expect(packSpheres(scene).byteLength).toBe(SPHERE_STRIDE_BYTES);
   });
 
   // `intersectQuad` multiplies by these instead of dividing by the edge lengths

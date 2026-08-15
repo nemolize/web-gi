@@ -138,8 +138,8 @@ export const packFlags = (settings: RenderSettings): number =>
 
 /**
  * Settings that invalidate accumulated history. Camera motion is deliberately
- * absent: every surface is Lambertian, so accumulated irradiance stays valid
- * when the eye moves and only the reference path tracer needs a reset.
+ * absent: diffuse irradiance survives camera motion. The renderer separately
+ * resets view-dependent reference and glass-scene radiance.
  */
 const ACCUMULATION_KEYS = [
   "scene",

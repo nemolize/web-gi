@@ -17,6 +17,13 @@ export type Material = {
   readonly emission: Vec3;
 };
 
+export type GlassSphere = {
+  readonly center: Vec3;
+  readonly radius: number;
+  readonly tint: Vec3;
+  readonly ior: number;
+};
+
 /**
  * Parallelogram primitive. Edges are required to be perpendicular so the
  * shader can invert `p = a*u + b*v` with two dot products instead of solving a
@@ -53,6 +60,7 @@ export type OccluderCluster = {
 export type Scene = {
   /** Occluders first, then the room walls; see `occluderCount`. */
   readonly quads: readonly Quad[];
+  readonly spheres: readonly GlassSphere[];
   readonly lights: readonly LightRef[];
   /**
    * Quads a shadow ray has to test. The room is convex and every shadow ray is
@@ -68,6 +76,7 @@ export type Scene = {
 
 export const SCENE_VARIANTS = [
   "classic",
+  "glassSphere",
   "manyLights",
   "doorway",
   "cove",
@@ -77,6 +86,7 @@ export type SceneVariant = (typeof SCENE_VARIANTS)[number];
 
 export const SCENE_LABELS: Record<SceneVariant, string> = {
   classic: "Cornell box",
+  glassSphere: "Glass sphere",
   manyLights: "30 lights",
   doorway: "Two rooms",
   cove: "Cove light",
@@ -84,6 +94,7 @@ export const SCENE_LABELS: Record<SceneVariant, string> = {
 };
 
 export const QUAD_STRIDE_BYTES = 96;
+export const SPHERE_STRIDE_BYTES = 32;
 export const LIGHT_STRIDE_BYTES = 16;
 export const CLUSTER_STRIDE_BYTES = 32;
 
@@ -163,6 +174,7 @@ type SceneDefinition = {
   readonly occluderGroups: readonly (readonly Quad[])[];
   /** Trail as a single group, which a closest-hit ray almost always reaches. */
   readonly walls: readonly Quad[];
+  readonly spheres?: readonly GlassSphere[];
 };
 
 type WallMaterials = {
@@ -328,6 +340,25 @@ const pillars = (): SceneDefinition => ({
   walls: room({ floor: SLATE, back: TEAL }),
 });
 
+const glassSphere = (): SceneDefinition => ({
+  occluderGroups: [
+    makeBox(vec3(0.5, 0.045, 0.55), vec3(0.16, 0.045, 0.16), 0, WHITE),
+    makeBox(vec3(0.24, 0.24, 0.14), vec3(0.075, 0.24, 0.035), -8, RED),
+    makeBox(vec3(0.5, 0.34, 0.12), vec3(0.08, 0.34, 0.035), 0, AMBER),
+    makeBox(vec3(0.76, 0.2, 0.14), vec3(0.075, 0.2, 0.035), 8, TEAL),
+    [ceilingLight([0.22, 0.78], [0.24, 0.76], vec3(7, 6.5, 5.8))],
+  ],
+  spheres: [
+    {
+      center: vec3(0.5, 0.325, 0.55),
+      radius: 0.235,
+      tint: vec3(0.96, 0.985, 1),
+      ior: 1.52,
+    },
+  ],
+  walls: room({ floor: SLATE, left: RED, right: GREEN }),
+});
+
 const LUMINANCE = vec3(0.2126, 0.7152, 0.0722);
 
 const collectLights = (quads: readonly Quad[]): LightRef[] => {
@@ -372,6 +403,7 @@ const SCENE_DEFINITIONS: Record<SceneVariant, () => SceneDefinition> = {
     occluderGroups: [...blocks(), classicLight()],
     walls: room({ left: RED, right: GREEN }),
   }),
+  glassSphere,
   manyLights: () => ({
     occluderGroups: [...blocks(), manyLights()],
     walls: room({ left: RED, right: GREEN }),
@@ -382,7 +414,7 @@ const SCENE_DEFINITIONS: Record<SceneVariant, () => SceneDefinition> = {
 };
 
 export const buildScene = (variant: SceneVariant): Scene => {
-  const { occluderGroups, walls } = SCENE_DEFINITIONS[variant]();
+  const { occluderGroups, walls, spheres = [] } = SCENE_DEFINITIONS[variant]();
   const groups = [...occluderGroups, walls];
   const quads = groups.flat();
 
@@ -395,11 +427,31 @@ export const buildScene = (variant: SceneVariant): Scene => {
 
   return {
     quads,
+    spheres,
     lights: collectLights(quads),
     occluderCount: occluderGroups.flat().length,
     clusters,
     occluderClusterCount: occluderGroups.length,
   };
+};
+
+export const packSpheres = (scene: Scene): ArrayBuffer => {
+  const buffer = new ArrayBuffer(
+    Math.max(scene.spheres.length, 1) * SPHERE_STRIDE_BYTES,
+  );
+  const f32 = new Float32Array(buffer);
+  scene.spheres.forEach((sphere, index) => {
+    const base = (index * SPHERE_STRIDE_BYTES) / 4;
+    f32.set(
+      [sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius],
+      base,
+    );
+    f32.set(
+      [sphere.tint.x, sphere.tint.y, sphere.tint.z, sphere.ior],
+      base + 4,
+    );
+  });
+  return buffer;
 };
 
 export const packQuads = (scene: Scene): ArrayBuffer => {
