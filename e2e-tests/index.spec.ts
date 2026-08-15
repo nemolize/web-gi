@@ -1,6 +1,17 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, test } from "@playwright/test";
 
 import { isPreviewTarget } from "./target";
+
+const waitForAccumulatedFrames = async (
+  accumulated: Locator,
+  frames: number,
+): Promise<void> => {
+  await expect
+    .poll(async () => Number((await accumulated.textContent()) ?? "0"), {
+      timeout: 20_000,
+    })
+    .toBeGreaterThanOrEqual(frames);
+};
 
 test("renders the control panel and starts (or reports) the WebGPU renderer", async ({
   page,
@@ -99,7 +110,7 @@ test("loads the paired comparison matrix from one preset", async ({ page }) => {
   await expect(page.getByLabel("Bounces")).toHaveValue("6");
 });
 
-test("renders finite Denoised PT output when WebGPU is available", async ({
+test("renders finite glass-shape output when WebGPU is available", async ({
   page,
 }) => {
   const gpuErrors: string[] = [];
@@ -129,46 +140,99 @@ test("renders finite Denoised PT output when WebGPU is available", async ({
     .not.toBe("pending");
   test.skip((await notice.count()) > 0, "requires a WebGPU adapter");
 
-  const before = Number((await accumulated.textContent()) ?? "0");
-  await page.getByRole("radio", { name: "Denoised PT" }).click();
+  const scene = page.getByLabel("Scene");
+  const beforeSceneChange = Number((await accumulated.textContent()) ?? "0");
+  await scene.selectOption("glassShapes");
+  await expect(scene).toHaveValue("glassShapes");
   await expect
     .poll(async () => Number((await accumulated.textContent()) ?? "0"))
-    .toBeLessThan(before);
-  await expect
-    .poll(async () => Number((await accumulated.textContent()) ?? "0"))
-    .toBeGreaterThan(0);
+    .toBeLessThan(beforeSceneChange);
 
-  const output = await page.evaluate(async () => {
-    const hooks: unknown = Reflect.get(globalThis, "__gi");
-    if (hooks === null || typeof hooks !== "object") return null;
-    const capture: unknown = Reflect.get(hooks, "capture");
-    if (typeof capture !== "function") return null;
-    const image: unknown = await Reflect.apply(capture, hooks, []);
-    if (image === null || typeof image !== "object") return null;
-    const data: unknown = Reflect.get(image, "data");
-    if (!(data instanceof Float32Array)) return null;
-    let energy = 0;
-    for (let index = 0; index < data.length; index += 4) {
-      const red = data[index];
-      const green = data[index + 1];
-      const blue = data[index + 2];
-      if (
-        red === undefined ||
-        green === undefined ||
-        blue === undefined ||
-        !Number.isFinite(red) ||
-        !Number.isFinite(green) ||
-        !Number.isFinite(blue)
-      ) {
-        return { finite: false, energy };
+  const captureOutput = async () =>
+    page.evaluate(async () => {
+      const hooks: unknown = Reflect.get(globalThis, "__gi");
+      if (hooks === null || typeof hooks !== "object") return null;
+      const capture: unknown = Reflect.get(hooks, "capture");
+      if (typeof capture !== "function") return null;
+      const image: unknown = await Reflect.apply(capture, hooks, []);
+      if (image === null || typeof image !== "object") return null;
+      const data: unknown = Reflect.get(image, "data");
+      if (!(data instanceof Float32Array)) return null;
+      let energy = 0;
+      let glassEnergy = 0;
+      let glassPixels = 0;
+      let transmittedPixels = 0;
+      let transmittedSpherePixels = 0;
+      let transmittedPedestalBoxPixels = 0;
+      let transmittedBackdropBoxPixels = 0;
+      for (let index = 0; index < data.length; index += 4) {
+        const red = data[index];
+        const green = data[index + 1];
+        const blue = data[index + 2];
+        if (
+          red === undefined ||
+          green === undefined ||
+          blue === undefined ||
+          !Number.isFinite(red) ||
+          !Number.isFinite(green) ||
+          !Number.isFinite(blue)
+        ) {
+          return { finite: false, energy };
+        }
+        energy += red + green + blue;
+        const diagnostic = data[index + 3] ?? 0;
+        if (diagnostic > 0.5) {
+          glassEnergy += red + green + blue;
+          glassPixels++;
+        }
+        if (diagnostic > 1.5) transmittedPixels++;
+        if (diagnostic > 1.5 && diagnostic < 2.5) {
+          transmittedSpherePixels++;
+        }
+        if (diagnostic > 2.5 && diagnostic < 3.5) {
+          transmittedPedestalBoxPixels++;
+        }
+        if (diagnostic > 3.5 && diagnostic < 4.5) {
+          transmittedBackdropBoxPixels++;
+        }
       }
-      energy += red + green + blue;
+      return {
+        finite: true,
+        energy,
+        glassEnergy,
+        glassPixels,
+        transmittedPixels,
+        transmittedSpherePixels,
+        transmittedPedestalBoxPixels,
+        transmittedBackdropBoxPixels,
+        pixels: data.length / 4,
+      };
+    });
+
+  const modes = ["ReSTIR", "Denoised PT", "Reference PT"] as const;
+  for (const [index, mode] of modes.entries()) {
+    if (index > 0) {
+      const before = Number((await accumulated.textContent()) ?? "0");
+      const control = page.getByRole("radio", { name: mode });
+      await control.click();
+      await expect(control).toHaveAttribute("aria-checked", "true");
+      await expect
+        .poll(async () => Number((await accumulated.textContent()) ?? "0"))
+        .toBeLessThan(before);
     }
-    return { finite: true, energy };
-  });
-  expect(output).not.toBeNull();
-  expect(output?.finite).toBe(true);
-  expect(output?.energy).toBeGreaterThan(0);
+    await waitForAccumulatedFrames(accumulated, 30);
+    const output = await captureOutput();
+    expect(output, mode).not.toBeNull();
+    expect(output?.finite, mode).toBe(true);
+    expect(output?.energy, mode).toBeGreaterThan(0);
+    expect(output?.glassPixels, mode).toBeGreaterThan(0);
+    expect(output?.glassPixels, mode).toBeLessThan(output?.pixels ?? 0);
+    expect(output?.glassEnergy, mode).toBeGreaterThan(0);
+    expect(output?.transmittedPixels, mode).toBeGreaterThan(0);
+    expect(output?.transmittedSpherePixels, mode).toBeGreaterThan(0);
+    expect(output?.transmittedPedestalBoxPixels, mode).toBeGreaterThan(0);
+    expect(output?.transmittedBackdropBoxPixels, mode).toBeGreaterThan(0);
+  }
   expect(gpuErrors).toEqual([]);
 });
 
@@ -177,10 +241,10 @@ test("offers every scene and switches between them", async ({ page }) => {
 
   const scene = page.getByLabel("Scene");
   await expect(scene).toHaveValue("classic");
-  await expect(scene.locator("option")).toHaveCount(5);
+  await expect(scene.locator("option")).toHaveCount(6);
 
-  await scene.selectOption("pillars");
-  await expect(scene).toHaveValue("pillars");
+  await scene.selectOption("glassShapes");
+  await expect(scene).toHaveValue("glassShapes");
 });
 
 test("keeps desktop sidebar keyboard navigation untrapped", async ({

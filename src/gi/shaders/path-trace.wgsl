@@ -20,12 +20,18 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
   rngInit(pixel, uni.frame, 7u);
   let position = surfacePosition(uni.cam, pixel, depth);
-  let normal = textureLoad(texNormal, pixel, 0).xyz;
+  let packedNormal = textureLoad(texNormal, pixel, 0);
+  let materialIndex = u32(abs(packedNormal.w) + 0.5);
+  let incoming = normalize(position - uni.cam.pos.xyz);
+  let albedo = materialAlbedo(materialIndex);
   let illumination = min(
     pathRadiance(
       position,
-      normal,
-      vec3f(1.0),
+      packedNormal.xyz,
+      albedo,
+      materialIndex,
+      packedNormal.w > 0.0,
+      incoming,
       uni.maxBounces + 1u,
     ),
     vec3f(MAX_ILLUMINATION),

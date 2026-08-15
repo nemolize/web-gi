@@ -11,10 +11,11 @@ reports the reason if the API or an adapter is unavailable.
 
 ## What it does
 
-Every surface in the scene is Lambertian, so all light transport is diffuse
-interreflection — colour bleeding from the coloured walls, soft shadows from
-the area lights, and multi-bounce indirect light are the whole point of the
-image.
+The rooms primarily use Lambertian surfaces, so diffuse interreflection —
+colour bleeding, soft shadows, and multi-bounce indirect light — remains the
+core of the image. The glass scene adds an analytic sphere and two clear cuboid
+dielectrics with Fresnel reflection, refraction, total internal reflection, and
+subtle transmission tints.
 
 - **ReSTIR DI** — per pixel, `M` light samples are drawn and resampled with RIS,
   then combined with the reprojected reservoir from the previous frame and with
@@ -44,15 +45,16 @@ visible from any angle.
 
 The panel exposes the RIS candidate count, spatial neighbour count and radius,
 GI bounce depth, the temporal accumulation window, resolution scale, and
-exposure, and switches between five scenes staged in the same unit-cube room:
+exposure, and switches between six scenes staged in the same unit-cube room:
 
-| Scene           | What it is for                                                                                |
-| --------------- | --------------------------------------------------------------------------------------------- |
-| **Cornell box** | The classic single ceiling emitter and two blocks                                             |
-| **30 lights**   | A grid of tinted emitters, where DI resampling has more to work with                          |
-| **Two rooms**   | A partition with one doorway: the near half is lit only through the opening and by bounce     |
-| **Cove light**  | An upward-facing emitter behind a lip: the room below it is lit by the bounce off the ceiling |
-| **Pillars**     | Nine pillars under a broad emitter — overlapping penumbrae and contact regions                |
+| Scene                      | What it is for                                                                                |
+| -------------------------- | --------------------------------------------------------------------------------------------- |
+| **Cornell box**            | The classic single ceiling emitter and two blocks                                             |
+| **Glass sphere & cuboids** | Three clear analytic dielectrics with reflected and refracted room detail                     |
+| **30 lights**              | A grid of tinted emitters, where DI resampling has more to work with                          |
+| **Two rooms**              | A partition with one doorway: the near half is lit only through the opening and by bounce     |
+| **Cove light**             | An upward-facing emitter behind a lip: the room below it is lit by the bounce off the ceiling |
+| **Pillars**                | Nine pillars under a broad emitter — overlapping penumbrae and contact regions                |
 
 Repeatable benchmark runs can start from short query strings:
 
@@ -207,18 +209,19 @@ helpers; `shaders/scene.wgsl` holds the bindings, ray tracing and light
 sampling. Both are prepended to every compute shader, so group 0 is identical
 across passes and one explicit bind group layout is reused.
 
-Because the scene is entirely Lambertian, accumulated irradiance does not
-depend on the eye: ReSTIR and the denoised path tracer keep their history across
-camera motion and only drop it on disocclusion. The reference path tracer
-averages full radiance per pixel, so it does restart when the camera moves.
+Diffuse irradiance does not depend on the eye, so ReSTIR and the denoised path
+tracer normally keep their history across camera motion and drop it only on
+disocclusion. Reference rendering and glass scenes restart accumulation because
+their full reflected and refracted radiance is view-dependent.
 
-The scene is a small set of parallelograms with perpendicular edges, which lets
-the shader invert the barycentric solve with two dot products and skips the need
-for any acceleration structure. It also stands in for one: the room is the
-convex hull of everything in it, so a shadow ray — always a segment between two
-points on its interior surfaces — can never reach a wall. `buildScene` sorts the
-walls last and occlusion queries stop before them. Adding geometry outside the
-room, or making the room concave, breaks that and is what
+The scene is a small set of parallelograms with perpendicular edges plus
+optional analytic glass spheres and boxes. Quad intersections invert the
+barycentric solve with two dot products and skip the need for any acceleration
+structure. The closed room provides another shortcut: it is the convex hull of
+everything in it, so a shadow ray — always a segment between two points on its
+interior surfaces — can never reach a wall. `buildScene` sorts the walls last
+and occlusion queries stop before them. Adding geometry outside the room, or
+making the room concave, breaks that and is what
 `shadow-ray-occluders.test.ts` guards. `src/gi/scene.ts` builds it and packs it for the
 GPU; the unit tests check the packing offsets against the WGSL struct layout and
 the camera maths against its shader counterpart.
@@ -238,8 +241,9 @@ bounce depths 1/3/6 measured luminance ratios of 0.9947–1.0041 after at least
 The residual is not consistently dark; its observed luminance shortfall or
 excess stayed within 0.53% across this sweep.
 
-Only diffuse BRDFs are implemented. Adding specular surfaces would need
-reconnection to be skipped at near-delta vertices.
+ReSTIR reservoirs remain restricted to diffuse vertices. Glass shapes are
+evaluated as delta paths in the shading pass and are never stored in a reservoir
+for spatial or temporal reconnection.
 
 ## Development
 

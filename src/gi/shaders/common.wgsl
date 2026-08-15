@@ -48,7 +48,7 @@ struct Uniforms {
   exposure: f32,
   clusterCount: u32,
   occluderClusterCount: u32,
-  _pad2: f32,
+  glassShapeCount: u32,
 }
 
 /** vec4f throughout for the same reason as `Camera`; layout is unchanged. */
@@ -59,6 +59,12 @@ struct Quad {
   normal: vec4f,   // xyz = unit normal
   albedo: vec4f,   // xyz = diffuse albedo
   emission: vec4f, // xyz = emitted radiance
+}
+
+struct GlassShape {
+  centerKind: vec4f, // xyz = centre, w = 0 sphere / 1 box
+  extentRadius: vec4f, // xyz = box half extents, w = sphere radius
+  tintIor: vec4f, // xyz = transmission tint, w = index of refraction
 }
 
 struct Light {

@@ -23,8 +23,10 @@ import type { Scene } from "@/gi/scene";
 import {
   buildScene,
   CLUSTER_STRIDE_BYTES,
+  GLASS_SHAPE_STRIDE_BYTES,
   LIGHT_STRIDE_BYTES,
   packClusters,
+  packGlassShapes,
   packLights,
   packQuads,
   QUAD_STRIDE_BYTES,
@@ -441,6 +443,7 @@ export class GiRenderer {
   private quadBuffer: GPUBuffer;
   private lightBuffer: GPUBuffer;
   private clusterBuffer: GPUBuffer;
+  private glassShapeBuffer: GPUBuffer;
   private sceneBindGroup: GPUBindGroup;
   private scene: Scene;
   private targets: Targets | null = null;
@@ -555,6 +558,7 @@ export class GiRenderer {
     this.quadBuffer = uploaded.quadBuffer;
     this.lightBuffer = uploaded.lightBuffer;
     this.clusterBuffer = uploaded.clusterBuffer;
+    this.glassShapeBuffer = uploaded.glassShapeBuffer;
     this.sceneBindGroup = uploaded.bindGroup;
   }
 
@@ -625,6 +629,7 @@ export class GiRenderer {
     return {
       scene: createLayout(device, "scene", compute, [
         uniformBinding,
+        readOnlyStorage,
         readOnlyStorage,
         readOnlyStorage,
         readOnlyStorage,
@@ -761,6 +766,7 @@ export class GiRenderer {
     quadBuffer: GPUBuffer;
     lightBuffer: GPUBuffer;
     clusterBuffer: GPUBuffer;
+    glassShapeBuffer: GPUBuffer;
     bindGroup: GPUBindGroup;
   } {
     const quadData = packQuads(scene);
@@ -781,16 +787,30 @@ export class GiRenderer {
       size: Math.max(clusterData.byteLength, CLUSTER_STRIDE_BYTES),
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
+    const glassShapeData = packGlassShapes(scene);
+    const glassShapeBuffer = this.device.createBuffer({
+      label: "glass-shapes",
+      size: Math.max(glassShapeData.byteLength, GLASS_SHAPE_STRIDE_BYTES),
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
     this.device.queue.writeBuffer(quadBuffer, 0, quadData);
     this.device.queue.writeBuffer(lightBuffer, 0, lightData);
     this.device.queue.writeBuffer(clusterBuffer, 0, clusterData);
+    this.device.queue.writeBuffer(glassShapeBuffer, 0, glassShapeData);
     const bindGroup = createBindGroup(this.device, this.layouts.scene, [
       { buffer: this.uniformBuffer },
       { buffer: quadBuffer },
       { buffer: lightBuffer },
       { buffer: clusterBuffer },
+      { buffer: glassShapeBuffer },
     ]);
-    return { quadBuffer, lightBuffer, clusterBuffer, bindGroup };
+    return {
+      quadBuffer,
+      lightBuffer,
+      clusterBuffer,
+      glassShapeBuffer,
+      bindGroup,
+    };
   }
 
   setSettings(next: RenderSettings): void {
@@ -804,11 +824,13 @@ export class GiRenderer {
       this.quadBuffer.destroy();
       this.lightBuffer.destroy();
       this.clusterBuffer.destroy();
+      this.glassShapeBuffer.destroy();
       this.scene = buildScene(next.scene);
       const uploaded = this.uploadScene(this.scene);
       this.quadBuffer = uploaded.quadBuffer;
       this.lightBuffer = uploaded.lightBuffer;
       this.clusterBuffer = uploaded.clusterBuffer;
+      this.glassShapeBuffer = uploaded.glassShapeBuffer;
       this.sceneBindGroup = uploaded.bindGroup;
     }
     if (requiresAccumulationReset(previous, next)) {
@@ -816,15 +838,14 @@ export class GiRenderer {
     }
   }
 
-  /**
-   * Lambertian-only transport makes accumulated irradiance view-independent,
-   * so ReSTIR keeps its history across camera motion; the reference path
-   * tracer averages full radiance per pixel and has to start over.
-   */
+  /** Diffuse irradiance is view-independent; glass and reference radiance are not. */
   notifyCameraChanged(): void {
     this.comparisonGeneration += 1;
     this.abortComparison("The camera moved during the comparison.");
-    if (this.settings.mode === "reference") {
+    if (
+      this.settings.mode === "reference" ||
+      this.scene.glassShapes.length > 0
+    ) {
       this.resetAccumulation();
     }
   }
@@ -1169,6 +1190,7 @@ export class GiRenderer {
     view.setFloat32(176, this.settings.exposure, true);
     view.setUint32(180, this.scene.clusters.length, true);
     view.setUint32(184, this.scene.occluderClusterCount, true);
+    view.setUint32(188, this.scene.glassShapes.length, true);
     this.device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData);
   }
 
@@ -1757,7 +1779,7 @@ export class GiRenderer {
     });
     const view = texture.createView();
     // The reference entry point reads only binding 0; the albedo and emission
-    // slots are filled to satisfy the shared layout.
+    // slots remain bound solely to satisfy the shared layout.
     const created: CaptureResources = {
       width: targets.width,
       height: targets.height,
@@ -1799,6 +1821,7 @@ export class GiRenderer {
     this.quadBuffer.destroy();
     this.lightBuffer.destroy();
     this.clusterBuffer.destroy();
+    this.glassShapeBuffer.destroy();
     this.uniformBuffer.destroy();
     for (const buffer of this.atrousBuffers) buffer.destroy();
     if (this.passProbe !== null) {

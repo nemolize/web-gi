@@ -29,6 +29,7 @@ export default defineConfig({
     command: isPreviewTarget
       ? "pnpm run build && pnpm run preview"
       : "pnpm run dev",
+    ...(isPreviewTarget ? { env: { VITE_E2E_CAPTURE: "1" } } : {}),
     url: localServerURL,
     // Only the preview command builds first; the dev server should surface a
     // hang at Playwright's default instead of three minutes later.

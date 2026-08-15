@@ -1,9 +1,8 @@
 // Temporal accumulation of the demodulated illumination.
 //
-// Every surface in the scene is Lambertian, so irradiance does not depend on
-// the eye. History therefore stays valid while the camera moves and only needs
-// to be dropped on disocclusion, which is why camera motion does not reset the
-// accumulator.
+// Diffuse irradiance does not depend on the eye, so its history survives camera
+// motion and is rejected only on disocclusion. Glass scenes reset this history
+// from the CPU because their reflected and refracted radiance is view-dependent.
 
 @group(1) @binding(0) var texIllumination: texture_2d<f32>;
 @group(1) @binding(1) var texDepth: texture_2d<f32>;

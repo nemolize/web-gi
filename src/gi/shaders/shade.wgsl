@@ -22,7 +22,28 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     return;
   }
   let x = surfacePosition(uni.cam, pixel, depth);
-  let n = textureLoad(texNormal, pixel, 0).xyz;
+  let packedNormal = textureLoad(texNormal, pixel, 0);
+  let n = packedNormal.xyz;
+  let materialIndex = u32(abs(packedNormal.w) + 0.5);
+
+  if (materialIndex > 0u) {
+    rngInit(pixel, uni.frame, 11u);
+    let incoming = normalize(x - uni.cam.pos.xyz);
+    let radiance = min(
+      pathRadiance(
+        x,
+        n,
+        materialAlbedo(materialIndex),
+        materialIndex,
+        packedNormal.w > 0.0,
+        incoming,
+        uni.maxBounces + 1u,
+      ),
+      vec3f(MAX_ILLUMINATION),
+    );
+    textureStore(outIllumination, pixel, vec4f(radiance, 1.0));
+    return;
+  }
 
   var illumination = vec3f(0.0);
 

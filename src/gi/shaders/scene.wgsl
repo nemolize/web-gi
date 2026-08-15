@@ -6,6 +6,7 @@
 @group(0) @binding(1) var<storage, read> quads: array<Quad>;
 @group(0) @binding(2) var<storage, read> lights: array<Light>;
 @group(0) @binding(3) var<storage, read> clusters: array<Cluster>;
+@group(0) @binding(4) var<storage, read> glassShapes: array<GlassShape>;
 
 struct HitInfo {
   hit: bool,
@@ -15,6 +16,8 @@ struct HitInfo {
   albedo: vec3f,
   emission: vec3f,
   quadIndex: u32,
+  materialIndex: u32,
+  frontFace: bool,
 }
 
 /**
@@ -51,6 +54,91 @@ fn intersectQuad(index: u32, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
   return t;
 }
 
+fn intersectSphere(index: u32, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
+  let shape = glassShapes[index];
+  let offset = ro - shape.centerKind.xyz;
+  let halfB = dot(offset, rd);
+  let c = dot(offset, offset) - shape.extentRadius.w * shape.extentRadius.w;
+  let discriminant = halfB * halfB - c;
+  if (discriminant < 0.0) {
+    return -1.0;
+  }
+  let root = sqrt(discriminant);
+  let near = -halfB - root;
+  if (near > RAY_EPS && near < tMax) {
+    return near;
+  }
+  let far = -halfB + root;
+  return select(-1.0, far, far > RAY_EPS && far < tMax);
+}
+
+fn intersectBox(index: u32, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
+  let shape = glassShapes[index];
+  let lo = shape.centerKind.xyz - shape.extentRadius.xyz;
+  let hi = shape.centerKind.xyz + shape.extentRadius.xyz;
+  let inverseDirection = vec3f(safeInverse(rd.x), safeInverse(rd.y), safeInverse(rd.z));
+  let a = (lo - ro) * inverseDirection;
+  let b = (hi - ro) * inverseDirection;
+  let near = min(a, b);
+  let far = max(a, b);
+  let enter = max(max(near.x, near.y), near.z);
+  let exit = min(min(far.x, far.y), far.z);
+  if (enter > exit) {
+    return -1.0;
+  }
+  let t = select(exit, enter, enter > RAY_EPS);
+  return select(-1.0, t, t > RAY_EPS && t < tMax);
+}
+
+fn intersectGlassShape(index: u32, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
+  if (glassShapes[index].centerKind.w > 0.5) {
+    return intersectBox(index, ro, rd, tMax);
+  }
+  return intersectSphere(index, ro, rd, tMax);
+}
+
+fn boxOutwardNormal(shape: GlassShape, position: vec3f) -> vec3f {
+  let local = (position - shape.centerKind.xyz) / shape.extentRadius.xyz;
+  let magnitude = abs(local);
+  if (magnitude.x >= magnitude.y && magnitude.x >= magnitude.z) {
+    return vec3f(sign(local.x), 0.0, 0.0);
+  }
+  if (magnitude.y >= magnitude.z) {
+    return vec3f(0.0, sign(local.y), 0.0);
+  }
+  return vec3f(0.0, 0.0, sign(local.z));
+}
+
+fn resolveHitSurface(hit: HitInfo, ro: vec3f, rd: vec3f) -> HitInfo {
+  var resolved = hit;
+  resolved.pos = ro + rd * resolved.t;
+  if (resolved.materialIndex == 0u) {
+    let q = quads[resolved.quadIndex];
+    resolved.normal = select(q.normal.xyz, -q.normal.xyz, dot(q.normal.xyz, rd) > 0.0);
+    resolved.albedo = q.albedo.xyz;
+    resolved.emission = q.emission.xyz;
+    resolved.frontFace = dot(q.normal.xyz, rd) <= 0.0;
+    return resolved;
+  }
+  let shape = glassShapes[resolved.materialIndex - 1u];
+  var outwardNormal = normalize(resolved.pos - shape.centerKind.xyz);
+  if (shape.centerKind.w > 0.5) {
+    outwardNormal = boxOutwardNormal(shape, resolved.pos);
+  }
+  resolved.frontFace = dot(outwardNormal, rd) < 0.0;
+  resolved.normal = select(-outwardNormal, outwardNormal, resolved.frontFace);
+  resolved.albedo = shape.tintIor.xyz;
+  resolved.emission = vec3f(0.0);
+  return resolved;
+}
+
+fn materialAlbedo(materialIndex: u32) -> vec3f {
+  if (materialIndex == 0u) {
+    return vec3f(1.0);
+  }
+  return glassShapes[materialIndex - 1u].tintIor.xyz;
+}
+
 /**
  * Reciprocal that stays finite: the slab test multiplies by it, and an infinity
  * meeting a zero-length extent would produce a NaN that swallows the comparison.
@@ -85,6 +173,7 @@ fn traceScene(ro: vec3f, rd: vec3f) -> HitInfo {
   best.hit = false;
   best.t = T_FAR;
   best.quadIndex = 0u;
+  best.materialIndex = 0u;
   let invRd = vec3f(safeInverse(rd.x), safeInverse(rd.y), safeInverse(rd.z));
   // Walked back to front: the walls are the last cluster and a closest-hit ray
   // almost always reaches one, so taking them first gives `best.t` a real bound
@@ -105,14 +194,20 @@ fn traceScene(ro: vec3f, rd: vec3f) -> HitInfo {
         best.hit = true;
         best.t = t;
         best.quadIndex = i;
+        best.materialIndex = 0u;
       }
     }
   }
+  for (var i = 0u; i < uni.glassShapeCount; i = i + 1u) {
+    let t = intersectGlassShape(i, ro, rd, best.t);
+    if (t > 0.0) {
+      best.hit = true;
+      best.t = t;
+      best.materialIndex = i + 1u;
+    }
+  }
   if (best.hit) {
-    let q = quads[best.quadIndex];
-    best.normal = select(q.normal.xyz, -q.normal.xyz, dot(q.normal.xyz, rd) > 0.0);
-    best.albedo = q.albedo.xyz;
-    best.emission = q.emission.xyz;
+    return resolveHitSurface(best, ro, rd);
   }
   best.pos = ro + rd * best.t;
   return best;
@@ -129,6 +224,7 @@ fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
   best.hit = false;
   best.t = T_FAR;
   best.quadIndex = 0u;
+  best.materialIndex = 0u;
   let invRd = vec3f(safeInverse(rd.x), safeInverse(rd.y), safeInverse(rd.z));
   // Back to front, for the same reason as `traceScene`.
   for (var c = uni.clusterCount; c > 0u; c = c - 1u) {
@@ -147,14 +243,20 @@ fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
         best.hit = true;
         best.t = t;
         best.quadIndex = i;
+        best.materialIndex = 0u;
       }
     }
   }
+  for (var i = 0u; i < uni.glassShapeCount; i = i + 1u) {
+    let t = intersectGlassShape(i, ro, rd, best.t);
+    if (t > 0.0) {
+      best.hit = true;
+      best.t = t;
+      best.materialIndex = i + 1u;
+    }
+  }
   if (best.hit) {
-    let q = quads[best.quadIndex];
-    best.normal = q.normal.xyz;
-    best.albedo = q.albedo.xyz;
-    best.emission = q.emission.xyz;
+    return resolveHitSurface(best, ro, rd);
   }
   best.pos = ro + rd * best.t;
   return best;
@@ -164,8 +266,9 @@ fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
  * Segment occlusion between two points on the scene's interior surfaces. The
  * room is convex, so a segment with both ends inside it never reaches a wall —
  * and the walls are the last cluster, so stopping at `occluderClusterCount`
- * drops them. Closest-hit traversal walks every cluster: bounces do land on
- * walls.
+ * drops them. A straight connection through a dielectric is not a valid shadow
+ * path, so glass shapes still block here; their transmitted light comes from
+ * BSDF sampling instead. Closest-hit traversal walks every primitive.
  */
 fn traceOccluded(ro: vec3f, rd: vec3f, tMax: f32) -> bool {
   let invRd = vec3f(safeInverse(rd.x), safeInverse(rd.y), safeInverse(rd.z));
@@ -180,6 +283,11 @@ fn traceOccluded(ro: vec3f, rd: vec3f, tMax: f32) -> bool {
       if (intersectQuad(i, ro, rd, tMax) > 0.0) {
         return true;
       }
+    }
+  }
+  for (var i = 0u; i < uni.glassShapeCount; i = i + 1u) {
+    if (intersectGlassShape(i, ro, rd, tMax) > 0.0) {
+      return true;
     }
   }
   return false;
@@ -361,44 +469,87 @@ fn nextEventEstimation(pos: vec3f, n: vec3f, albedo: vec3f) -> vec3f {
   return albedo * INV_PI * ls.emission * (cosX * cosL / dist2) / ls.pdfArea;
 }
 
-/**
- * Radiance leaving a Lambertian surface point, excluding its own emission.
- * Lights are reached exclusively through NEE, so emissive hits along the walk
- * contribute nothing and no MIS weighting is needed.
- */
-fn pathRadiance(startPos: vec3f, startNormal: vec3f, startAlbedo: vec3f, maxBounces: u32) -> vec3f {
+fn fresnelReflectance(cosine: f32, ior: f32) -> f32 {
+  let r = (1.0 - ior) / (1.0 + ior);
+  let r0 = r * r;
+  return r0 + (1.0 - r0) * pow(1.0 - cosine, 5.0);
+}
+
+fn glassScatterDirection(
+  incoming: vec3f,
+  normal: vec3f,
+  eta: f32,
+  reflected: bool,
+) -> vec3f {
+  return select(refract(incoming, normal, eta), reflect(incoming, normal), reflected);
+}
+
+fn pathRadiance(
+  startPos: vec3f,
+  startNormal: vec3f,
+  startAlbedo: vec3f,
+  startMaterialIndex: u32,
+  startFrontFace: bool,
+  startIncoming: vec3f,
+  maxBounces: u32,
+) -> vec3f {
   var radiance = vec3f(0.0);
   var throughput = vec3f(1.0);
   var pos = startPos;
   var normal = startNormal;
   var albedo = startAlbedo;
+  var materialIndex = startMaterialIndex;
+  var frontFace = startFrontFace;
+  var incoming = startIncoming;
+  var diffuseBounces = 0u;
+  let maxSteps = maxBounces + max(4u, uni.glassShapeCount * 4u);
 
-  for (var bounce = 0u; bounce < maxBounces; bounce = bounce + 1u) {
-    radiance += throughput * nextEventEstimation(pos, normal, albedo);
-
-    // The last vertex has already contributed; extending the walk from it would
-    // trace a ray whose hit no iteration reads.
-    if (bounce + 1u >= maxBounces) {
-      break;
-    }
-
-    // Cosine-weighted sampling makes the BRDF/pdf ratio exactly the albedo.
-    throughput *= albedo;
-    if (bounce >= 1u) {
-      let survival = clamp(maxComponent(throughput), 0.05, 1.0);
-      if (rand() > survival) {
+  for (var step = 0u; step < maxSteps; step = step + 1u) {
+    var dir = vec3f(0.0);
+    let deltaScatter = materialIndex > 0u;
+    if (deltaScatter) {
+      let shape = glassShapes[materialIndex - 1u];
+      let ior = shape.tintIor.w;
+      let eta = select(ior, 1.0 / ior, frontFace);
+      let cosTheta = min(dot(-incoming, normal), 1.0);
+      let sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+      let totalInternalReflection = eta * sinTheta > 1.0;
+      let reflected = totalInternalReflection || rand() < fresnelReflectance(cosTheta, ior);
+      dir = glassScatterDirection(incoming, normal, eta, reflected);
+      if (!reflected && !frontFace) {
+        throughput *= albedo;
+      }
+    } else {
+      radiance += throughput * nextEventEstimation(pos, normal, albedo);
+      diffuseBounces += 1u;
+      if (diffuseBounces >= maxBounces) {
         break;
       }
-      throughput /= survival;
+      throughput *= albedo;
+      if (diffuseBounces >= 2u) {
+        let survival = clamp(maxComponent(throughput), 0.05, 1.0);
+        if (rand() > survival) {
+          break;
+        }
+        throughput /= survival;
+      }
+      dir = cosineSampleHemisphere(normal, rand(), rand());
     }
-    let dir = cosineSampleHemisphere(normal, rand(), rand());
-    let hit = traceScene(pos + normal * SURFACE_EPS, dir);
+
+    let hit = traceScene(pos + dir * SURFACE_EPS, dir);
     if (!hit.hit) {
+      break;
+    }
+    if (deltaScatter && maxComponent(hit.emission) > 0.0) {
+      radiance += throughput * hit.emission;
       break;
     }
     pos = hit.pos;
     normal = hit.normal;
     albedo = hit.albedo;
+    materialIndex = hit.materialIndex;
+    frontFace = hit.frontFace;
+    incoming = dir;
   }
   return radiance;
 }

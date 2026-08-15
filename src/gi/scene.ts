@@ -17,6 +17,25 @@ export type Material = {
   readonly emission: Vec3;
 };
 
+type GlassMaterial = {
+  readonly tint: Vec3;
+  readonly ior: number;
+};
+
+export type GlassSphere = GlassMaterial & {
+  readonly kind: "sphere";
+  readonly center: Vec3;
+  readonly radius: number;
+};
+
+export type GlassBox = GlassMaterial & {
+  readonly kind: "box";
+  readonly center: Vec3;
+  readonly halfExtents: Vec3;
+};
+
+export type GlassShape = GlassSphere | GlassBox;
+
 /**
  * Parallelogram primitive. Edges are required to be perpendicular so the
  * shader can invert `p = a*u + b*v` with two dot products instead of solving a
@@ -53,6 +72,7 @@ export type OccluderCluster = {
 export type Scene = {
   /** Occluders first, then the room walls; see `occluderCount`. */
   readonly quads: readonly Quad[];
+  readonly glassShapes: readonly GlassShape[];
   readonly lights: readonly LightRef[];
   /**
    * Quads a shadow ray has to test. The room is convex and every shadow ray is
@@ -68,6 +88,7 @@ export type Scene = {
 
 export const SCENE_VARIANTS = [
   "classic",
+  "glassShapes",
   "manyLights",
   "doorway",
   "cove",
@@ -77,6 +98,7 @@ export type SceneVariant = (typeof SCENE_VARIANTS)[number];
 
 export const SCENE_LABELS: Record<SceneVariant, string> = {
   classic: "Cornell box",
+  glassShapes: "Glass sphere & cuboids",
   manyLights: "30 lights",
   doorway: "Two rooms",
   cove: "Cove light",
@@ -84,6 +106,7 @@ export const SCENE_LABELS: Record<SceneVariant, string> = {
 };
 
 export const QUAD_STRIDE_BYTES = 96;
+export const GLASS_SHAPE_STRIDE_BYTES = 48;
 export const LIGHT_STRIDE_BYTES = 16;
 export const CLUSTER_STRIDE_BYTES = 32;
 
@@ -163,6 +186,7 @@ type SceneDefinition = {
   readonly occluderGroups: readonly (readonly Quad[])[];
   /** Trail as a single group, which a closest-hit ray almost always reaches. */
   readonly walls: readonly Quad[];
+  readonly glassShapes?: readonly GlassShape[];
 };
 
 type WallMaterials = {
@@ -328,6 +352,39 @@ const pillars = (): SceneDefinition => ({
   walls: room({ floor: SLATE, back: TEAL }),
 });
 
+const glassScene = (): SceneDefinition => ({
+  occluderGroups: [
+    makeBox(vec3(0.5, 0.04, 0.55), vec3(0.36, 0.04, 0.16), 0, WHITE),
+    makeBox(vec3(0.24, 0.24, 0.14), vec3(0.075, 0.24, 0.035), -8, RED),
+    makeBox(vec3(0.76, 0.2, 0.14), vec3(0.075, 0.2, 0.035), 8, TEAL),
+    [ceilingLight([0.22, 0.78], [0.24, 0.76], vec3(7, 6.5, 5.8))],
+  ],
+  glassShapes: [
+    {
+      kind: "sphere",
+      center: vec3(0.36, 0.25, 0.55),
+      radius: 0.16,
+      tint: vec3(0.96, 0.985, 1),
+      ior: 1.52,
+    },
+    {
+      kind: "box",
+      center: vec3(0.66, 0.25, 0.55),
+      halfExtents: vec3(0.095, 0.16, 0.1),
+      tint: vec3(0.985, 0.97, 0.94),
+      ior: 1.52,
+    },
+    {
+      kind: "box",
+      center: vec3(0.5, 0.35, 0.12),
+      halfExtents: vec3(0.08, 0.34, 0.035),
+      tint: vec3(1, 1, 1),
+      ior: 1.52,
+    },
+  ],
+  walls: room({ floor: SLATE, left: RED, right: GREEN }),
+});
+
 const LUMINANCE = vec3(0.2126, 0.7152, 0.0722);
 
 const collectLights = (quads: readonly Quad[]): LightRef[] => {
@@ -372,6 +429,7 @@ const SCENE_DEFINITIONS: Record<SceneVariant, () => SceneDefinition> = {
     occluderGroups: [...blocks(), classicLight()],
     walls: room({ left: RED, right: GREEN }),
   }),
+  glassShapes: glassScene,
   manyLights: () => ({
     occluderGroups: [...blocks(), manyLights()],
     walls: room({ left: RED, right: GREEN }),
@@ -382,7 +440,11 @@ const SCENE_DEFINITIONS: Record<SceneVariant, () => SceneDefinition> = {
 };
 
 export const buildScene = (variant: SceneVariant): Scene => {
-  const { occluderGroups, walls } = SCENE_DEFINITIONS[variant]();
+  const {
+    occluderGroups,
+    walls,
+    glassShapes = [],
+  } = SCENE_DEFINITIONS[variant]();
   const groups = [...occluderGroups, walls];
   const quads = groups.flat();
 
@@ -395,11 +457,39 @@ export const buildScene = (variant: SceneVariant): Scene => {
 
   return {
     quads,
+    glassShapes,
     lights: collectLights(quads),
     occluderCount: occluderGroups.flat().length,
     clusters,
     occluderClusterCount: occluderGroups.length,
   };
+};
+
+export const packGlassShapes = (scene: Scene): ArrayBuffer => {
+  const buffer = new ArrayBuffer(
+    Math.max(scene.glassShapes.length, 1) * GLASS_SHAPE_STRIDE_BYTES,
+  );
+  const f32 = new Float32Array(buffer);
+  scene.glassShapes.forEach((shape, index) => {
+    const base = (index * GLASS_SHAPE_STRIDE_BYTES) / 4;
+    f32.set(
+      [
+        shape.center.x,
+        shape.center.y,
+        shape.center.z,
+        shape.kind === "box" ? 1 : 0,
+      ],
+      base,
+    );
+    f32.set(
+      shape.kind === "sphere"
+        ? [0, 0, 0, shape.radius]
+        : [shape.halfExtents.x, shape.halfExtents.y, shape.halfExtents.z, 0],
+      base + 4,
+    );
+    f32.set([shape.tint.x, shape.tint.y, shape.tint.z, shape.ior], base + 8);
+  });
+  return buffer;
 };
 
 export const packQuads = (scene: Scene): ArrayBuffer => {

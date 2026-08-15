@@ -29,7 +29,19 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   }
 
   textureStore(outDepth, pixel, vec4f(surfaceDepth(uni.cam, hit.pos), 0.0, 0.0, 0.0));
-  textureStore(outNormal, pixel, vec4f(hit.normal, 0.0));
-  textureStore(outAlbedo, pixel, vec4f(hit.albedo, 1.0));
+  let materialMarker = select(
+    -f32(hit.materialIndex),
+    f32(hit.materialIndex),
+    hit.frontFace,
+  );
+  textureStore(outNormal, pixel, vec4f(hit.normal, materialMarker));
+  textureStore(
+    outAlbedo,
+    pixel,
+    vec4f(
+      select(hit.albedo, vec3f(1.0), hit.materialIndex > 0u),
+      select(0.0, 1.0, hit.materialIndex > 0u),
+    ),
+  );
   textureStore(outEmission, pixel, vec4f(hit.emission, 1.0));
 }

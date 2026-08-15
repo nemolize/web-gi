@@ -16,14 +16,23 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let jitter = rand2() - 0.5;
   let uv = (vec2f(pixel) + 0.5 + jitter) / vec2f(uni.resolution);
   let ndc = vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
-  let hit = traceScenePrimary(uni.cam.pos.xyz, primaryRayDir(uni.cam, ndc));
+  let primaryDirection = primaryRayDir(uni.cam, ndc);
+  let hit = traceScenePrimary(uni.cam.pos.xyz, primaryDirection);
 
   var radiance = vec3f(0.0);
   if (hit.hit) {
     // One extra bounce so the path depth matches ReSTIR's
     // "one reconnection vertex + maxBounces" configuration.
     radiance = hit.emission
-      + pathRadiance(hit.pos, hit.normal, hit.albedo, uni.maxBounces + 1u);
+      + pathRadiance(
+        hit.pos,
+        hit.normal,
+        hit.albedo,
+        hit.materialIndex,
+        hit.frontFace,
+        primaryDirection,
+        uni.maxBounces + 1u,
+      );
   }
 
   let previous = textureLoad(texPrevAccum, pixel, 0);

@@ -5,11 +5,13 @@ import type { Quad } from "@/gi/scene";
 import {
   buildScene,
   CLUSTER_STRIDE_BYTES,
+  GLASS_SHAPE_STRIDE_BYTES,
   isInsideRoom,
   LIGHT_STRIDE_BYTES,
   makeBox,
   makeQuad,
   packClusters,
+  packGlassShapes,
   packLights,
   packQuads,
   QUAD_STRIDE_BYTES,
@@ -115,6 +117,55 @@ describe("buildScene", () => {
     }
   });
 
+  it("stages clear dielectric sphere and boxes inside the glass scene", () => {
+    const scene = buildScene("glassShapes");
+    expect(scene.glassShapes).toHaveLength(3);
+    const sphere = requireAt(scene.glassShapes, 0);
+    const pedestalBox = requireAt(scene.glassShapes, 1);
+    const backdropBox = requireAt(scene.glassShapes, 2);
+    if (
+      sphere.kind !== "sphere" ||
+      pedestalBox.kind !== "box" ||
+      backdropBox.kind !== "box"
+    ) {
+      throw new Error("Glass scene must contain the sphere and both boxes");
+    }
+    expect(sphere.ior).toBeCloseTo(1.52);
+    expect(sphere.tint.x).toBeGreaterThan(0.9);
+    expect(backdropBox.center).toEqual(vec3(0.5, 0.35, 0.12));
+    expect(backdropBox.halfExtents).toEqual(vec3(0.08, 0.34, 0.035));
+    expect(backdropBox.tint).toEqual(vec3(1, 1, 1));
+    expect(backdropBox.ior).toBeCloseTo(1.52);
+    const boxes = [pedestalBox, backdropBox];
+    for (const axis of ["x", "y", "z"] as const) {
+      expect(sphere.center[axis] - sphere.radius).toBeGreaterThanOrEqual(0);
+      expect(sphere.center[axis] + sphere.radius).toBeLessThanOrEqual(1);
+      for (const box of boxes) {
+        expect(box.center[axis] - box.halfExtents[axis]).toBeGreaterThanOrEqual(
+          0,
+        );
+        expect(box.center[axis] + box.halfExtents[axis]).toBeLessThanOrEqual(1);
+      }
+    }
+    const pedestalTop = Math.max(
+      ...scene.quads
+        .slice(0, 6)
+        .flatMap(quadCorners)
+        .map((corner) => corner.y),
+    );
+    expect(
+      pedestalBox.center.y - pedestalBox.halfExtents.y - pedestalTop,
+    ).toBeGreaterThan(0.005);
+    expect(backdropBox.center.y - backdropBox.halfExtents.y).toBeGreaterThan(
+      0.005,
+    );
+    for (const variant of SCENE_VARIANTS.filter(
+      (candidate) => candidate !== "glassShapes",
+    )) {
+      expect(buildScene(variant).glassShapes).toEqual([]);
+    }
+  });
+
   // The cove emitter is the one that does not face the room: it points at the
   // ceiling, and a flipped normal would light nothing a shadow ray can reach.
   it("aims the cove emitter at the ceiling", () => {
@@ -206,6 +257,34 @@ describe("GPU packing", () => {
     expect(view.getFloat32(12, true)).toBeCloseTo(first.area);
     expect(view.getFloat32(48, true)).toBeCloseTo(first.normal.x);
     expect(view.getFloat32(52, true)).toBeCloseTo(first.normal.y);
+  });
+
+  it("writes glass shape fields at the offsets the shader reads", () => {
+    const glassScene = buildScene("glassShapes");
+    const sphere = requireAt(glassScene.glassShapes, 0);
+    const box = requireAt(glassScene.glassShapes, 1);
+    const backdropBox = requireAt(glassScene.glassShapes, 2);
+    if (
+      sphere.kind !== "sphere" ||
+      box.kind !== "box" ||
+      backdropBox.kind !== "box"
+    ) {
+      throw new Error("Glass shapes are not staged in the expected order");
+    }
+    const view = new DataView(packGlassShapes(glassScene));
+    expect(view.byteLength).toBe(GLASS_SHAPE_STRIDE_BYTES * 3);
+    expect(view.getFloat32(0, true)).toBeCloseTo(sphere.center.x);
+    expect(view.getFloat32(12, true)).toBe(0);
+    expect(view.getFloat32(28, true)).toBeCloseTo(sphere.radius);
+    expect(view.getFloat32(32, true)).toBeCloseTo(sphere.tint.x);
+    expect(view.getFloat32(44, true)).toBeCloseTo(sphere.ior);
+    expect(view.getFloat32(60, true)).toBe(1);
+    expect(view.getFloat32(64, true)).toBeCloseTo(box.halfExtents.x);
+    expect(view.getFloat32(92, true)).toBeCloseTo(box.ior);
+    expect(view.getFloat32(108, true)).toBe(1);
+    expect(view.getFloat32(128, true)).toBeCloseTo(backdropBox.tint.x);
+    expect(view.getFloat32(140, true)).toBeCloseTo(backdropBox.ior);
+    expect(packGlassShapes(scene).byteLength).toBe(GLASS_SHAPE_STRIDE_BYTES);
   });
 
   // `intersectQuad` multiplies by these instead of dividing by the edge lengths
