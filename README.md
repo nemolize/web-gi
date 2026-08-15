@@ -13,9 +13,9 @@ reports the reason if the API or an adapter is unavailable.
 
 The rooms primarily use Lambertian surfaces, so diffuse interreflection —
 colour bleeding, soft shadows, and multi-bounce indirect light — remains the
-core of the image. The glass scene adds analytic sphere and cuboid dielectrics
-with Fresnel reflection, refraction, total internal reflection, and subtle
-transmission tints.
+core of the image. The glass scene adds an analytic sphere and two cuboid
+dielectrics, including a tall yellow-tinted box, with Fresnel reflection,
+refraction, total internal reflection, and subtle transmission tints.
 
 - **ReSTIR DI** — per pixel, `M` light samples are drawn and resampled with RIS,
   then combined with the reprojected reservoir from the previous frame and with
@@ -47,14 +47,14 @@ The panel exposes the RIS candidate count, spatial neighbour count and radius,
 GI bounce depth, the temporal accumulation window, resolution scale, and
 exposure, and switches between six scenes staged in the same unit-cube room:
 
-| Scene                     | What it is for                                                                                |
-| ------------------------- | --------------------------------------------------------------------------------------------- |
-| **Cornell box**           | The classic single ceiling emitter and two blocks                                             |
-| **Glass sphere & cuboid** | Two clear analytic dielectrics with reflected and refracted room detail                       |
-| **30 lights**             | A grid of tinted emitters, where DI resampling has more to work with                          |
-| **Two rooms**             | A partition with one doorway: the near half is lit only through the opening and by bounce     |
-| **Cove light**            | An upward-facing emitter behind a lip: the room below it is lit by the bounce off the ceiling |
-| **Pillars**               | Nine pillars under a broad emitter — overlapping penumbrae and contact regions                |
+| Scene                      | What it is for                                                                                |
+| -------------------------- | --------------------------------------------------------------------------------------------- |
+| **Cornell box**            | The classic single ceiling emitter and two blocks                                             |
+| **Glass sphere & cuboids** | Three clear analytic dielectrics with reflected and refracted room detail                     |
+| **30 lights**              | A grid of tinted emitters, where DI resampling has more to work with                          |
+| **Two rooms**              | A partition with one doorway: the near half is lit only through the opening and by bounce     |
+| **Cove light**             | An upward-facing emitter behind a lip: the room below it is lit by the bounce off the ceiling |
+| **Pillars**                | Nine pillars under a broad emitter — overlapping penumbrae and contact regions                |
 
 Repeatable benchmark runs can start from short query strings:
 

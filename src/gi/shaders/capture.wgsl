@@ -33,7 +33,7 @@ fn glassDiagnostic(ro: vec3f, rd: vec3f) -> f32 {
     return 1.0;
   }
   let backdrop = traceScene(exit.pos + outsideDirection * SURFACE_EPS, outsideDirection);
-  let transmittedCode = 2.0 + shape.centerKind.w;
+  let transmittedCode = 1.0 + f32(entry.materialIndex);
   return select(1.0, transmittedCode, backdrop.hit && backdrop.materialIndex == 0u);
 }
 

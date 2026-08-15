@@ -163,7 +163,8 @@ test("renders finite glass-shape output when WebGPU is available", async ({
       let glassPixels = 0;
       let transmittedPixels = 0;
       let transmittedSpherePixels = 0;
-      let transmittedBoxPixels = 0;
+      let transmittedPedestalBoxPixels = 0;
+      let transmittedYellowBoxPixels = 0;
       for (let index = 0; index < data.length; index += 4) {
         const red = data[index];
         const green = data[index + 1];
@@ -188,7 +189,12 @@ test("renders finite glass-shape output when WebGPU is available", async ({
         if (diagnostic > 1.5 && diagnostic < 2.5) {
           transmittedSpherePixels++;
         }
-        if (diagnostic > 2.5) transmittedBoxPixels++;
+        if (diagnostic > 2.5 && diagnostic < 3.5) {
+          transmittedPedestalBoxPixels++;
+        }
+        if (diagnostic > 3.5 && diagnostic < 4.5) {
+          transmittedYellowBoxPixels++;
+        }
       }
       return {
         finite: true,
@@ -197,7 +203,8 @@ test("renders finite glass-shape output when WebGPU is available", async ({
         glassPixels,
         transmittedPixels,
         transmittedSpherePixels,
-        transmittedBoxPixels,
+        transmittedPedestalBoxPixels,
+        transmittedYellowBoxPixels,
         pixels: data.length / 4,
       };
     });
@@ -223,7 +230,8 @@ test("renders finite glass-shape output when WebGPU is available", async ({
     expect(output?.glassEnergy, mode).toBeGreaterThan(0);
     expect(output?.transmittedPixels, mode).toBeGreaterThan(0);
     expect(output?.transmittedSpherePixels, mode).toBeGreaterThan(0);
-    expect(output?.transmittedBoxPixels, mode).toBeGreaterThan(0);
+    expect(output?.transmittedPedestalBoxPixels, mode).toBeGreaterThan(0);
+    expect(output?.transmittedYellowBoxPixels, mode).toBeGreaterThan(0);
   }
   expect(gpuErrors).toEqual([]);
 });

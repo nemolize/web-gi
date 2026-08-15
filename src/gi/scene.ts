@@ -98,7 +98,7 @@ export type SceneVariant = (typeof SCENE_VARIANTS)[number];
 
 export const SCENE_LABELS: Record<SceneVariant, string> = {
   classic: "Cornell box",
-  glassShapes: "Glass sphere & cuboid",
+  glassShapes: "Glass sphere & cuboids",
   manyLights: "30 lights",
   doorway: "Two rooms",
   cove: "Cove light",
@@ -356,7 +356,6 @@ const glassScene = (): SceneDefinition => ({
   occluderGroups: [
     makeBox(vec3(0.5, 0.04, 0.55), vec3(0.36, 0.04, 0.16), 0, WHITE),
     makeBox(vec3(0.24, 0.24, 0.14), vec3(0.075, 0.24, 0.035), -8, RED),
-    makeBox(vec3(0.5, 0.34, 0.12), vec3(0.08, 0.34, 0.035), 0, AMBER),
     makeBox(vec3(0.76, 0.2, 0.14), vec3(0.075, 0.2, 0.035), 8, TEAL),
     [ceilingLight([0.22, 0.78], [0.24, 0.76], vec3(7, 6.5, 5.8))],
   ],
@@ -373,6 +372,13 @@ const glassScene = (): SceneDefinition => ({
       center: vec3(0.66, 0.25, 0.55),
       halfExtents: vec3(0.095, 0.16, 0.1),
       tint: vec3(0.985, 0.97, 0.94),
+      ior: 1.52,
+    },
+    {
+      kind: "box",
+      center: vec3(0.5, 0.35, 0.12),
+      halfExtents: vec3(0.08, 0.34, 0.035),
+      tint: vec3(1, 0.9, 0.58),
       ior: 1.52,
     },
   ],
