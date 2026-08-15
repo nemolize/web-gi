@@ -164,7 +164,7 @@ test("renders finite glass-shape output when WebGPU is available", async ({
       let transmittedPixels = 0;
       let transmittedSpherePixels = 0;
       let transmittedPedestalBoxPixels = 0;
-      let transmittedYellowBoxPixels = 0;
+      let transmittedBackdropBoxPixels = 0;
       for (let index = 0; index < data.length; index += 4) {
         const red = data[index];
         const green = data[index + 1];
@@ -193,7 +193,7 @@ test("renders finite glass-shape output when WebGPU is available", async ({
           transmittedPedestalBoxPixels++;
         }
         if (diagnostic > 3.5 && diagnostic < 4.5) {
-          transmittedYellowBoxPixels++;
+          transmittedBackdropBoxPixels++;
         }
       }
       return {
@@ -204,7 +204,7 @@ test("renders finite glass-shape output when WebGPU is available", async ({
         transmittedPixels,
         transmittedSpherePixels,
         transmittedPedestalBoxPixels,
-        transmittedYellowBoxPixels,
+        transmittedBackdropBoxPixels,
         pixels: data.length / 4,
       };
     });
@@ -231,7 +231,7 @@ test("renders finite glass-shape output when WebGPU is available", async ({
     expect(output?.transmittedPixels, mode).toBeGreaterThan(0);
     expect(output?.transmittedSpherePixels, mode).toBeGreaterThan(0);
     expect(output?.transmittedPedestalBoxPixels, mode).toBeGreaterThan(0);
-    expect(output?.transmittedYellowBoxPixels, mode).toBeGreaterThan(0);
+    expect(output?.transmittedBackdropBoxPixels, mode).toBeGreaterThan(0);
   }
   expect(gpuErrors).toEqual([]);
 });

@@ -378,7 +378,7 @@ const glassScene = (): SceneDefinition => ({
       kind: "box",
       center: vec3(0.5, 0.35, 0.12),
       halfExtents: vec3(0.08, 0.34, 0.035),
-      tint: vec3(1, 0.9, 0.58),
+      tint: vec3(1, 1, 1),
       ior: 1.52,
     },
   ],

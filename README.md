@@ -13,9 +13,9 @@ reports the reason if the API or an adapter is unavailable.
 
 The rooms primarily use Lambertian surfaces, so diffuse interreflection —
 colour bleeding, soft shadows, and multi-bounce indirect light — remains the
-core of the image. The glass scene adds an analytic sphere and two cuboid
-dielectrics, including a tall yellow-tinted box, with Fresnel reflection,
-refraction, total internal reflection, and subtle transmission tints.
+core of the image. The glass scene adds an analytic sphere and two clear cuboid
+dielectrics with Fresnel reflection, refraction, total internal reflection, and
+subtle transmission tints.
 
 - **ReSTIR DI** — per pixel, `M` light samples are drawn and resampled with RIS,
   then combined with the reprojected reservoir from the previous frame and with

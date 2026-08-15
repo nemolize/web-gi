@@ -122,21 +122,21 @@ describe("buildScene", () => {
     expect(scene.glassShapes).toHaveLength(3);
     const sphere = requireAt(scene.glassShapes, 0);
     const pedestalBox = requireAt(scene.glassShapes, 1);
-    const yellowBox = requireAt(scene.glassShapes, 2);
+    const backdropBox = requireAt(scene.glassShapes, 2);
     if (
       sphere.kind !== "sphere" ||
       pedestalBox.kind !== "box" ||
-      yellowBox.kind !== "box"
+      backdropBox.kind !== "box"
     ) {
       throw new Error("Glass scene must contain the sphere and both boxes");
     }
     expect(sphere.ior).toBeCloseTo(1.52);
     expect(sphere.tint.x).toBeGreaterThan(0.9);
-    expect(yellowBox.center).toEqual(vec3(0.5, 0.35, 0.12));
-    expect(yellowBox.halfExtents).toEqual(vec3(0.08, 0.34, 0.035));
-    expect(yellowBox.tint.x).toBeGreaterThan(yellowBox.tint.y);
-    expect(yellowBox.tint.y).toBeGreaterThan(yellowBox.tint.z);
-    const boxes = [pedestalBox, yellowBox];
+    expect(backdropBox.center).toEqual(vec3(0.5, 0.35, 0.12));
+    expect(backdropBox.halfExtents).toEqual(vec3(0.08, 0.34, 0.035));
+    expect(backdropBox.tint).toEqual(vec3(1, 1, 1));
+    expect(backdropBox.ior).toBeCloseTo(1.52);
+    const boxes = [pedestalBox, backdropBox];
     for (const axis of ["x", "y", "z"] as const) {
       expect(sphere.center[axis] - sphere.radius).toBeGreaterThanOrEqual(0);
       expect(sphere.center[axis] + sphere.radius).toBeLessThanOrEqual(1);
@@ -156,7 +156,9 @@ describe("buildScene", () => {
     expect(
       pedestalBox.center.y - pedestalBox.halfExtents.y - pedestalTop,
     ).toBeGreaterThan(0.005);
-    expect(yellowBox.center.y - yellowBox.halfExtents.y).toBeGreaterThan(0.005);
+    expect(backdropBox.center.y - backdropBox.halfExtents.y).toBeGreaterThan(
+      0.005,
+    );
     for (const variant of SCENE_VARIANTS.filter(
       (candidate) => candidate !== "glassShapes",
     )) {
@@ -261,11 +263,11 @@ describe("GPU packing", () => {
     const glassScene = buildScene("glassShapes");
     const sphere = requireAt(glassScene.glassShapes, 0);
     const box = requireAt(glassScene.glassShapes, 1);
-    const yellowBox = requireAt(glassScene.glassShapes, 2);
+    const backdropBox = requireAt(glassScene.glassShapes, 2);
     if (
       sphere.kind !== "sphere" ||
       box.kind !== "box" ||
-      yellowBox.kind !== "box"
+      backdropBox.kind !== "box"
     ) {
       throw new Error("Glass shapes are not staged in the expected order");
     }
@@ -280,8 +282,8 @@ describe("GPU packing", () => {
     expect(view.getFloat32(64, true)).toBeCloseTo(box.halfExtents.x);
     expect(view.getFloat32(92, true)).toBeCloseTo(box.ior);
     expect(view.getFloat32(108, true)).toBe(1);
-    expect(view.getFloat32(128, true)).toBeCloseTo(yellowBox.tint.x);
-    expect(view.getFloat32(140, true)).toBeCloseTo(yellowBox.ior);
+    expect(view.getFloat32(128, true)).toBeCloseTo(backdropBox.tint.x);
+    expect(view.getFloat32(140, true)).toBeCloseTo(backdropBox.ior);
     expect(packGlassShapes(scene).byteLength).toBe(GLASS_SHAPE_STRIDE_BYTES);
   });
 
