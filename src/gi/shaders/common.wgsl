@@ -48,7 +48,7 @@ struct Uniforms {
   exposure: f32,
   clusterCount: u32,
   occluderClusterCount: u32,
-  sphereCount: u32,
+  glassShapeCount: u32,
 }
 
 /** vec4f throughout for the same reason as `Camera`; layout is unchanged. */
@@ -61,9 +61,10 @@ struct Quad {
   emission: vec4f, // xyz = emitted radiance
 }
 
-struct Sphere {
-  centerRadius: vec4f, // xyz = centre, w = radius
-  tintIor: vec4f,      // xyz = transmission tint, w = index of refraction
+struct GlassShape {
+  centerKind: vec4f, // xyz = centre, w = 0 sphere / 1 box
+  extentRadius: vec4f, // xyz = box half extents, w = sphere radius
+  tintIor: vec4f, // xyz = transmission tint, w = index of refraction
 }
 
 struct Light {

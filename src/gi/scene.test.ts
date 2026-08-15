@@ -5,18 +5,18 @@ import type { Quad } from "@/gi/scene";
 import {
   buildScene,
   CLUSTER_STRIDE_BYTES,
+  GLASS_SHAPE_STRIDE_BYTES,
   isInsideRoom,
   LIGHT_STRIDE_BYTES,
   makeBox,
   makeQuad,
   packClusters,
+  packGlassShapes,
   packLights,
   packQuads,
-  packSpheres,
   QUAD_STRIDE_BYTES,
   quadCorners,
   SCENE_VARIANTS,
-  SPHERE_STRIDE_BYTES,
 } from "@/gi/scene";
 
 const NO_EMISSION = { albedo: vec3(1, 1, 1), emission: vec3(0, 0, 0) };
@@ -117,20 +117,37 @@ describe("buildScene", () => {
     }
   });
 
-  it("stages one clear dielectric sphere inside the glass scene", () => {
-    const scene = buildScene("glassSphere");
-    expect(scene.spheres).toHaveLength(1);
-    const sphere = requireAt(scene.spheres, 0);
+  it("stages clear dielectric sphere and box shapes inside the glass scene", () => {
+    const scene = buildScene("glassShapes");
+    expect(scene.glassShapes).toHaveLength(2);
+    const sphere = scene.glassShapes.find((shape) => shape.kind === "sphere");
+    const box = scene.glassShapes.find((shape) => shape.kind === "box");
+    if (sphere === undefined || box === undefined) {
+      throw new Error("Glass scene must contain both shape kinds");
+    }
     expect(sphere.ior).toBeCloseTo(1.52);
     expect(sphere.tint.x).toBeGreaterThan(0.9);
     for (const axis of ["x", "y", "z"] as const) {
       expect(sphere.center[axis] - sphere.radius).toBeGreaterThanOrEqual(0);
       expect(sphere.center[axis] + sphere.radius).toBeLessThanOrEqual(1);
+      expect(box.center[axis] - box.halfExtents[axis]).toBeGreaterThanOrEqual(
+        0,
+      );
+      expect(box.center[axis] + box.halfExtents[axis]).toBeLessThanOrEqual(1);
     }
+    const pedestalTop = Math.max(
+      ...scene.quads
+        .slice(0, 6)
+        .flatMap(quadCorners)
+        .map((corner) => corner.y),
+    );
+    expect(box.center.y - box.halfExtents.y - pedestalTop).toBeGreaterThan(
+      0.005,
+    );
     for (const variant of SCENE_VARIANTS.filter(
-      (candidate) => candidate !== "glassSphere",
+      (candidate) => candidate !== "glassShapes",
     )) {
-      expect(buildScene(variant).spheres).toEqual([]);
+      expect(buildScene(variant).glassShapes).toEqual([]);
     }
   });
 
@@ -227,16 +244,24 @@ describe("GPU packing", () => {
     expect(view.getFloat32(52, true)).toBeCloseTo(first.normal.y);
   });
 
-  it("writes sphere fields at the offsets the shader reads", () => {
-    const sphereScene = buildScene("glassSphere");
-    const sphere = requireAt(sphereScene.spheres, 0);
-    const view = new DataView(packSpheres(sphereScene));
-    expect(view.byteLength).toBe(SPHERE_STRIDE_BYTES);
+  it("writes glass shape fields at the offsets the shader reads", () => {
+    const glassScene = buildScene("glassShapes");
+    const sphere = requireAt(glassScene.glassShapes, 0);
+    const box = requireAt(glassScene.glassShapes, 1);
+    if (sphere.kind !== "sphere" || box.kind !== "box") {
+      throw new Error("Glass shapes are not staged in the expected order");
+    }
+    const view = new DataView(packGlassShapes(glassScene));
+    expect(view.byteLength).toBe(GLASS_SHAPE_STRIDE_BYTES * 2);
     expect(view.getFloat32(0, true)).toBeCloseTo(sphere.center.x);
-    expect(view.getFloat32(12, true)).toBeCloseTo(sphere.radius);
-    expect(view.getFloat32(16, true)).toBeCloseTo(sphere.tint.x);
-    expect(view.getFloat32(28, true)).toBeCloseTo(sphere.ior);
-    expect(packSpheres(scene).byteLength).toBe(SPHERE_STRIDE_BYTES);
+    expect(view.getFloat32(12, true)).toBe(0);
+    expect(view.getFloat32(28, true)).toBeCloseTo(sphere.radius);
+    expect(view.getFloat32(32, true)).toBeCloseTo(sphere.tint.x);
+    expect(view.getFloat32(44, true)).toBeCloseTo(sphere.ior);
+    expect(view.getFloat32(60, true)).toBe(1);
+    expect(view.getFloat32(64, true)).toBeCloseTo(box.halfExtents.x);
+    expect(view.getFloat32(92, true)).toBeCloseTo(box.ior);
+    expect(packGlassShapes(scene).byteLength).toBe(GLASS_SHAPE_STRIDE_BYTES);
   });
 
   // `intersectQuad` multiplies by these instead of dividing by the edge lengths

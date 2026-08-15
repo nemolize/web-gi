@@ -13,8 +13,8 @@ fn glassDiagnostic(ro: vec3f, rd: vec3f) -> f32 {
   if (!entry.hit || entry.materialIndex == 0u) {
     return 0.0;
   }
-  let sphere = spheres[entry.materialIndex - 1u];
-  let entryEta = select(sphere.tintIor.w, 1.0 / sphere.tintIor.w, entry.frontFace);
+  let shape = glassShapes[entry.materialIndex - 1u];
+  let entryEta = select(shape.tintIor.w, 1.0 / shape.tintIor.w, entry.frontFace);
   let insideDirection = glassScatterDirection(rd, entry.normal, entryEta, false);
   if (dot(insideDirection, insideDirection) == 0.0) {
     return 1.0;
@@ -26,14 +26,15 @@ fn glassDiagnostic(ro: vec3f, rd: vec3f) -> f32 {
   let outsideDirection = glassScatterDirection(
     insideDirection,
     exit.normal,
-    sphere.tintIor.w,
+    shape.tintIor.w,
     false,
   );
   if (dot(outsideDirection, outsideDirection) == 0.0) {
     return 1.0;
   }
   let backdrop = traceScene(exit.pos + outsideDirection * SURFACE_EPS, outsideDirection);
-  return select(1.0, 2.0, backdrop.hit && backdrop.materialIndex == 0u);
+  let transmittedCode = 2.0 + shape.centerKind.w;
+  return select(1.0, transmittedCode, backdrop.hit && backdrop.materialIndex == 0u);
 }
 
 /** Mirrors the demodulated present path, minus `display`. */

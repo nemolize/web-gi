@@ -110,7 +110,7 @@ test("loads the paired comparison matrix from one preset", async ({ page }) => {
   await expect(page.getByLabel("Bounces")).toHaveValue("6");
 });
 
-test("renders finite glass-sphere output when WebGPU is available", async ({
+test("renders finite glass-shape output when WebGPU is available", async ({
   page,
 }) => {
   const gpuErrors: string[] = [];
@@ -142,8 +142,8 @@ test("renders finite glass-sphere output when WebGPU is available", async ({
 
   const scene = page.getByLabel("Scene");
   const beforeSceneChange = Number((await accumulated.textContent()) ?? "0");
-  await scene.selectOption("glassSphere");
-  await expect(scene).toHaveValue("glassSphere");
+  await scene.selectOption("glassShapes");
+  await expect(scene).toHaveValue("glassShapes");
   await expect
     .poll(async () => Number((await accumulated.textContent()) ?? "0"))
     .toBeLessThan(beforeSceneChange);
@@ -162,6 +162,8 @@ test("renders finite glass-sphere output when WebGPU is available", async ({
       let glassEnergy = 0;
       let glassPixels = 0;
       let transmittedPixels = 0;
+      let transmittedSpherePixels = 0;
+      let transmittedBoxPixels = 0;
       for (let index = 0; index < data.length; index += 4) {
         const red = data[index];
         const green = data[index + 1];
@@ -183,6 +185,10 @@ test("renders finite glass-sphere output when WebGPU is available", async ({
           glassPixels++;
         }
         if (diagnostic > 1.5) transmittedPixels++;
+        if (diagnostic > 1.5 && diagnostic < 2.5) {
+          transmittedSpherePixels++;
+        }
+        if (diagnostic > 2.5) transmittedBoxPixels++;
       }
       return {
         finite: true,
@@ -190,6 +196,8 @@ test("renders finite glass-sphere output when WebGPU is available", async ({
         glassEnergy,
         glassPixels,
         transmittedPixels,
+        transmittedSpherePixels,
+        transmittedBoxPixels,
         pixels: data.length / 4,
       };
     });
@@ -214,6 +222,8 @@ test("renders finite glass-sphere output when WebGPU is available", async ({
     expect(output?.glassPixels, mode).toBeLessThan(output?.pixels ?? 0);
     expect(output?.glassEnergy, mode).toBeGreaterThan(0);
     expect(output?.transmittedPixels, mode).toBeGreaterThan(0);
+    expect(output?.transmittedSpherePixels, mode).toBeGreaterThan(0);
+    expect(output?.transmittedBoxPixels, mode).toBeGreaterThan(0);
   }
   expect(gpuErrors).toEqual([]);
 });
@@ -225,8 +235,8 @@ test("offers every scene and switches between them", async ({ page }) => {
   await expect(scene).toHaveValue("classic");
   await expect(scene.locator("option")).toHaveCount(6);
 
-  await scene.selectOption("glassSphere");
-  await expect(scene).toHaveValue("glassSphere");
+  await scene.selectOption("glassShapes");
+  await expect(scene).toHaveValue("glassShapes");
 });
 
 test("keeps desktop sidebar keyboard navigation untrapped", async ({

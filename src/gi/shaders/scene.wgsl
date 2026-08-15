@@ -6,7 +6,7 @@
 @group(0) @binding(1) var<storage, read> quads: array<Quad>;
 @group(0) @binding(2) var<storage, read> lights: array<Light>;
 @group(0) @binding(3) var<storage, read> clusters: array<Cluster>;
-@group(0) @binding(4) var<storage, read> spheres: array<Sphere>;
+@group(0) @binding(4) var<storage, read> glassShapes: array<GlassShape>;
 
 struct HitInfo {
   hit: bool,
@@ -55,10 +55,10 @@ fn intersectQuad(index: u32, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
 }
 
 fn intersectSphere(index: u32, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
-  let sphere = spheres[index].centerRadius;
-  let offset = ro - sphere.xyz;
+  let shape = glassShapes[index];
+  let offset = ro - shape.centerKind.xyz;
   let halfB = dot(offset, rd);
-  let c = dot(offset, offset) - sphere.w * sphere.w;
+  let c = dot(offset, offset) - shape.extentRadius.w * shape.extentRadius.w;
   let discriminant = halfB * halfB - c;
   if (discriminant < 0.0) {
     return -1.0;
@@ -72,6 +72,43 @@ fn intersectSphere(index: u32, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
   return select(-1.0, far, far > RAY_EPS && far < tMax);
 }
 
+fn intersectBox(index: u32, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
+  let shape = glassShapes[index];
+  let lo = shape.centerKind.xyz - shape.extentRadius.xyz;
+  let hi = shape.centerKind.xyz + shape.extentRadius.xyz;
+  let inverseDirection = vec3f(safeInverse(rd.x), safeInverse(rd.y), safeInverse(rd.z));
+  let a = (lo - ro) * inverseDirection;
+  let b = (hi - ro) * inverseDirection;
+  let near = min(a, b);
+  let far = max(a, b);
+  let enter = max(max(near.x, near.y), near.z);
+  let exit = min(min(far.x, far.y), far.z);
+  if (enter > exit) {
+    return -1.0;
+  }
+  let t = select(exit, enter, enter > RAY_EPS);
+  return select(-1.0, t, t > RAY_EPS && t < tMax);
+}
+
+fn intersectGlassShape(index: u32, ro: vec3f, rd: vec3f, tMax: f32) -> f32 {
+  if (glassShapes[index].centerKind.w > 0.5) {
+    return intersectBox(index, ro, rd, tMax);
+  }
+  return intersectSphere(index, ro, rd, tMax);
+}
+
+fn boxOutwardNormal(shape: GlassShape, position: vec3f) -> vec3f {
+  let local = (position - shape.centerKind.xyz) / shape.extentRadius.xyz;
+  let magnitude = abs(local);
+  if (magnitude.x >= magnitude.y && magnitude.x >= magnitude.z) {
+    return vec3f(sign(local.x), 0.0, 0.0);
+  }
+  if (magnitude.y >= magnitude.z) {
+    return vec3f(0.0, sign(local.y), 0.0);
+  }
+  return vec3f(0.0, 0.0, sign(local.z));
+}
+
 fn resolveHitSurface(hit: HitInfo, ro: vec3f, rd: vec3f) -> HitInfo {
   var resolved = hit;
   resolved.pos = ro + rd * resolved.t;
@@ -83,11 +120,14 @@ fn resolveHitSurface(hit: HitInfo, ro: vec3f, rd: vec3f) -> HitInfo {
     resolved.frontFace = dot(q.normal.xyz, rd) <= 0.0;
     return resolved;
   }
-  let sphere = spheres[resolved.materialIndex - 1u];
-  let outwardNormal = normalize(resolved.pos - sphere.centerRadius.xyz);
+  let shape = glassShapes[resolved.materialIndex - 1u];
+  var outwardNormal = normalize(resolved.pos - shape.centerKind.xyz);
+  if (shape.centerKind.w > 0.5) {
+    outwardNormal = boxOutwardNormal(shape, resolved.pos);
+  }
   resolved.frontFace = dot(outwardNormal, rd) < 0.0;
   resolved.normal = select(-outwardNormal, outwardNormal, resolved.frontFace);
-  resolved.albedo = sphere.tintIor.xyz;
+  resolved.albedo = shape.tintIor.xyz;
   resolved.emission = vec3f(0.0);
   return resolved;
 }
@@ -96,7 +136,7 @@ fn materialAlbedo(materialIndex: u32) -> vec3f {
   if (materialIndex == 0u) {
     return vec3f(1.0);
   }
-  return spheres[materialIndex - 1u].tintIor.xyz;
+  return glassShapes[materialIndex - 1u].tintIor.xyz;
 }
 
 /**
@@ -158,8 +198,8 @@ fn traceScene(ro: vec3f, rd: vec3f) -> HitInfo {
       }
     }
   }
-  for (var i = 0u; i < uni.sphereCount; i = i + 1u) {
-    let t = intersectSphere(i, ro, rd, best.t);
+  for (var i = 0u; i < uni.glassShapeCount; i = i + 1u) {
+    let t = intersectGlassShape(i, ro, rd, best.t);
     if (t > 0.0) {
       best.hit = true;
       best.t = t;
@@ -207,8 +247,8 @@ fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
       }
     }
   }
-  for (var i = 0u; i < uni.sphereCount; i = i + 1u) {
-    let t = intersectSphere(i, ro, rd, best.t);
+  for (var i = 0u; i < uni.glassShapeCount; i = i + 1u) {
+    let t = intersectGlassShape(i, ro, rd, best.t);
     if (t > 0.0) {
       best.hit = true;
       best.t = t;
@@ -227,8 +267,8 @@ fn traceScenePrimary(ro: vec3f, rd: vec3f) -> HitInfo {
  * room is convex, so a segment with both ends inside it never reaches a wall —
  * and the walls are the last cluster, so stopping at `occluderClusterCount`
  * drops them. A straight connection through a dielectric is not a valid shadow
- * path, so spheres still block here; their transmitted light comes from BSDF
- * sampling instead. Closest-hit traversal walks every primitive.
+ * path, so glass shapes still block here; their transmitted light comes from
+ * BSDF sampling instead. Closest-hit traversal walks every primitive.
  */
 fn traceOccluded(ro: vec3f, rd: vec3f, tMax: f32) -> bool {
   let invRd = vec3f(safeInverse(rd.x), safeInverse(rd.y), safeInverse(rd.z));
@@ -245,8 +285,8 @@ fn traceOccluded(ro: vec3f, rd: vec3f, tMax: f32) -> bool {
       }
     }
   }
-  for (var i = 0u; i < uni.sphereCount; i = i + 1u) {
-    if (intersectSphere(i, ro, rd, tMax) > 0.0) {
+  for (var i = 0u; i < uni.glassShapeCount; i = i + 1u) {
+    if (intersectGlassShape(i, ro, rd, tMax) > 0.0) {
       return true;
     }
   }
@@ -462,14 +502,14 @@ fn pathRadiance(
   var frontFace = startFrontFace;
   var incoming = startIncoming;
   var diffuseBounces = 0u;
-  let maxSteps = maxBounces + max(4u, uni.sphereCount * 4u);
+  let maxSteps = maxBounces + max(4u, uni.glassShapeCount * 4u);
 
   for (var step = 0u; step < maxSteps; step = step + 1u) {
     var dir = vec3f(0.0);
     let deltaScatter = materialIndex > 0u;
     if (deltaScatter) {
-      let sphere = spheres[materialIndex - 1u];
-      let ior = sphere.tintIor.w;
+      let shape = glassShapes[materialIndex - 1u];
+      let ior = shape.tintIor.w;
       let eta = select(ior, 1.0 / ior, frontFace);
       let cosTheta = min(dot(-incoming, normal), 1.0);
       let sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));

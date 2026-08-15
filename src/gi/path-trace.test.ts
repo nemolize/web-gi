@@ -15,8 +15,10 @@ describe("denoised path-tracing shader", () => {
     expect(pathTraceWgsl).not.toContain("traceScenePrimary");
   });
 
-  it("traces the glass sphere through reflection and refraction", () => {
+  it("traces glass spheres and boxes through reflection and refraction", () => {
     expect(sceneWgsl).toContain("intersectSphere");
+    expect(sceneWgsl).toContain("intersectBox");
+    expect(sceneWgsl).toContain("boxOutwardNormal");
     expect(sceneWgsl).toContain("fresnelReflectance");
     expect(sceneWgsl).toContain(
       "dir = glassScatterDirection(incoming, normal, eta, reflected)",
@@ -28,7 +30,7 @@ describe("denoised path-tracing shader", () => {
       "glassScatterDirection(rd, entry.normal, entryEta, false)",
     );
     expect(captureWgsl).toMatch(
-      /glassScatterDirection\(\s*insideDirection,\s*exit\.normal,\s*sphere\.tintIor\.w,\s*false/,
+      /glassScatterDirection\(\s*insideDirection,\s*exit\.normal,\s*shape\.tintIor\.w,\s*false/,
     );
     expect(captureWgsl).toContain(
       "backdrop.hit && backdrop.materialIndex == 0u",
@@ -36,7 +38,7 @@ describe("denoised path-tracing shader", () => {
     expect(pathTraceWgsl).toContain("packedNormal.w > 0.0");
     expect(giWgsl).toContain("hit.materialIndex == 0u");
     expect(sceneWgsl).toMatch(
-      /fn traceOccluded[\s\S]*intersectSphere\(i, ro, rd, tMax\)/,
+      /fn traceOccluded[\s\S]*intersectGlassShape\(i, ro, rd, tMax\)/,
     );
   });
 
