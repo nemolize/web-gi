@@ -87,6 +87,10 @@ export const MATRIX_SPATIAL_RADII = [
   "64",
 ] as const;
 
+/** `0` degenerates both spatial passes to 1/Z pass-through, separating spatial
+ * reuse from temporal reprojection as the cause of #90's grazing cases. */
+export const MATRIX_SPATIAL_SAMPLES = ["0", "1", "2", "4", "8"] as const;
+
 type NumericSettingKey = {
   [K in keyof RenderSettings]: RenderSettings[K] extends number ? K : never;
 }[keyof RenderSettings];
@@ -95,6 +99,7 @@ type NumericSettingKey = {
 const MATRIX_OVERRIDES = [
   { param: "scale", key: "resolutionScale", values: MATRIX_RESOLUTION_SCALES },
   { param: "radius", key: "spatialRadius", values: MATRIX_SPATIAL_RADII },
+  { param: "spatial", key: "spatialSamples", values: MATRIX_SPATIAL_SAMPLES },
 ] as const satisfies readonly {
   readonly param: string;
   readonly key: NumericSettingKey;

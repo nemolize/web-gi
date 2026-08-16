@@ -14,6 +14,7 @@ import {
   FLAG_GI_TEMPORAL,
   MATRIX_RESOLUTION_SCALES,
   MATRIX_SPATIAL_RADII,
+  MATRIX_SPATIAL_SAMPLES,
   packFlags,
   requiresAccumulationReset,
   sanitizedRenderQueryParams,
@@ -176,13 +177,59 @@ describe("render query", () => {
     }
   });
 
-  it("combines the two matrix overrides", () => {
-    const search = "?preset=matrix&scale=0.25&radius=8";
+  it("combines every matrix override", () => {
+    const search = "?preset=matrix&scale=0.25&radius=8&spatial=0";
     const settings = settingsFromSearch(search);
     expect(settings.resolutionScale).toBe(0.25);
     expect(settings.spatialRadius).toBe(8);
+    expect(settings.spatialSamples).toBe(0);
     expect(sanitizedRenderQueryParams(search).toString()).toBe(
-      "preset=matrix&scale=0.25&radius=8",
+      "preset=matrix&scale=0.25&radius=8&spatial=0",
+    );
+  });
+
+  // #90's discriminator: the override has to survive the heavy preset's own
+  // `spatialSamples: 8`, or the run measures spatial reuse it meant to disable.
+  it("overrides the neighbour count the matrix preset would otherwise set", () => {
+    const search = "?preset=matrix&spatial=0";
+    expect(settingsFromSearch("?preset=matrix").spatialSamples).toBe(8);
+    expect(settingsFromSearch(search).spatialSamples).toBe(0);
+    expect(sanitizedRenderQueryParams(search).toString()).toBe(
+      "preset=matrix&spatial=0",
+    );
+  });
+
+  it("keeps every allowlisted neighbour count a number the renderer can use", () => {
+    for (const samples of MATRIX_SPATIAL_SAMPLES) {
+      const resolved = settingsFromSearch(
+        `?preset=matrix&spatial=${samples}`,
+      ).spatialSamples;
+      expect(resolved).toBe(Number(samples));
+      expect(Number.isInteger(resolved)).toBe(true);
+      expect(resolved).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("ignores a neighbour count outside the allowlist", () => {
+    for (const search of [
+      "?preset=matrix&spatial=3",
+      "?preset=matrix&spatial=16",
+      "?preset=matrix&spatial=0px",
+      "?preset=matrix&spatial=abc",
+      "?preset=matrix&spatial=",
+      "?preset=matrix&spatial=-1",
+    ]) {
+      expect(settingsFromSearch(search).spatialSamples).toBe(8);
+      expect(sanitizedRenderQueryParams(search).toString()).toBe(
+        "preset=matrix",
+      );
+    }
+  });
+
+  it("does not accept a neighbour count outside the matrix preset", () => {
+    expect(settingsFromSearch("?spatial=0").spatialSamples).toBe(4);
+    expect(settingsFromSearch("?preset=heavy&spatial=0").spatialSamples).toBe(
+      8,
     );
   });
 
