@@ -1,4 +1,8 @@
 import {
+  COMPARISON_MATRIX_BUDGET,
+  COMPARISON_MATRIX_PROBE_BUDGET,
+} from "@/gi/comparison-matrix";
+import {
   autoComparisonMode,
   DEFAULT_SETTINGS,
   FLAG_DENOISE,
@@ -117,6 +121,40 @@ describe("render query", () => {
       expect(resolved).toBeGreaterThan(0);
       expect(resolved).toBeLessThanOrEqual(1);
     }
+  });
+
+  it("loads the probe preset like the matrix, on the same settings", () => {
+    const search = "?preset=probe";
+    expect(settingsFromSearch(search)).toEqual(
+      settingsFromSearch("?preset=matrix"),
+    );
+    expect(autoComparisonMode(search)).toBe("probe");
+    expect(sanitizedRenderQueryParams(search).toString()).toBe("preset=probe");
+  });
+
+  it("takes the same overrides on the probe preset", () => {
+    const search = "?preset=probe&scale=0.25&radius=8";
+    const settings = settingsFromSearch(search);
+    expect(settings.resolutionScale).toBe(0.25);
+    expect(settings.spatialRadius).toBe(8);
+    expect(sanitizedRenderQueryParams(search).toString()).toBe(
+      "preset=probe&scale=0.25&radius=8",
+    );
+  });
+
+  // The probe trades away dispersion and oracle accuracy, so a run recorded
+  // under it must not read as one recorded under the matrix budget.
+  it("keeps the probe budget cheaper and distinguishable", () => {
+    expect(COMPARISON_MATRIX_PROBE_BUDGET.repeats).toBeLessThan(
+      COMPARISON_MATRIX_BUDGET.repeats,
+    );
+    expect(COMPARISON_MATRIX_PROBE_BUDGET.referenceFrames).toBeLessThan(
+      COMPARISON_MATRIX_BUDGET.referenceFrames,
+    );
+    expect(COMPARISON_MATRIX_PROBE_BUDGET.durationMs).toBeLessThan(
+      COMPARISON_MATRIX_BUDGET.durationMs,
+    );
+    expect(COMPARISON_MATRIX_PROBE_BUDGET.repeats % 2).toBe(0);
   });
 
   it("overrides the spatial reuse radius for the matrix", () => {

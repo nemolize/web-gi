@@ -4,7 +4,10 @@ import type {
   ComparisonMatrixProgress,
   LinearComparisonMatrixReport,
 } from "@/gi/comparison-matrix";
-import { DEFAULT_COMPARISON_MATRIX_REPEATS } from "@/gi/comparison-matrix";
+import {
+  COMPARISON_MATRIX_BUDGET,
+  COMPARISON_MATRIX_PROBE_BUDGET,
+} from "@/gi/comparison-matrix";
 import type { LinearComparisonReport } from "@/gi/comparison-session";
 import type {
   ComparisonMatrixSummary,
@@ -207,32 +210,37 @@ export const StatsOverlay = ({
       setReport(null);
       setCaptureError(null);
       setCaptureStatus("idle");
+      const budget =
+        autoCompareMode === "probe"
+          ? COMPARISON_MATRIX_PROBE_BUDGET
+          : COMPARISON_MATRIX_BUDGET;
+      const isMatrix =
+        autoCompareMode === "matrix" || autoCompareMode === "probe";
       setAutoComparisonStatus(
-        autoCompareMode === "matrix"
-          ? `Starting the comparison matrix (${String(DEFAULT_COMPARISON_MATRIX_REPEATS)} repeats)…`
+        isMatrix
+          ? `Starting the comparison matrix (${String(budget.repeats)} repeats${autoCompareMode === "probe" ? ", probe budget" : ""})…`
           : `Building ${String(AUTO_COMPARISON_REFERENCE_FRAMES)}-frame reference, then comparing ${autoCompareMode} for ${String(COMPARISON_DURATION_MS / 1_000)} seconds…`,
       );
-      const comparisonPromise =
-        autoCompareMode === "matrix"
-          ? runAutomaticComparisonMatrix(
-              AUTO_COMPARISON_REFERENCE_FRAMES,
-              COMPARISON_DURATION_MS,
-              DEFAULT_COMPARISON_MATRIX_REPEATS,
-              ({ runIndex, totalRuns, entry, phase }) => {
-                const action =
-                  phase === "reference"
-                    ? `building ${String(AUTO_COMPARISON_REFERENCE_FRAMES)}-frame reference`
-                    : `comparing ${phase} for ${String(COMPARISON_DURATION_MS / 1_000)} seconds`;
-                setAutoComparisonStatus(
-                  `${String(runIndex)}/${String(totalRuns)} · ${entry.label} · repeat ${String(entry.repeat + 1)} · ${action}…`,
-                );
-              },
-            )
-          : runAutomaticComparison(
-              autoCompareMode,
-              AUTO_COMPARISON_REFERENCE_FRAMES,
-              COMPARISON_DURATION_MS,
-            );
+      const comparisonPromise = isMatrix
+        ? runAutomaticComparisonMatrix(
+            budget.referenceFrames,
+            budget.durationMs,
+            budget.repeats,
+            ({ runIndex, totalRuns, entry, phase }) => {
+              const action =
+                phase === "reference"
+                  ? `building ${String(budget.referenceFrames)}-frame reference`
+                  : `comparing ${phase} for ${String(budget.durationMs / 1_000)} seconds`;
+              setAutoComparisonStatus(
+                `${String(runIndex)}/${String(totalRuns)} · ${entry.label} · repeat ${String(entry.repeat + 1)} · ${action}…`,
+              );
+            },
+          )
+        : runAutomaticComparison(
+            autoCompareMode,
+            AUTO_COMPARISON_REFERENCE_FRAMES,
+            COMPARISON_DURATION_MS,
+          );
       void comparisonPromise
         .then((comparison) => {
           if (comparison === null) {

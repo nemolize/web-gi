@@ -58,6 +58,29 @@ export const COMPARISON_MATRIX_CASES: readonly ComparisonMatrixCase[] =
 /** Even, so every case gets each run order exactly half the time. */
 export const DEFAULT_COMPARISON_MATRIX_REPEATS = 4;
 
+export type ComparisonMatrixBudget = {
+  readonly repeats: number;
+  readonly referenceFrames: number;
+  readonly durationMs: number;
+};
+
+/** The budget every recorded verdict in the README was measured under. */
+export const COMPARISON_MATRIX_BUDGET: ComparisonMatrixBudget = {
+  repeats: DEFAULT_COMPARISON_MATRIX_REPEATS,
+  referenceFrames: 1_024,
+  durationMs: 5_000,
+};
+
+/**
+ * For iterating on a change, never for recording a verdict: two repeats cannot
+ * show dispersion, and the oracle is below the 512 frames that once flipped one.
+ */
+export const COMPARISON_MATRIX_PROBE_BUDGET: ComparisonMatrixBudget = {
+  repeats: 2,
+  referenceFrames: 256,
+  durationMs: 750,
+};
+
 export type ComparisonMatrixRun = ComparisonMatrixCase & {
   /** 0-based. */
   readonly repeat: number;

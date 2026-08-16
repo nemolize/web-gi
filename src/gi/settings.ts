@@ -4,7 +4,9 @@ export const RENDER_MODES = ["restir", "path-traced", "reference"] as const;
 export type RenderMode = (typeof RENDER_MODES)[number];
 export const COMPARISON_MODES = ["restir", "path-traced"] as const;
 export type ComparisonMode = (typeof COMPARISON_MODES)[number];
-export type AutoComparisonMode = ComparisonMode | "matrix";
+export const MATRIX_PRESETS = ["matrix", "probe"] as const;
+export type MatrixPreset = (typeof MATRIX_PRESETS)[number];
+export type AutoComparisonMode = ComparisonMode | MatrixPreset;
 
 export type RenderSettings = {
   readonly scene: SceneVariant;
@@ -108,8 +110,9 @@ const enumValue = <T extends string>(
 export const sanitizedRenderQueryParams = (search: string): URLSearchParams => {
   const source = new URLSearchParams(search);
   const sanitized = new URLSearchParams();
-  if (source.get("preset") === "matrix") {
-    sanitized.set("preset", "matrix");
+  const matrix = enumValue(source, "preset", MATRIX_PRESETS);
+  if (matrix !== undefined) {
+    sanitized.set("preset", matrix);
     for (const { param, values } of MATRIX_OVERRIDES) {
       const value = enumValue(source, param, values);
       if (value !== undefined) sanitized.set(param, value);
@@ -137,9 +140,9 @@ export const settingsFromSearch = (search: string): RenderSettings => {
   const params = sanitizedRenderQueryParams(search);
   const preset = params.get("preset");
   const base =
-    preset === "heavy" || preset === "matrix"
-      ? { ...DEFAULT_SETTINGS, ...HEAVY_SETTINGS }
-      : { ...DEFAULT_SETTINGS };
+    preset === null
+      ? { ...DEFAULT_SETTINGS }
+      : { ...DEFAULT_SETTINGS, ...HEAVY_SETTINGS };
   // `params` is already sanitized, so a surviving override is allowlisted.
   const overrides = Object.fromEntries(
     MATRIX_OVERRIDES.flatMap(({ param, key }) => {
@@ -165,8 +168,11 @@ export const autoComparisonMode = (
 ): AutoComparisonMode | null => {
   const params =
     typeof search === "string" ? new URLSearchParams(search) : search;
-  if (params.get("preset") === "matrix") return "matrix";
-  return enumValue(params, "compare", COMPARISON_MODES) ?? null;
+  return (
+    enumValue(params, "preset", MATRIX_PRESETS) ??
+    enumValue(params, "compare", COMPARISON_MODES) ??
+    null
+  );
 };
 
 export const FLAG_DI_ENABLED = 1 << 0;

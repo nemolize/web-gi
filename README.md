@@ -70,6 +70,7 @@ Equal-time linear-radiance comparisons use similarly short URLs:
 
 - `?preset=matrix`
 - `?preset=matrix&scale=0.4`
+- `?preset=probe`
 - `?preset=heavy&compare=restir`
 - `?preset=heavy&compare=path-traced`
 
@@ -84,6 +85,15 @@ Reports include the camera basis, settings, a-trous variant, frame counts, actua
 durations, and linear-radiance error metrics, and remain available through
 `Copy result`. Keep the page visible and unchanged while the several-minute
 matrix is running.
+
+`preset=probe` runs the same six cases and the same pairing on a tenth of the
+wall clock — around 30 seconds against roughly five and a half minutes — by
+taking two repeats instead of four, a 256-frame oracle instead of 1,024, and
+750 ms per renderer instead of five seconds. It is for iterating on a change,
+never for recording a verdict: two repeats cannot show the repeat-to-repeat
+spread that a low-resolution ReSTIR run turns out to need, and the oracle is
+below the 512 frames that already flipped a Relative L2 winner once. Numbers
+quoted in this README come from `preset=matrix`.
 
 `scale` throttles the matrix to a lower resolution, which raises both renderers'
 frame rates without touching anything else in the preset. It accepts `0.25`,
@@ -239,6 +249,18 @@ issue set out to measure:
   38% of the whole `manyLights/right-high` figure — a few pixels, not an
   image-wide collapse. Mean absolute rose 6.3× on that case where Relative L2
   rose 801×.
+
+Narrowing the radius to its world-space equivalent (`radius=8` at `scale=0.25`,
+matching what 24 pixels spanned at the higher resolution) confirms the first
+mechanism on four of the six cases, which return to within 1.4× of their
+baseline error. It does not explain the other two: `manyLights/right-high`
+improves twenty-fold but remains at 1.52, and `classic/right-high` reads 9.19,
+worse than the 0.347 it showed at the wider radius. Both are the grazing-angle
+camera, and both swing wildly between repeats — 11× and 188× — against 1.1–3.7×
+on the four that recovered. At four repeats that dispersion is wide enough that
+the direction of the `classic/right-high` change is not established; what the
+run does establish is that something beyond the reuse radius affects the
+grazing-angle cases.
 
 So the throttle reads as a ReSTIR defect surfacing at low resolution rather than
 as the equal-time crossover, and the crossover device speed remains unmeasured.
