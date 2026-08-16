@@ -245,14 +245,15 @@ and stayed within 1.02× across repeats, while ReSTIR's spread reached 7.2×.
 Two separate things produce that number, and neither is the device speed the
 issue set out to measure:
 
-- **ReSTIR's spatial reuse degrades as pixels cover more of the scene.**
-  `spatialRadius` is a pixel count (`src/gi/renderer.ts`) but the guard that
-  accepts a neighbour is a world-space plane distance
-  (`src/gi/shaders/restir-di-spatial.wgsl`), and that guard measures only the
-  component along the normal — so for two points on one flat surface it is zero
-  at any separation. On the unit-cube room the 24-pixel radius sits inside the
-  tolerance at 691×1,445 and crosses it at 270×564. The path tracer never
-  dispatches either spatial pass, which is why it is unaffected.
+- **ReSTIR's spatial reuse degraded as pixels covered more of the scene** — the
+  defect, since fixed below. `spatialRadius` is a pixel count
+  (`src/gi/renderer.ts`) but the guard that accepts a neighbour is a world-space
+  distance (`src/gi/shaders/restir-di-spatial.wgsl`), and at the time that guard
+  measured only the component along the normal — so for two points on one flat
+  surface it was zero at any separation. On the unit-cube room the 24-pixel
+  radius sits inside the tolerance at 691×1,445 and crosses it at 270×564. The
+  path tracer never dispatches either spatial pass, which is why it is
+  unaffected.
 - **Relative L2 amplifies a handful of pixels.** It divides by `b² + 1e-3`
   (`src/gi/compare.ts`), so a stray bright sample where the reference is black
   contributes enormously. One channel at the observed maximum accounts for about
@@ -274,12 +275,34 @@ the direction of the `classic/right-high` change is not established; what the
 run does establish is that something beyond the reuse radius affects the
 grazing-angle cases.
 
-So the throttle reads as a ReSTIR defect surfacing at low resolution rather than
-as the equal-time crossover, and the crossover device speed remains unmeasured.
+Running the same six cases with spatial reuse switched off entirely (`samples=0`)
+settles which mechanism that is. Both grazing cases fall to 0.0197 and 0.0088 —
+below their own baselines — while temporal reuse stayed on throughout, so the
+temporal reprojection that was the remaining suspect is not carrying any of it.
+The repeat spread collapses to 1.00–1.02× across all six, which is the second
+reading: the dispersion that made the `radius=8` arm unreadable came from spatial
+reuse too.
+
+That the narrowed radius did **not** fix the grazing cases while removing the
+reuse did is what chooses between the two possible fixes. Scaling the radius with
+resolution only restores a pixel count that was already too permissive; the limit
+has to be on the distance itself. Both spatial passes now bound the neighbour
+offset **in the surface plane**, in world units (`IN_PLANE_TOLERANCE`), alongside
+the existing normal-direction test — 0.04, what the default 24 pixels spanned at
+the resolution the tuning came from.
+
+Measured under the same throttle, that returns every case to at or below its
+throttled error, and the two grazing cases to below their baselines (0.0202 and
+0.0099). The guard is selective rather than merely restrictive: with reuse
+**enabled** it reaches the quality of having it disabled, while the four
+non-grazing cases stay consistently a little above their `samples=0` figures,
+which is the legitimate reuse still being accepted.
+
 The `right-high` camera is the only one in the matrix that sees the floor and
 ceiling at a grazing angle, and `manyLights` puts 30 small emitters on a pitch
-comparable to the widened reuse radius, which is why those two cases are worst
-hit.
+comparable to the widened reuse radius, which is why those two cases were worst
+hit. The equal-time crossover device speed #80 asks about remains unmeasured —
+the throttle turned out to be reading this defect rather than the crossover.
 
 ## Pipeline
 
