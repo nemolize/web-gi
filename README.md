@@ -275,6 +275,13 @@ the direction of the `classic/right-high` change is not established; what the
 run does establish is that something beyond the reuse radius affects the
 grazing-angle cases.
 
+The two runs that settle the mechanism and check the fix were both taken under
+`preset=probe`, so unlike every other figure on this page they are diagnostic
+readings rather than recorded verdicts — two repeats and a 256-frame oracle. The
+effects below span three orders of magnitude, which is well clear of that
+coarseness, but the numbers themselves want a `preset=matrix` run before being
+quoted as measurements.
+
 Running the same six cases with spatial reuse switched off entirely (`samples=0`)
 settles which mechanism that is. Both grazing cases fall to 0.0197 and 0.0088 —
 below their own baselines — while temporal reuse stayed on throughout, so the

@@ -76,12 +76,12 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let neighborDepth = textureLoad(texDepth, neighbor, 0).x;
     let neighborNormal = textureLoad(texNormal, neighbor, 0).xyz;
     let neighborPosition = surfacePosition(uni.cam, neighbor, neighborDepth);
-    let offset3 = neighborPosition - x;
-    let alongNormal = dot(offset3, n);
+    let worldOffset = neighborPosition - x;
+    let alongNormal = dot(worldOffset, n);
     if (!surfaceHit(neighborDepth)
       || dot(neighborNormal, n) < NORMAL_TOLERANCE
       || abs(alongNormal) > PLANE_TOLERANCE
-      || length(offset3 - alongNormal * n) > IN_PLANE_TOLERANCE) {
+      || length(worldOffset - alongNormal * n) > IN_PLANE_TOLERANCE) {
       continue;
     }
 
