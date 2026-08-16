@@ -90,10 +90,11 @@ matrix is running.
 wall clock — around 30 seconds against roughly five and a half minutes — by
 taking two repeats instead of four, a 256-frame oracle instead of 1,024, and
 750 ms per renderer instead of five seconds. It is for iterating on a change,
-never for recording a verdict: two repeats cannot show the repeat-to-repeat
-spread that a low-resolution ReSTIR run turns out to need, and the oracle is
-below the 512 frames that already flipped a Relative L2 winner once. Numbers
-quoted in this README come from `preset=matrix`.
+never for recording a verdict: at two repeats a unanimous case is one in two by
+chance, so the repeat-to-repeat spread a low-resolution ReSTIR run turns out to
+need cannot be separated from noise, and the oracle is below the 512 frames that
+already flipped a Relative L2 winner once. Numbers quoted in this README come
+from `preset=matrix`.
 
 `scale` throttles the matrix to a lower resolution, which raises both renderers'
 frame rates without touching anything else in the preset. It accepts `0.25`,
@@ -101,7 +102,8 @@ frame rates without touching anything else in the preset. It accepts `0.25`,
 anything else is ignored and the run proceeds at `0.75`. The value it ran at is
 recorded in the report's `url`, so two runs at different scales stay
 distinguishable afterwards. `radius` overrides the spatial reuse radius the same
-way, from `2` to `64`; it exists to test whether that radius explains the
+way, accepting `2`, `4`, `6`, `8`, `12`, `16`, `24` (the preset's own radius),
+`32`, `48` and `64`; it exists to test whether that radius explains the
 low-resolution ReSTIR error recorded below (#90). This is the throttle #80 asks for — the equal-time
 verdict is a function of achievable frame rate, so lowering the resolution on one
 machine tests the model that predicts the crossover without needing a second
@@ -215,8 +217,11 @@ lower late in the run than early.
 The `scale` throttle was added to test the equal-time model on a single machine
 (#80): if the verdict follows achievable frame rate, lowering the resolution
 should move it. A Galaxy-class Android device in Chrome 140 ran the matrix twice,
-identical but for the scale — 691×1445 then 270×564, four repeats each,
-`fallback` in both.
+identical but for the scale — `scale=0.75` giving 691×1,445, then `scale=0.25`
+giving 270×564, four repeats each, `fallback` in both. Both sizes come from the
+same 480×1,003 viewport at a device pixel ratio of 2.25, with the higher one
+sitting just under the million-pixel cap, so the dimensions do not scale in
+proportion to the two `scale` values.
 
 The verdict did move, from ReSTIR winning Relative L2 in four of six cases to
 Denoised PT winning all six, every one unanimous. But it moved for the wrong
@@ -241,7 +246,7 @@ issue set out to measure:
   (`src/gi/shaders/restir-di-spatial.wgsl`), and that guard measures only the
   component along the normal — so for two points on one flat surface it is zero
   at any separation. On the unit-cube room the 24-pixel radius sits inside the
-  tolerance at 691×1445 and crosses it at 270×564. The path tracer never
+  tolerance at 691×1,445 and crosses it at 270×564. The path tracer never
   dispatches either spatial pass, which is why it is unaffected.
 - **Relative L2 amplifies a handful of pixels.** It divides by `b² + 1e-3`
   (`src/gi/compare.ts`), so a stray bright sample where the reference is black
@@ -253,7 +258,9 @@ issue set out to measure:
 Narrowing the radius to its world-space equivalent (`radius=8` at `scale=0.25`,
 matching what 24 pixels spanned at the higher resolution) confirms the first
 mechanism on four of the six cases, which return to within 1.4× of their
-baseline error. It does not explain the other two: `manyLights/right-high`
+baseline error. That third run shares the throttled run's `scale`, so the radius
+is the only variable between those two; the comparison against the baseline still
+crosses both. It does not explain the other two cases: `manyLights/right-high`
 improves twenty-fold but remains at 1.52, and `classic/right-high` reads 9.19,
 worse than the 0.347 it showed at the wider radius. Both are the grazing-angle
 camera, and both swing wildly between repeats — 11× and 188× — against 1.1–3.7×

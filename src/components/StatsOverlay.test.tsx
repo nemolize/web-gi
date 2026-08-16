@@ -10,7 +10,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StatsOverlay } from "@/components/StatsOverlay";
 import { DEFAULT_CAMERA } from "@/gi/camera";
-import { DEFAULT_COMPARISON_MATRIX_REPEATS } from "@/gi/comparison-matrix";
+import {
+  COMPARISON_MATRIX_BUDGET,
+  COMPARISON_MATRIX_PROBE_BUDGET,
+  DEFAULT_COMPARISON_MATRIX_REPEATS,
+} from "@/gi/comparison-matrix";
 import type { PerformanceMeasurement } from "@/gi/performance";
 import { DEFAULT_SETTINGS } from "@/gi/settings";
 
@@ -414,6 +418,52 @@ describe("StatsOverlay performance capture", () => {
       restir: 1,
       "path-traced": 0,
     });
+  });
+
+  // A swapped budget would still produce a well-formed report, so only the call
+  // arguments distinguish a probe run from a verdict-grade one.
+  it.each([
+    ["matrix" as const, COMPARISON_MATRIX_BUDGET],
+    ["probe" as const, COMPARISON_MATRIX_PROBE_BUDGET],
+  ])("runs %s on its own budget", async (preset, budget) => {
+    const runAutomaticComparisonMatrix = vi.fn().mockResolvedValue({
+      kind: "comparison-matrix" as const,
+      requestedReferenceFrames: budget.referenceFrames,
+      requestedDurationMs: budget.durationMs,
+      repeats: budget.repeats,
+      runs: [],
+    });
+
+    render(
+      <StatsOverlay
+        {...inertComparisonProps()}
+        runAutomaticComparisonMatrix={runAutomaticComparisonMatrix}
+        measurePerformance={vi.fn()}
+        autoCompareMode={preset}
+        stats={{
+          width: 640,
+          height: 480,
+          accumFrames: 1,
+          frameMs: 12,
+          atrousVariant: "fallback",
+        }}
+        settings={{ ...DEFAULT_SETTINGS, mode: "reference" }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(runAutomaticComparisonMatrix).toHaveBeenCalledWith(
+        budget.referenceFrames,
+        budget.durationMs,
+        budget.repeats,
+        expect.any(Function),
+      );
+    });
+
+    const completion = await screen.findByText(/cases × .* repeats/);
+    expect(
+      completion.textContent?.includes("probe budget, not a verdict"),
+    ).toBe(preset === "probe");
   });
 
   it("allows retrying after capture failure", async () => {

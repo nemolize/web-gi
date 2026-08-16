@@ -256,7 +256,7 @@ export const StatsOverlay = ({
                 summary.overall.repeated
                   ? ` · ${String(unanimous)}/${String(summary.overall.cases)} unanimous`
                   : ""
-              }`,
+              }${autoCompareMode === "probe" ? " · probe budget, not a verdict" : ""}`,
             );
           } else {
             setReport(formatLinearComparisonReport(comparison, null));

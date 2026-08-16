@@ -345,8 +345,6 @@ describe("performance capture", () => {
     ).toBe("https://example.com/demo?preset=matrix");
   });
 
-  // The scale is what tells one throttled run from another after the fact, so a
-  // report that omitted it would not identify its own arm (#80).
   it("records the matrix resolution scale in the report URL", () => {
     expect(
       sanitizePerformanceReportUrl(

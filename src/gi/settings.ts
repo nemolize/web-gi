@@ -87,12 +87,17 @@ export const MATRIX_SPATIAL_RADII = [
   "64",
 ] as const;
 
+type NumericSettingKey = {
+  [K in keyof RenderSettings]: RenderSettings[K] extends number ? K : never;
+}[keyof RenderSettings];
+
+/** `key` is numeric-only: the value reaches settings through `Number()`. */
 const MATRIX_OVERRIDES = [
   { param: "scale", key: "resolutionScale", values: MATRIX_RESOLUTION_SCALES },
   { param: "radius", key: "spatialRadius", values: MATRIX_SPATIAL_RADII },
 ] as const satisfies readonly {
   readonly param: string;
-  readonly key: keyof RenderSettings;
+  readonly key: NumericSettingKey;
   readonly values: readonly string[];
 }[];
 
@@ -143,7 +148,6 @@ export const settingsFromSearch = (search: string): RenderSettings => {
     preset === null
       ? { ...DEFAULT_SETTINGS }
       : { ...DEFAULT_SETTINGS, ...HEAVY_SETTINGS };
-  // `params` is already sanitized, so a surviving override is allowlisted.
   const overrides = Object.fromEntries(
     MATRIX_OVERRIDES.flatMap(({ param, key }) => {
       const value = params.get(param);

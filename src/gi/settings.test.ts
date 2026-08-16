@@ -206,8 +206,6 @@ describe("render query", () => {
     expect(settingsFromSearch("?preset=heavy&radius=8").spatialRadius).toBe(24);
   });
 
-  // An unrecognised scale must not read as a run at the preset's own scale, so
-  // it leaves the URL the report records rather than silently rounding (#80).
   it("ignores a scale outside the allowlist", () => {
     for (const search of [
       "?preset=matrix&scale=0.42",
