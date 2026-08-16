@@ -13,6 +13,9 @@
 const MAX_NEIGHBORS: u32 = 8u;
 const PLANE_TOLERANCE: f32 = 0.05;
 const NORMAL_TOLERANCE: f32 = 0.9;
+// The plane test is identically zero along a flat surface, so without this the
+// pixel radius alone bounds reuse distance and drifts with resolution (#90).
+const IN_PLANE_TOLERANCE: f32 = 0.04;
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3u) {
@@ -78,9 +81,12 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let neighborDepth = textureLoad(texDepth, neighbor, 0).x;
     let neighborNormal = textureLoad(texNormal, neighbor, 0).xyz;
     let neighborPosition = surfacePosition(uni.cam, neighbor, neighborDepth);
+    let worldOffset = neighborPosition - x;
+    let alongNormal = dot(worldOffset, n);
     if (!surfaceHit(neighborDepth)
       || dot(neighborNormal, n) < NORMAL_TOLERANCE
-      || abs(dot(neighborPosition - x, n)) > PLANE_TOLERANCE) {
+      || abs(alongNormal) > PLANE_TOLERANCE
+      || length(worldOffset - alongNormal * n) > IN_PLANE_TOLERANCE) {
       continue;
     }
 
