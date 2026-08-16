@@ -69,6 +69,8 @@ available through `Copy result`.
 Equal-time linear-radiance comparisons use similarly short URLs:
 
 - `?preset=matrix`
+- `?preset=matrix&scale=0.4`
+- `?preset=probe`
 - `?preset=heavy&compare=restir`
 - `?preset=heavy&compare=path-traced`
 
@@ -83,6 +85,29 @@ Reports include the camera basis, settings, a-trous variant, frame counts, actua
 durations, and linear-radiance error metrics, and remain available through
 `Copy result`. Keep the page visible and unchanged while the several-minute
 matrix is running.
+
+`preset=probe` runs the same six cases and the same pairing on a tenth of the
+wall clock — around 30 seconds against roughly five and a half minutes — by
+taking two repeats instead of four, a 256-frame oracle instead of 1,024, and
+750 ms per renderer instead of five seconds. It is for iterating on a change,
+never for recording a verdict: at two repeats a unanimous case is one in two by
+chance, so the repeat-to-repeat spread a low-resolution ReSTIR run turns out to
+need cannot be separated from noise, and the oracle is below the 512 frames that
+already flipped a Relative L2 winner once. Numbers quoted in this README come
+from `preset=matrix`.
+
+`scale` throttles the matrix to a lower resolution, which raises both renderers'
+frame rates without touching anything else in the preset. It accepts `0.25`,
+`0.3`, `0.35`, `0.4`, `0.5`, `0.6`, `0.75` (the preset's own scale) and `1`;
+anything else is ignored and the run proceeds at `0.75`. The value it ran at is
+recorded in the report's `url`, so two runs at different scales stay
+distinguishable afterwards. `radius` overrides the spatial reuse radius the same
+way, accepting `2`, `4`, `6`, `8`, `12`, `16`, `24` (the preset's own radius),
+`32`, `48` and `64`; it exists to test whether that radius explains the
+low-resolution ReSTIR error recorded below (#90). This is the throttle #80 asks for — the equal-time
+verdict is a function of achievable frame rate, so lowering the resolution on one
+machine tests the model that predicts the crossover without needing a second
+device. It cannot rule out a device-specific cause on its own.
 
 Two things vary across repeats so the schedule does not bake in what it is trying
 to measure. Run order alternates on the camera index plus the repeat number,
@@ -186,6 +211,70 @@ to the last (3,267→3,890 ms on `classic`, 5,428→6,077 ms on `manyLights`), s
 machine was heating over the session; pairing absorbs that for the verdicts —
 both renderers share one oracle per repeat — but the absolute frame counts are
 lower late in the run than early.
+
+### Throttling one device does not measure the crossover
+
+The `scale` throttle was added to test the equal-time model on a single machine
+(#80): if the verdict follows achievable frame rate, lowering the resolution
+should move it. A Galaxy-class Android device in Chrome 140 ran the matrix twice,
+identical but for the scale — `scale=0.75` giving 691×1,445, then `scale=0.25`
+giving 270×564, four repeats each, `fallback` in both. Both sizes come from the
+same 480×1,003 viewport at a device pixel ratio of 2.25, with the higher one
+sitting just under the million-pixel cap, so the dimensions do not scale in
+proportion to the two `scale` values.
+
+The verdict did move, from ReSTIR winning Relative L2 in four of six cases to
+Denoised PT winning all six, every one unanimous. But it moved for the wrong
+reason, so it does not locate a crossover. Path tracing's frame advantage
+**shrank** as the resolution fell — the median PT/ReSTIR ratio went from 2.20 to
+1.67 — while the verdict swung towards PT. Both renderers got roughly four times
+the frames (ReSTIR 54→256 per five seconds, PT 118→437), so it is not a
+convergence-time effect either. Under the equal-time model a smaller frame
+advantage should favour ReSTIR; it did the opposite.
+
+What actually changed is ReSTIR's error at low resolution:
+`manyLights/right-high` went from 0.045 to 35.97 (one repeat reached 102.7),
+`classic/right-high` from 0.015 to 0.347. Denoised PT barely moved on any case
+and stayed within 1.02× across repeats, while ReSTIR's spread reached 7.2×.
+
+Two separate things produce that number, and neither is the device speed the
+issue set out to measure:
+
+- **ReSTIR's spatial reuse degrades as pixels cover more of the scene.**
+  `spatialRadius` is a pixel count (`src/gi/renderer.ts`) but the guard that
+  accepts a neighbour is a world-space plane distance
+  (`src/gi/shaders/restir-di-spatial.wgsl`), and that guard measures only the
+  component along the normal — so for two points on one flat surface it is zero
+  at any separation. On the unit-cube room the 24-pixel radius sits inside the
+  tolerance at 691×1,445 and crosses it at 270×564. The path tracer never
+  dispatches either spatial pass, which is why it is unaffected.
+- **Relative L2 amplifies a handful of pixels.** It divides by `b² + 1e-3`
+  (`src/gi/compare.ts`), so a stray bright sample where the reference is black
+  contributes enormously. One channel at the observed maximum accounts for about
+  38% of the whole `manyLights/right-high` figure — a few pixels, not an
+  image-wide collapse. Mean absolute rose 6.3× on that case where Relative L2
+  rose 801×.
+
+Narrowing the radius to its world-space equivalent (`radius=8` at `scale=0.25`,
+matching what 24 pixels spanned at the higher resolution) confirms the first
+mechanism on four of the six cases, which return to within 1.4× of their
+baseline error. That third run shares the throttled run's `scale`, so the radius
+is the only variable between those two; the comparison against the baseline still
+crosses both. It does not explain the other two cases: `manyLights/right-high`
+improves twenty-fold but remains at 1.52, and `classic/right-high` reads 9.19,
+worse than the 0.347 it showed at the wider radius. Both are the grazing-angle
+camera, and both swing wildly between repeats — 11× and 188× — against 1.1–3.7×
+on the four that recovered. At four repeats that dispersion is wide enough that
+the direction of the `classic/right-high` change is not established; what the
+run does establish is that something beyond the reuse radius affects the
+grazing-angle cases.
+
+So the throttle reads as a ReSTIR defect surfacing at low resolution rather than
+as the equal-time crossover, and the crossover device speed remains unmeasured.
+The `right-high` camera is the only one in the matrix that sees the floor and
+ceiling at a grazing angle, and `manyLights` puts 30 small emitters on a pitch
+comparable to the widened reuse radius, which is why those two cases are worst
+hit.
 
 ## Pipeline
 

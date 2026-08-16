@@ -344,4 +344,22 @@ describe("performance capture", () => {
       ),
     ).toBe("https://example.com/demo?preset=matrix");
   });
+
+  it("records the matrix resolution scale in the report URL", () => {
+    expect(
+      sanitizePerformanceReportUrl(
+        "https://example.com/demo?preset=matrix&scale=0.4&token=secret#private",
+      ),
+    ).toBe("https://example.com/demo?preset=matrix&scale=0.4");
+    expect(
+      sanitizePerformanceReportUrl(
+        "https://example.com/demo?preset=matrix&scale=0.4&atrous=tiled",
+      ),
+    ).toBe("https://example.com/demo?preset=matrix&scale=0.4&atrous=tiled");
+    expect(
+      sanitizePerformanceReportUrl(
+        "https://example.com/demo?preset=matrix&scale=0.42",
+      ),
+    ).toBe("https://example.com/demo?preset=matrix");
+  });
 });

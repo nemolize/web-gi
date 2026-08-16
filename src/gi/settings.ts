@@ -4,7 +4,9 @@ export const RENDER_MODES = ["restir", "path-traced", "reference"] as const;
 export type RenderMode = (typeof RENDER_MODES)[number];
 export const COMPARISON_MODES = ["restir", "path-traced"] as const;
 export type ComparisonMode = (typeof COMPARISON_MODES)[number];
-export type AutoComparisonMode = ComparisonMode | "matrix";
+export const MATRIX_PRESETS = ["matrix", "probe"] as const;
+export type MatrixPreset = (typeof MATRIX_PRESETS)[number];
+export type AutoComparisonMode = ComparisonMode | MatrixPreset;
 
 export type RenderSettings = {
   readonly scene: SceneVariant;
@@ -56,6 +58,49 @@ const HEAVY_SETTINGS: Partial<RenderSettings> = {
   resolutionScale: 0.75,
 };
 
+/**
+ * Allowlisted, not parsed: an unrecognised value must drop out of the recorded
+ * `url` rather than round to one nobody chose (#80).
+ */
+export const MATRIX_RESOLUTION_SCALES = [
+  "0.25",
+  "0.3",
+  "0.35",
+  "0.4",
+  "0.5",
+  "0.6",
+  "0.75",
+  "1",
+] as const;
+
+/** Spans the range the panel offers, to test the pixel-unit radius of #90. */
+export const MATRIX_SPATIAL_RADII = [
+  "2",
+  "4",
+  "6",
+  "8",
+  "12",
+  "16",
+  "24",
+  "32",
+  "48",
+  "64",
+] as const;
+
+type NumericSettingKey = {
+  [K in keyof RenderSettings]: RenderSettings[K] extends number ? K : never;
+}[keyof RenderSettings];
+
+/** `key` is numeric-only: the value reaches settings through `Number()`. */
+const MATRIX_OVERRIDES = [
+  { param: "scale", key: "resolutionScale", values: MATRIX_RESOLUTION_SCALES },
+  { param: "radius", key: "spatialRadius", values: MATRIX_SPATIAL_RADII },
+] as const satisfies readonly {
+  readonly param: string;
+  readonly key: NumericSettingKey;
+  readonly values: readonly string[];
+}[];
+
 const enumValue = <T extends string>(
   params: URLSearchParams,
   key: string,
@@ -70,8 +115,13 @@ const enumValue = <T extends string>(
 export const sanitizedRenderQueryParams = (search: string): URLSearchParams => {
   const source = new URLSearchParams(search);
   const sanitized = new URLSearchParams();
-  if (source.get("preset") === "matrix") {
-    sanitized.set("preset", "matrix");
+  const matrix = enumValue(source, "preset", MATRIX_PRESETS);
+  if (matrix !== undefined) {
+    sanitized.set("preset", matrix);
+    for (const { param, values } of MATRIX_OVERRIDES) {
+      const value = enumValue(source, param, values);
+      if (value !== undefined) sanitized.set(param, value);
+    }
     return sanitized;
   }
   if (source.get("preset") === "heavy") {
@@ -95,11 +145,18 @@ export const settingsFromSearch = (search: string): RenderSettings => {
   const params = sanitizedRenderQueryParams(search);
   const preset = params.get("preset");
   const base =
-    preset === "heavy" || preset === "matrix"
-      ? { ...DEFAULT_SETTINGS, ...HEAVY_SETTINGS }
-      : { ...DEFAULT_SETTINGS };
+    preset === null
+      ? { ...DEFAULT_SETTINGS }
+      : { ...DEFAULT_SETTINGS, ...HEAVY_SETTINGS };
+  const overrides = Object.fromEntries(
+    MATRIX_OVERRIDES.flatMap(({ param, key }) => {
+      const value = params.get(param);
+      return value === null ? [] : [[key, Number(value)]];
+    }),
+  );
   return {
     ...base,
+    ...overrides,
     mode:
       autoComparisonMode(params) === null
         ? (enumValue(params, "mode", RENDER_MODES) ?? base.mode)
@@ -115,8 +172,11 @@ export const autoComparisonMode = (
 ): AutoComparisonMode | null => {
   const params =
     typeof search === "string" ? new URLSearchParams(search) : search;
-  if (params.get("preset") === "matrix") return "matrix";
-  return enumValue(params, "compare", COMPARISON_MODES) ?? null;
+  return (
+    enumValue(params, "preset", MATRIX_PRESETS) ??
+    enumValue(params, "compare", COMPARISON_MODES) ??
+    null
+  );
 };
 
 export const FLAG_DI_ENABLED = 1 << 0;
