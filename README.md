@@ -104,12 +104,12 @@ recorded in the report's `url`, so two runs at different scales stay
 distinguishable afterwards. `radius` overrides the spatial reuse radius the same
 way, accepting `2`, `4`, `6`, `8`, `12`, `16`, `24` (the preset's own radius),
 `32`, `48` and `64`; it exists to test whether that radius explains the
-low-resolution ReSTIR error recorded below (#90). `spatial` overrides the number
+low-resolution ReSTIR error recorded below (#90). `samples` overrides the number
 of neighbours each spatial pass visits, accepting `0`, `1`, `2`, `4` and `8` (the
 preset's own count). `0` disables spatial reuse outright — both passes degenerate
 to a 1/Z pass-through — which separates the reuse radius from temporal
 reprojection as the cause of the grazing-angle cases the `radius` run left
-unexplained. This is the throttle #80 asks for — the equal-time
+unexplained. `scale` is also the throttle #80 asks for — the equal-time
 verdict is a function of achievable frame rate, so lowering the resolution on one
 machine tests the model that predicts the crossover without needing a second
 device. It cannot rule out a device-specific cause on its own.
