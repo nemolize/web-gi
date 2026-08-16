@@ -9,6 +9,7 @@ import {
   FLAG_GI_SPATIAL,
   FLAG_GI_TEMPORAL,
   MATRIX_RESOLUTION_SCALES,
+  MATRIX_SPATIAL_RADII,
   packFlags,
   requiresAccumulationReset,
   sanitizedRenderQueryParams,
@@ -116,6 +117,55 @@ describe("render query", () => {
       expect(resolved).toBeGreaterThan(0);
       expect(resolved).toBeLessThanOrEqual(1);
     }
+  });
+
+  it("overrides the spatial reuse radius for the matrix", () => {
+    const search = "?preset=matrix&radius=8";
+    expect(settingsFromSearch(search).spatialRadius).toBe(8);
+    expect(sanitizedRenderQueryParams(search).toString()).toBe(
+      "preset=matrix&radius=8",
+    );
+  });
+
+  it("keeps every allowlisted radius a number the renderer can use", () => {
+    for (const radius of MATRIX_SPATIAL_RADII) {
+      const resolved = settingsFromSearch(
+        `?preset=matrix&radius=${radius}`,
+      ).spatialRadius;
+      expect(resolved).toBe(Number(radius));
+      expect(Number.isInteger(resolved)).toBe(true);
+      expect(resolved).toBeGreaterThan(0);
+    }
+  });
+
+  it("combines the two matrix overrides", () => {
+    const search = "?preset=matrix&scale=0.25&radius=8";
+    const settings = settingsFromSearch(search);
+    expect(settings.resolutionScale).toBe(0.25);
+    expect(settings.spatialRadius).toBe(8);
+    expect(sanitizedRenderQueryParams(search).toString()).toBe(
+      "preset=matrix&scale=0.25&radius=8",
+    );
+  });
+
+  it("ignores a radius outside the allowlist", () => {
+    for (const search of [
+      "?preset=matrix&radius=7",
+      "?preset=matrix&radius=8px",
+      "?preset=matrix&radius=abc",
+      "?preset=matrix&radius=",
+      "?preset=matrix&radius=-8",
+    ]) {
+      expect(settingsFromSearch(search).spatialRadius).toBe(24);
+      expect(sanitizedRenderQueryParams(search).toString()).toBe(
+        "preset=matrix",
+      );
+    }
+  });
+
+  it("does not accept a radius outside the matrix preset", () => {
+    expect(settingsFromSearch("?radius=8").spatialRadius).toBe(24);
+    expect(settingsFromSearch("?preset=heavy&radius=8").spatialRadius).toBe(24);
   });
 
   // An unrecognised scale must not read as a run at the preset's own scale, so

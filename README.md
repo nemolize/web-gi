@@ -90,7 +90,9 @@ frame rates without touching anything else in the preset. It accepts `0.25`,
 `0.3`, `0.35`, `0.4`, `0.5`, `0.6`, `0.75` (the preset's own scale) and `1`;
 anything else is ignored and the run proceeds at `0.75`. The value it ran at is
 recorded in the report's `url`, so two runs at different scales stay
-distinguishable afterwards. This is the throttle #80 asks for — the equal-time
+distinguishable afterwards. `radius` overrides the spatial reuse radius the same
+way, from `2` to `64`; it exists to test whether that radius explains the
+low-resolution ReSTIR error recorded below (#90). This is the throttle #80 asks for — the equal-time
 verdict is a function of achievable frame rate, so lowering the resolution on one
 machine tests the model that predicts the crossover without needing a second
 device. It cannot rule out a device-specific cause on its own.

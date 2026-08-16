@@ -57,9 +57,8 @@ const HEAVY_SETTINGS: Partial<RenderSettings> = {
 };
 
 /**
- * Allowlisted rather than parsed as a float: the scale is what tells two
- * throttled runs apart in the recorded `url`, so an unrecognised one must drop
- * out of the URL instead of rounding to a scale nobody chose (#80).
+ * Allowlisted, not parsed: an unrecognised value must drop out of the recorded
+ * `url` rather than round to one nobody chose (#80).
  */
 export const MATRIX_RESOLUTION_SCALES = [
   "0.25",
@@ -71,6 +70,29 @@ export const MATRIX_RESOLUTION_SCALES = [
   "0.75",
   "1",
 ] as const;
+
+/** Spans the range the panel offers, to test the pixel-unit radius of #90. */
+export const MATRIX_SPATIAL_RADII = [
+  "2",
+  "4",
+  "6",
+  "8",
+  "12",
+  "16",
+  "24",
+  "32",
+  "48",
+  "64",
+] as const;
+
+const MATRIX_OVERRIDES = [
+  { param: "scale", key: "resolutionScale", values: MATRIX_RESOLUTION_SCALES },
+  { param: "radius", key: "spatialRadius", values: MATRIX_SPATIAL_RADII },
+] as const satisfies readonly {
+  readonly param: string;
+  readonly key: keyof RenderSettings;
+  readonly values: readonly string[];
+}[];
 
 const enumValue = <T extends string>(
   params: URLSearchParams,
@@ -88,8 +110,10 @@ export const sanitizedRenderQueryParams = (search: string): URLSearchParams => {
   const sanitized = new URLSearchParams();
   if (source.get("preset") === "matrix") {
     sanitized.set("preset", "matrix");
-    const scale = enumValue(source, "scale", MATRIX_RESOLUTION_SCALES);
-    if (scale !== undefined) sanitized.set("scale", scale);
+    for (const { param, values } of MATRIX_OVERRIDES) {
+      const value = enumValue(source, param, values);
+      if (value !== undefined) sanitized.set(param, value);
+    }
     return sanitized;
   }
   if (source.get("preset") === "heavy") {
@@ -116,11 +140,16 @@ export const settingsFromSearch = (search: string): RenderSettings => {
     preset === "heavy" || preset === "matrix"
       ? { ...DEFAULT_SETTINGS, ...HEAVY_SETTINGS }
       : { ...DEFAULT_SETTINGS };
-  // `params` is already sanitized, so a surviving `scale` is allowlisted.
-  const scale = params.get("scale");
+  // `params` is already sanitized, so a surviving override is allowlisted.
+  const overrides = Object.fromEntries(
+    MATRIX_OVERRIDES.flatMap(({ param, key }) => {
+      const value = params.get(param);
+      return value === null ? [] : [[key, Number(value)]];
+    }),
+  );
   return {
     ...base,
-    ...(scale === null ? {} : { resolutionScale: Number(scale) }),
+    ...overrides,
     mode:
       autoComparisonMode(params) === null
         ? (enumValue(params, "mode", RENDER_MODES) ?? base.mode)
