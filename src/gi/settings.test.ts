@@ -14,6 +14,7 @@ import {
   FLAG_GI_TEMPORAL,
   MATRIX_RESOLUTION_SCALES,
   MATRIX_SPATIAL_RADII,
+  MATRIX_SPATIAL_SAMPLES,
   packFlags,
   requiresAccumulationReset,
   sanitizedRenderQueryParams,
@@ -133,12 +134,13 @@ describe("render query", () => {
   });
 
   it("takes the same overrides on the probe preset", () => {
-    const search = "?preset=probe&scale=0.25&radius=8";
+    const search = "?preset=probe&scale=0.25&radius=8&samples=0";
     const settings = settingsFromSearch(search);
     expect(settings.resolutionScale).toBe(0.25);
     expect(settings.spatialRadius).toBe(8);
+    expect(settings.spatialSamples).toBe(0);
     expect(sanitizedRenderQueryParams(search).toString()).toBe(
-      "preset=probe&scale=0.25&radius=8",
+      "preset=probe&scale=0.25&radius=8&samples=0",
     );
   });
 
@@ -176,13 +178,57 @@ describe("render query", () => {
     }
   });
 
-  it("combines the two matrix overrides", () => {
-    const search = "?preset=matrix&scale=0.25&radius=8";
+  it("combines every matrix override", () => {
+    const search = "?preset=matrix&scale=0.25&radius=8&samples=0";
     const settings = settingsFromSearch(search);
     expect(settings.resolutionScale).toBe(0.25);
     expect(settings.spatialRadius).toBe(8);
+    expect(settings.spatialSamples).toBe(0);
     expect(sanitizedRenderQueryParams(search).toString()).toBe(
-      "preset=matrix&scale=0.25&radius=8",
+      "preset=matrix&scale=0.25&radius=8&samples=0",
+    );
+  });
+
+  it("overrides the neighbour count the matrix preset would otherwise set (#90's discriminator)", () => {
+    const search = "?preset=matrix&samples=0";
+    expect(settingsFromSearch("?preset=matrix").spatialSamples).toBe(8);
+    expect(settingsFromSearch(search).spatialSamples).toBe(0);
+    expect(sanitizedRenderQueryParams(search).toString()).toBe(
+      "preset=matrix&samples=0",
+    );
+  });
+
+  it("keeps every allowlisted neighbour count a number the renderer can use", () => {
+    for (const samples of MATRIX_SPATIAL_SAMPLES) {
+      const resolved = settingsFromSearch(
+        `?preset=matrix&samples=${samples}`,
+      ).spatialSamples;
+      expect(resolved).toBe(Number(samples));
+      expect(Number.isInteger(resolved)).toBe(true);
+      expect(resolved).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("ignores a neighbour count outside the allowlist", () => {
+    for (const search of [
+      "?preset=matrix&samples=3",
+      "?preset=matrix&samples=16",
+      "?preset=matrix&samples=0px",
+      "?preset=matrix&samples=abc",
+      "?preset=matrix&samples=",
+      "?preset=matrix&samples=-1",
+    ]) {
+      expect(settingsFromSearch(search).spatialSamples).toBe(8);
+      expect(sanitizedRenderQueryParams(search).toString()).toBe(
+        "preset=matrix",
+      );
+    }
+  });
+
+  it("does not accept a neighbour count outside the matrix preset", () => {
+    expect(settingsFromSearch("?samples=0").spatialSamples).toBe(4);
+    expect(settingsFromSearch("?preset=heavy&samples=0").spatialSamples).toBe(
+      8,
     );
   });
 
