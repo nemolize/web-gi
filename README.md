@@ -198,6 +198,53 @@ machine was heating over the session; pairing absorbs that for the verdicts —
 both renderers share one oracle per repeat — but the absolute frame counts are
 lower late in the run than early.
 
+### Throttling one device does not measure the crossover
+
+The `scale` throttle was added to test the equal-time model on a single machine
+(#80): if the verdict follows achievable frame rate, lowering the resolution
+should move it. A Galaxy-class Android device in Chrome 140 ran the matrix twice,
+identical but for the scale — 691×1445 then 270×564, four repeats each,
+`fallback` in both.
+
+The verdict did move, from ReSTIR winning Relative L2 in four of six cases to
+Denoised PT winning all six, every one unanimous. But it moved for the wrong
+reason, so it does not locate a crossover. Path tracing's frame advantage
+**shrank** as the resolution fell — the median PT/ReSTIR ratio went from 2.20 to
+1.67 — while the verdict swung towards PT. Both renderers got roughly four times
+the frames (ReSTIR 54→256 per five seconds, PT 118→437), so it is not a
+convergence-time effect either. Under the equal-time model a smaller frame
+advantage should favour ReSTIR; it did the opposite.
+
+What actually changed is ReSTIR's error at low resolution:
+`manyLights/right-high` went from 0.045 to 35.97 (one repeat reached 102.7),
+`classic/right-high` from 0.015 to 0.347. Denoised PT barely moved on any case
+and stayed within 1.02× across repeats, while ReSTIR's spread reached 7.2×.
+
+Two separate things produce that number, and neither is the device speed the
+issue set out to measure:
+
+- **ReSTIR's spatial reuse degrades as pixels cover more of the scene.**
+  `spatialRadius` is a pixel count (`src/gi/renderer.ts`) but the guard that
+  accepts a neighbour is a world-space plane distance
+  (`src/gi/shaders/restir-di-spatial.wgsl`), and that guard measures only the
+  component along the normal — so for two points on one flat surface it is zero
+  at any separation. On the unit-cube room the 24-pixel radius sits inside the
+  tolerance at 691×1445 and crosses it at 270×564. The path tracer never
+  dispatches either spatial pass, which is why it is unaffected.
+- **Relative L2 amplifies a handful of pixels.** It divides by `b² + 1e-3`
+  (`src/gi/compare.ts`), so a stray bright sample where the reference is black
+  contributes enormously. One channel at the observed maximum accounts for about
+  38% of the whole `manyLights/right-high` figure — a few pixels, not an
+  image-wide collapse. Mean absolute rose 6.3× on that case where Relative L2
+  rose 801×.
+
+So the throttle reads as a ReSTIR defect surfacing at low resolution rather than
+as the equal-time crossover, and the crossover device speed remains unmeasured.
+The `right-high` camera is the only one in the matrix that sees the floor and
+ceiling at a grazing angle, and `manyLights` puts 30 small emitters on a pitch
+comparable to the widened reuse radius, which is why those two cases are worst
+hit.
+
 ## Pipeline
 
 One frame, in dispatch order (`src/gi/renderer.ts`):
