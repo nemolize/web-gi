@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: nemolize/actions/setup@ffbe3737f01cb4e563dd19424761da8c3c9a9173 # v1.2.0
+      - uses: nemolize/actions/setup@0d3561c5db69eafa1311f4fad6c65d5984350006 # v1.3.0
       - run: pnpm lint
 
   Test:
@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: nemolize/actions/setup@ffbe3737f01cb4e563dd19424761da8c3c9a9173 # v1.2.0
+      - uses: nemolize/actions/setup@0d3561c5db69eafa1311f4fad6c65d5984350006 # v1.3.0
       - run: pnpm test
 
   Build:
@@ -37,7 +37,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: nemolize/actions/setup@ffbe3737f01cb4e563dd19424761da8c3c9a9173 # v1.2.0
+      - uses: nemolize/actions/setup@0d3561c5db69eafa1311f4fad6c65d5984350006 # v1.3.0
       - run: pnpm run build
 
   E2ETests:
@@ -52,7 +52,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # checkout's own safe.directory lasts only for its step; `prepare` needs it too.
       - run: git config --global --add safe.directory "$(pwd)"
-      - uses: nemolize/actions/setup@ffbe3737f01cb4e563dd19424761da8c3c9a9173 # v1.2.0
+      - uses: nemolize/actions/setup@0d3561c5db69eafa1311f4fad6c65d5984350006 # v1.3.0
       - name: Assert the image ships the Playwright version we depend on
         run: |
           img="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/ms-playwright/.docker-info', 'utf8')).driverVersion)")"

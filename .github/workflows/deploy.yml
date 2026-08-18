@@ -38,7 +38,7 @@ jobs:
           message: "Version Preview URL: ⏳deployment is in progress..."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: nemolize/actions/setup@ffbe3737f01cb4e563dd19424761da8c3c9a9173 # v1.2.0
+      - uses: nemolize/actions/setup@0d3561c5db69eafa1311f4fad6c65d5984350006 # v1.3.0
 
       - run: pnpm run build
 
