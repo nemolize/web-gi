@@ -22,6 +22,8 @@ export type RenderSettings = {
   readonly diCandidates: number;
   /** Neighbours visited per spatial reuse pass. */
   readonly spatialSamples: number;
+  /** Spatial reuse radius in world units (#90): both the disc the shaders
+   * sample and the in-plane distance at which a neighbour is rejected. */
   readonly spatialRadius: number;
   /** Bounces traced when evaluating the radiance of a GI sample point. */
   readonly maxBounces: number;
@@ -43,7 +45,7 @@ export const DEFAULT_SETTINGS: RenderSettings = {
   denoise: true,
   diCandidates: 8,
   spatialSamples: 4,
-  spatialRadius: 24,
+  spatialRadius: 0.04,
   maxBounces: 3,
   maxHistory: 512,
   resolutionScale: 0.75,
@@ -73,18 +75,18 @@ export const MATRIX_RESOLUTION_SCALES = [
   "1",
 ] as const;
 
-/** Spans the range the panel offers, to test the pixel-unit radius of #90. */
+/** World units since #90, bracketing the 0.04 the guard was derived at back
+ * when it was a separate constant — this sweep now moves the guard with it. */
 export const MATRIX_SPATIAL_RADII = [
-  "2",
-  "4",
-  "6",
-  "8",
-  "12",
-  "16",
-  "24",
-  "32",
-  "48",
-  "64",
+  "0.005",
+  "0.01",
+  "0.02",
+  "0.03",
+  "0.04",
+  "0.06",
+  "0.08",
+  "0.12",
+  "0.16",
 ] as const;
 
 /** `0` degenerates both spatial passes to 1/Z pass-through; #90's discriminator. */

@@ -310,12 +310,12 @@ const SettingsSections = memo(
             }}
           />
           <Slider
-            label="Spatial radius"
+            label="Spatial radius (world)"
             value={settings.spatialRadius}
-            min={2}
-            max={64}
-            step={1}
-            format={(value) => `${String(value)} px`}
+            min={0.005}
+            max={0.16}
+            step={0.005}
+            format={(value) => value.toFixed(3)}
             onChange={(spatialRadius) => {
               updateSettings({ spatialRadius });
             }}

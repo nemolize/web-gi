@@ -9,6 +9,9 @@ const SURFACE_EPS: f32 = 1e-3;
 const T_FAR: f32 = 1e20;
 /** Firefly guard; generous enough that it never clips the lit floor. */
 const MAX_ILLUMINATION: f32 = 200.0;
+/** 64 was the radius' own maximum back when it was a pixel count (#90). */
+const SPATIAL_MIN_PIXEL_RADIUS: f32 = 1.0;
+const SPATIAL_MAX_PIXEL_RADIUS: f32 = 64.0;
 
 /**
  * vec4f throughout: a `vec3f` followed by a scalar packs that scalar into the
@@ -264,6 +267,41 @@ fn surfacePosition(cam: Camera, pixel: vec2u, depth: f32) -> vec3f {
 /** Zero means the primary ray escaped; every real hit is in front of the eye. */
 fn surfaceHit(depth: f32) -> bool {
   return depth > 0.0;
+}
+
+/**
+ * World distance spanned by one pixel of vertical offset at `depth`. Exact
+ * rather than approximate: `viewRay` is linear in ndc and `depth` is measured
+ * along `forward`, so the ratio does not vary across the frame.
+ */
+fn worldPerPixel(cam: Camera, depth: f32) -> f32 {
+  return depth * 2.0 * camTanHalfFov(cam) / f32(uni.resolution.y);
+}
+
+/** Clamped because the conversion diverges as a surface nears the eye. */
+fn spatialPixelRadius(cam: Camera, depth: f32) -> f32 {
+  let perPixel = worldPerPixel(cam, depth);
+  // Unreachable via `surfaceHit`; guards WGSL's indeterminate division rather
+  // than a real input.
+  if (perPixel <= 0.0) {
+    return SPATIAL_MIN_PIXEL_RADIUS;
+  }
+  return clamp(
+    uni.spatialRadius / perPixel,
+    SPATIAL_MIN_PIXEL_RADIUS,
+    SPATIAL_MAX_PIXEL_RADIUS,
+  );
+}
+
+/**
+ * Uniform over the disc of `pixelRadius`, floored at one pixel of offset: the
+ * caller truncates to `vec2i`, so anything shorter lands back on the centre
+ * pixel and merges the reservoir into itself instead of reusing a neighbour.
+ */
+fn spatialOffset(pixelRadius: f32, angle: f32, u: f32) -> vec2i {
+  let radius = max(pixelRadius * sqrt(u), SPATIAL_MIN_PIXEL_RADIUS);
+  let direction = vec2f(cos(angle), sin(angle));
+  return vec2i(sign(direction) * ceil(abs(direction) * radius));
 }
 
 /** Returns top-left-origin screen UV in xy; z is 1 when the point is on screen. */

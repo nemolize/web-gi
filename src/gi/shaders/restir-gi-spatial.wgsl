@@ -13,9 +13,6 @@
 const MAX_NEIGHBORS: u32 = 8u;
 const PLANE_TOLERANCE: f32 = 0.05;
 const NORMAL_TOLERANCE: f32 = 0.9;
-// The plane test is identically zero along a flat surface, so without this the
-// pixel radius alone bounds reuse distance and drifts with resolution (#90).
-const IN_PLANE_TOLERANCE: f32 = 0.04;
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3u) {
@@ -69,10 +66,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   // way; disabling spatial reuse simply degenerates it to a 1/Z pass-through.
   let spatial = (uni.flags & FLAG_GI_SPATIAL) != 0u;
   let wanted = select(0u, min(uni.spatialSamples, MAX_NEIGHBORS), spatial);
+  let pixelRadius = spatialPixelRadius(uni.cam, depth);
   for (var i = 0u; i < wanted; i = i + 1u) {
     let angle = rand() * 2.0 * PI;
-    let radius = uni.spatialRadius * sqrt(rand());
-    let coord = vec2i(pixel) + vec2i(i32(cos(angle) * radius), i32(sin(angle) * radius));
+    let coord = vec2i(pixel) + spatialOffset(pixelRadius, angle, rand());
     if (coord.x < 0 || coord.y < 0
       || coord.x >= i32(uni.resolution.x) || coord.y >= i32(uni.resolution.y)) {
       continue;
@@ -86,7 +83,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     if (!surfaceHit(neighborDepth)
       || dot(neighborNormal, n) < NORMAL_TOLERANCE
       || abs(alongNormal) > PLANE_TOLERANCE
-      || length(worldOffset - alongNormal * n) > IN_PLANE_TOLERANCE) {
+      || length(worldOffset - alongNormal * n) > uni.spatialRadius) {
       continue;
     }
 
