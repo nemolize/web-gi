@@ -127,9 +127,10 @@ each case, tallied both overall and **per scene**. Luminance is scored as
 `|ratio - 1|`, since a ratio of 0.9 and one of 1.1 are equally biased.
 
 The per-scene split is the part worth reading — an even overall tally can be two
-opposite sweeps. It is also what a hybrid would have to exploit: on the desktop
-run below the primary metric's winners do not divide along scene lines, so that
-run offers no scene-dependent pattern to build one around (#43).
+opposite sweeps. It is also what a hybrid would have to exploit, and the
+recorded desktop run offered no such split — its primary-metric winners did not
+divide along scene lines, so there was no scene-dependent pattern to build one
+around (#43).
 
 ### How a verdict is decided
 
@@ -166,165 +167,90 @@ established; a unanimous one is a candidate worth repeating at a higher count.
 Relative L2 is the **primary** metric and the report marks it as such. The point
 is naming it before the run rather than after: with five metrics on offer, a
 verdict picked from whichever came out favourably is a verdict about the picking.
-The other four are diagnostic — they say _how_ the images differ and can run
-opposite to the primary one, as the recorded runs below do.
+The other four are diagnostic — they say _how_ the images differ, and they
+routinely run opposite to the primary one on the same case.
 
 The completion line shows the relative-L2 split by scene along with how many of
 those wins were unanimous, without opening the JSON.
 
-The automatic 1,024-frame reference is the mobile default: at 691×1,445, the
-target-device matrix completed one pass of its measured phases in 188 seconds
-and preserved the 2,048-frame sweep's decisions. ReSTIR had lower Relative L2 in
-all six cases; Denoised PT had lower mean absolute error and fewer outliers in
-all six, plus lower absolute luminance error in four. A 512-frame run was
-rejected after it changed one Relative L2 winner. Those figures are aggregates
-from a single unrepeated pass, recorded before the summary existed, and they were
-read off each renderer's own errors rather than the paired difference — so they
-say neither how the six cases split by scene nor which verdicts every repeat
-agreed on. A fresh matrix run reports both directly. Budget the single-pass
-duration times the repeat count. Higher-confidence one-off validation can still
-use the development controls to save a longer reference, with the actual frame
-count retained in the report.
+The automatic 1,024-frame reference is the mobile default: it preserved the
+decisions a 2,048-frame sweep made, while a 512-frame run changed one Relative L2
+winner. Budget the single-pass duration times the repeat count. Higher-confidence
+one-off validation can still use the development controls to save a longer
+reference, with the actual frame count retained in the report.
 
-A desktop run points the other way. On an Apple silicon laptop in Chrome 150 at
-1,128×885, four repeats of the six cases put Denoised PT lower on Relative L2 in
-all six, every one of them unanimous, by paired median differences of 2.9%,
-12.9%, 16.4%, 19.2%, 28.7% and 30.6%. Mean absolute and outliers agree in all
-six; max absolute agrees in five with one exact tie, none unanimous. Path
-tracing got almost exactly twice the frames in the same five seconds (1.93× to
-2.14×): at this speed the extra samples outweigh what resampling buys. The frame
-ratio does not explain the spread, though — it is near-constant across the six
-cases while the margins run from 2.9% to 30.6%, so resampling is buying
-something per frame, just not enough to close the gap.
+**Which renderer wins depends on the device, so any claim about it has to name
+one.** Recorded runs put ReSTIR ahead on Relative L2 on a phone and Denoised PT
+ahead on a desktop, which is what an equal-time model predicts: the faster the
+machine, the further path tracing's larger frame count carries against what
+resampling buys per frame. The crossover between them is not measured (#80), and
+a run's own report is the place to read its figures rather than this page.
 
-Luminance is the one metric that does not follow, and it splits 3:3 with no case
-unanimous. Its direction is nonetheless perfectly consistent — ReSTIR came out
-brighter than the oracle in all 24 runs and Denoised PT darker in all 24 — so on
-this device the bias is consistent in sign and buried in noise in magnitude. The
-earlier unrepeated desktop pass read this as a clean ReSTIR win; four repeats do
-not support that.
+### Spatial reuse is bounded in world units
 
-The two devices disagree, and consistently so under an equal-time model: the
-faster the machine, the more path tracing's larger frame count outweighs
-resampling. The crossover point is still not measured, so any claim about which
-renderer wins has to name the device.
+The reuse radius and the test that accepts a neighbour have to be in the same
+unit. They were not: `spatialRadius` was a pixel count while the acceptance test
+was a world distance, so their ratio depended on the render resolution and a
+radius tuned at one resolution meant something else at another.
 
-Two caveats on the run itself. It filtered with `fallback`, while the earlier
-desktop pass ran before tiling became opt-in and used `tiled-16` — so the two
-desktop readings differ in filter as well as in decision rule, and are not a
-like-for-like pair. And oracle generation slowed by 12–19% from the first sweep
-to the last (3,267→3,890 ms on `classic`, 5,428→6,077 ms on `manyLights`), so the
-machine was heating over the session; pairing absorbs that for the verdicts —
-both renderers share one oracle per repeat — but the absolute frame counts are
-lower late in the run than early.
+The acceptance test also measured only the offset's component along the normal:
 
-### Throttling one device does not measure the crossover
+```wgsl
+abs(dot(neighborPosition - x, n)) > PLANE_TOLERANCE
+```
 
-The `scale` throttle was added to test the equal-time model on a single machine
-(#80): if the verdict follows achievable frame rate, lowering the resolution
-should move it. A Galaxy-class Android device in Chrome 140 ran the matrix twice,
-identical but for the scale — `scale=0.75` giving 691×1,445, then `scale=0.25`
-giving 270×564, four repeats each, `fallback` in both. Both sizes come from the
-same 480×1,003 viewport at a device pixel ratio of 2.25, with the higher one
-sitting just under the million-pixel cap, so the dimensions do not scale in
-proportion to the two `scale` values.
+For two points on one flat surface that component is identically zero at any
+separation, so along a surface it rejected nothing. The room is a unit cube whose
+walls, floor and ceiling dominate it, which left the pixel radius as the only
+bound on reuse distance — and at a low enough resolution that bound reaches
+across the room. Both spatial passes now also bound the offset **in the surface
+plane**.
 
-The verdict did move, from ReSTIR winning Relative L2 in four of six cases to
-Denoised PT winning all six, every one unanimous. But it moved for the wrong
-reason, so it does not locate a crossover. Path tracing's frame advantage
-**shrank** as the resolution fell — the median PT/ReSTIR ratio went from 2.20 to
-1.67 — while the verdict swung towards PT. Both renderers got roughly four times
-the frames (ReSTIR 54→256 per five seconds, PT 118→437), so it is not a
-convergence-time effect either. Under the equal-time model a smaller frame
-advantage should favour ReSTIR; it did the opposite.
+The radius is a world distance too, converted to a pixel radius per pixel against
+that surface's own depth:
 
-What actually changed is ReSTIR's error at low resolution:
-`manyLights/right-high` went from 0.045 to 35.97 (one repeat reached 102.7),
-`classic/right-high` from 0.015 to 0.347. Denoised PT barely moved on any case
-and stayed within 1.02× across repeats, while ReSTIR's spread reached 7.2×.
+```wgsl
+worldPerPixel = depth * 2 * camTanHalfFov / resolution.y
+pixelRadius   = clamp(spatialRadius / worldPerPixel, 1, 64)
+```
 
-Two separate things produce that number, and neither is the device speed the
-issue set out to measure:
-
-- **ReSTIR's spatial reuse degraded as pixels covered more of the scene** — the
-  defect, since fixed below. `spatialRadius` was a pixel count
-  (`src/gi/renderer.ts`) but the guard that accepts a neighbour is a world-space
-  distance (`src/gi/shaders/restir-di-spatial.wgsl`), and at the time that guard
-  measured only the component along the normal — so for two points on one flat
-  surface it was zero at any separation. On the unit-cube room the 24-pixel
-  radius sits inside the tolerance at 691×1,445 and crosses it at 270×564. The
-  path tracer never dispatches either spatial pass, which is why it is
-  unaffected.
-- **Relative L2 amplifies a handful of pixels.** It divides by `b² + 1e-3`
-  (`src/gi/compare.ts`), so a stray bright sample where the reference is black
-  contributes enormously. One channel at the observed maximum accounts for about
-  38% of the whole `manyLights/right-high` figure — a few pixels, not an
-  image-wide collapse. Mean absolute rose 6.3× on that case where Relative L2
-  rose 801×.
-
-Narrowing the radius to its world-space equivalent (`radius=8` at `scale=0.25`,
-matching what 24 pixels spanned at the higher resolution) confirms the first
-mechanism on four of the six cases, which return to within 1.4× of their
-baseline error. That third run shares the throttled run's `scale`, so the radius
-is the only variable between those two; the comparison against the baseline still
-crosses both. It does not explain the other two cases: `manyLights/right-high`
-improves twenty-fold but remains at 1.52, and `classic/right-high` reads 9.19,
-worse than the 0.347 it showed at the wider radius. Both are the grazing-angle
-camera, and both swing wildly between repeats — 11× and 188× — against 1.1–3.7×
-on the four that recovered. At four repeats that dispersion is wide enough that
-the direction of the `classic/right-high` change is not established; what the
-run does establish is that something beyond the reuse radius affects the
-grazing-angle cases.
-
-The two runs that settle the mechanism and check the fix were both taken under
-`preset=probe`, so unlike every other figure on this page they are diagnostic
-readings rather than recorded verdicts — two repeats and a 256-frame oracle. The
-effects below span three orders of magnitude, which is well clear of that
-coarseness, but the numbers themselves want a `preset=matrix` run before being
-quoted as measurements.
-
-Running the same six cases with spatial reuse switched off entirely (`samples=0`)
-settles which mechanism that is. Both grazing cases fall to 0.0197 and 0.0088 —
-below their own baselines — while temporal reuse stayed on throughout, so the
-temporal reprojection that was the remaining suspect is not carrying any of it.
-The repeat spread collapses to 1.00–1.02× across all six, which is the second
-reading: the dispersion that made the `radius=8` arm unreadable came from spatial
-reuse too.
-
-That the narrowed radius did **not** fix the grazing cases while removing the
-reuse did is what chooses between the two possible fixes. Scaling the radius with
-resolution only restores a pixel count that was already too permissive; the limit
-has to be on the distance itself. Both spatial passes now bound the neighbour
-offset **in the surface plane**, in world units, alongside the existing
-normal-direction test — 0.04 when it landed as its own constant, what the
-default 24 pixels spanned at the resolution the tuning came from.
-
-Measured under the same throttle, that returns every case to at or below its
-throttled error, and the two grazing cases to below their baselines (0.0202 and
-0.0099). The guard is selective rather than merely restrictive: with reuse
-**enabled** it reaches the quality of having it disabled, while the four
-non-grazing cases stay consistently a little above their `samples=0` figures,
-which is the legitimate reuse still being accepted.
-
-The radius itself is now a world distance too, converted to a pixel radius per
-pixel against that surface's depth. This is not the "scale the radius with
-resolution" direction the paragraph above rejects: that one keeps a pixel count
-and rescales it, leaving a quantity that still means a different reuse distance
-at different depths within one frame. Stating the radius in world units instead
-puts it in the same unit as the guard, so the guard **is** the radius — the
-separate constant is gone and `radius` moves both. That also stops the guard
-from being reached by rejection: at high resolution the old pixel radius drew
+This is not the same as scaling a pixel radius with resolution. That keeps a
+pixel count and rescales it, leaving a quantity that still means a different reuse
+distance at different depths within one frame. Stating the radius in world units
+puts it in the same unit as the acceptance test, so the guard **is** the radius —
+there is no separate tolerance constant, and `radius` moves both. It also stops
+the guard from being reached by rejection: at high resolution a pixel radius drew
 most of its taps past the tolerance and the guard discarded them, spending the
-neighbour budget to find nothing. The pixel conversion is clamped to 1–64, since
-it diverges as a surface nears the eye and a sub-pixel offset would truncate
-back onto the centre pixel. **Unmeasured** — the runs recorded above predate it,
-and collapsing the two knobs into one changes what a sweep value means.
+neighbour budget to find nothing.
 
-The `right-high` camera is the only one in the matrix that sees the floor and
-ceiling at a grazing angle, and `manyLights` puts 30 small emitters on a pitch
-comparable to the widened reuse radius, which is why those two cases were worst
-hit. The equal-time crossover device speed #80 asks about remains unmeasured —
-the throttle turned out to be reading this defect rather than the crossover.
+The pixel conversion is clamped to 1–64, since it diverges as a surface nears the
+eye, and a sub-pixel offset would truncate back onto the centre pixel — a self-tap
+passes every guard, so the pass would merge the centre reservoir into itself once
+per neighbour slot.
+
+The DI pass is the more exposed of the two: it has no visibility test and no
+Jacobian gate, accepting a neighbour on `diTargetPdf` alone, and `diTargetPdf`
+excludes visibility by design (it is deferred to `shaders/shade.wgsl`). A sample
+resampled from a lit neighbour can therefore land on a shadowed pixel and still
+take a large reservoir weight. The GI pass has a Jacobian and one group
+visibility ray, so it degrades more gracefully. The path tracer dispatches
+neither spatial pass, so it is structurally unaffected.
+
+The defect surfaced through the `scale` throttle, which had been added to test
+the equal-time model of #80 on one machine; it dominated that reading rather than
+the crossover, so throttling one device still does not measure the crossover.
+Issue #90 records the measurements behind the diagnosis and behind the in-plane
+bound, and the `scale`, `radius` and `samples` overrides above are what reproduces
+them. **Stating the radius in world units is not covered by them** — those runs
+predate it, and collapsing two knobs into one changes what a sweep value means.
+
+One property of the primary metric is worth knowing before reading any figure it
+produces: Relative L2 divides by `b² + 1e-3` (`src/gi/compare.ts`), so a stray
+bright sample where the reference is black contributes enormously. On the worst
+case recorded there, one channel at the observed maximum accounted for about 38%
+of the whole figure, and mean absolute error moved by a factor of 6 where
+Relative L2 moved by a factor of 800. The defect was real; the image was not 800×
+worse.
 
 ## Pipeline
 
@@ -372,13 +298,10 @@ Algorithm 4) with the 1/Z correction for spatial reuse, and clamp the temporal
 history length. That combination is biased, and the visibility test used to
 reject GI candidates is not reflected in the 1/Z normalisation.
 
-A `compareLinear` sweep at 480×450 over three camera positions, the Cornell box
-and 30-light scenes, and all combinations of spatial-neighbour counts 0/4/8 and
-bounce depths 1/3/6 measured luminance ratios of 0.9947–1.0041 after at least
-2,048 reference frames and 1,024 ReSTIR frames. Relative L2 ranged from
-0.0014–0.0043 and mean absolute error from 0.0026–0.0085 in linear radiance.
-The residual is not consistently dark; its observed luminance shortfall or
-excess stayed within 0.53% across this sweep.
+A `compareLinear` sweep across both scenes, three camera positions, and every
+combination of spatial-neighbour count and bounce depth put the residual well
+under a percent of luminance, in either direction — it is not consistently dark.
+Run one to see the figures for a given build rather than trusting this sentence.
 
 ReSTIR reservoirs remain restricted to diffuse vertices. Glass shapes are
 evaluated as delta paths in the shading pass and are never stored in a reservoir
