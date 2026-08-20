@@ -134,13 +134,13 @@ describe("render query", () => {
   });
 
   it("takes the same overrides on the probe preset", () => {
-    const search = "?preset=probe&scale=0.25&radius=8&samples=0";
+    const search = "?preset=probe&scale=0.25&radius=0.02&samples=0";
     const settings = settingsFromSearch(search);
     expect(settings.resolutionScale).toBe(0.25);
-    expect(settings.spatialRadius).toBe(8);
+    expect(settings.spatialRadius).toBe(0.02);
     expect(settings.spatialSamples).toBe(0);
     expect(sanitizedRenderQueryParams(search).toString()).toBe(
-      "preset=probe&scale=0.25&radius=8&samples=0",
+      "preset=probe&scale=0.25&radius=0.02&samples=0",
     );
   });
 
@@ -160,10 +160,10 @@ describe("render query", () => {
   });
 
   it("overrides the spatial reuse radius for the matrix", () => {
-    const search = "?preset=matrix&radius=8";
-    expect(settingsFromSearch(search).spatialRadius).toBe(8);
+    const search = "?preset=matrix&radius=0.02";
+    expect(settingsFromSearch(search).spatialRadius).toBe(0.02);
     expect(sanitizedRenderQueryParams(search).toString()).toBe(
-      "preset=matrix&radius=8",
+      "preset=matrix&radius=0.02",
     );
   });
 
@@ -173,19 +173,18 @@ describe("render query", () => {
         `?preset=matrix&radius=${radius}`,
       ).spatialRadius;
       expect(resolved).toBe(Number(radius));
-      expect(Number.isInteger(resolved)).toBe(true);
       expect(resolved).toBeGreaterThan(0);
     }
   });
 
   it("combines every matrix override", () => {
-    const search = "?preset=matrix&scale=0.25&radius=8&samples=0";
+    const search = "?preset=matrix&scale=0.25&radius=0.02&samples=0";
     const settings = settingsFromSearch(search);
     expect(settings.resolutionScale).toBe(0.25);
-    expect(settings.spatialRadius).toBe(8);
+    expect(settings.spatialRadius).toBe(0.02);
     expect(settings.spatialSamples).toBe(0);
     expect(sanitizedRenderQueryParams(search).toString()).toBe(
-      "preset=matrix&scale=0.25&radius=8&samples=0",
+      "preset=matrix&scale=0.25&radius=0.02&samples=0",
     );
   });
 
@@ -240,16 +239,19 @@ describe("render query", () => {
       "?preset=matrix&radius=",
       "?preset=matrix&radius=-8",
     ]) {
-      expect(settingsFromSearch(search).spatialRadius).toBe(24);
+      expect(settingsFromSearch(search).spatialRadius).toBe(0.04);
       expect(sanitizedRenderQueryParams(search).toString()).toBe(
         "preset=matrix",
       );
     }
   });
 
+  // The value is allowlisted, so only the preset gate can be rejecting it.
   it("does not accept a radius outside the matrix preset", () => {
-    expect(settingsFromSearch("?radius=8").spatialRadius).toBe(24);
-    expect(settingsFromSearch("?preset=heavy&radius=8").spatialRadius).toBe(24);
+    expect(settingsFromSearch("?radius=0.02").spatialRadius).toBe(0.04);
+    expect(settingsFromSearch("?preset=heavy&radius=0.02").spatialRadius).toBe(
+      0.04,
+    );
   });
 
   it("ignores a scale outside the allowlist", () => {

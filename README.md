@@ -102,9 +102,10 @@ frame rates without touching anything else in the preset. It accepts `0.25`,
 anything else is ignored and the run proceeds at `0.75`. The value it ran at is
 recorded in the report's `url`, so two runs at different scales stay
 distinguishable afterwards. `radius` overrides the spatial reuse radius the same
-way, accepting `2`, `4`, `6`, `8`, `12`, `16`, `24` (the preset's own radius),
-`32`, `48` and `64`; it exists to test whether that radius explains the
-low-resolution ReSTIR error recorded below (#90). `samples` overrides the number
+way, accepting `0.005`, `0.01`, `0.02`, `0.03`, `0.04` (the preset's own radius),
+`0.06`, `0.08`, `0.12` and `0.16`. Those are world units, not pixels, since #90,
+and they move the neighbour-rejection distance with them — the guard is the
+radius. `samples` overrides the number
 of neighbours each spatial pass visits, accepting `0`, `1`, `2`, `4` and `8` (the
 preset's own count). `0` disables spatial reuse outright — both passes degenerate
 to a 1/Z pass-through — which separates the reuse radius from temporal
@@ -246,7 +247,7 @@ Two separate things produce that number, and neither is the device speed the
 issue set out to measure:
 
 - **ReSTIR's spatial reuse degraded as pixels covered more of the scene** — the
-  defect, since fixed below. `spatialRadius` is a pixel count
+  defect, since fixed below. `spatialRadius` was a pixel count
   (`src/gi/renderer.ts`) but the guard that accepts a neighbour is a world-space
   distance (`src/gi/shaders/restir-di-spatial.wgsl`), and at the time that guard
   measured only the component along the normal — so for two points on one flat
@@ -294,9 +295,9 @@ That the narrowed radius did **not** fix the grazing cases while removing the
 reuse did is what chooses between the two possible fixes. Scaling the radius with
 resolution only restores a pixel count that was already too permissive; the limit
 has to be on the distance itself. Both spatial passes now bound the neighbour
-offset **in the surface plane**, in world units (`IN_PLANE_TOLERANCE`), alongside
-the existing normal-direction test — 0.04, what the default 24 pixels spanned at
-the resolution the tuning came from.
+offset **in the surface plane**, in world units, alongside the existing
+normal-direction test — 0.04 when it landed as its own constant, what the
+default 24 pixels spanned at the resolution the tuning came from.
 
 Measured under the same throttle, that returns every case to at or below its
 throttled error, and the two grazing cases to below their baselines (0.0202 and
@@ -304,6 +305,20 @@ throttled error, and the two grazing cases to below their baselines (0.0202 and
 **enabled** it reaches the quality of having it disabled, while the four
 non-grazing cases stay consistently a little above their `samples=0` figures,
 which is the legitimate reuse still being accepted.
+
+The radius itself is now a world distance too, converted to a pixel radius per
+pixel against that surface's depth. This is not the "scale the radius with
+resolution" direction the paragraph above rejects: that one keeps a pixel count
+and rescales it, leaving a quantity that still means a different reuse distance
+at different depths within one frame. Stating the radius in world units instead
+puts it in the same unit as the guard, so the guard **is** the radius — the
+separate constant is gone and `radius` moves both. That also stops the guard
+from being reached by rejection: at high resolution the old pixel radius drew
+most of its taps past the tolerance and the guard discarded them, spending the
+neighbour budget to find nothing. The pixel conversion is clamped to 1–64, since
+it diverges as a surface nears the eye and a sub-pixel offset would truncate
+back onto the centre pixel. **Unmeasured** — the runs recorded above predate it,
+and collapsing the two knobs into one changes what a sweep value means.
 
 The `right-high` camera is the only one in the matrix that sees the floor and
 ceiling at a grazing angle, and `manyLights` puts 30 small emitters on a pitch
