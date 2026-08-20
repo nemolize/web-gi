@@ -275,12 +275,12 @@ the direction of the `classic/right-high` change is not established; what the
 run does establish is that something beyond the reuse radius affects the
 grazing-angle cases.
 
-The two runs that settle the mechanism and check the fix were both taken under
-`preset=probe`, so unlike every other figure on this page they are diagnostic
-readings rather than recorded verdicts — two repeats and a 256-frame oracle. The
-effects below span three orders of magnitude, which is well clear of that
-coarseness, but the numbers themselves want a `preset=matrix` run before being
-quoted as measurements.
+The run that settles the mechanism was taken under `preset=probe`, so unlike
+every other figure on this page it is a diagnostic reading rather than a recorded
+verdict — two repeats and a 256-frame oracle. The effect it separates spans three
+orders of magnitude, well clear of that coarseness, but its own numbers are not
+ones to quote as measurements. The fix is measured under `preset=matrix` further
+down.
 
 Running the same six cases with spatial reuse switched off entirely (`samples=0`)
 settles which mechanism that is. Both grazing cases fall to 0.0197 and 0.0088 —
@@ -298,18 +298,41 @@ offset **in the surface plane**, in world units (`IN_PLANE_TOLERANCE`), alongsid
 the existing normal-direction test — 0.04, what the default 24 pixels spanned at
 the resolution the tuning came from.
 
-Measured under the same throttle, that returns every case to at or below its
-throttled error, and the two grazing cases to below their baselines (0.0202 and
-0.0099). The guard is selective rather than merely restrictive: with reuse
-**enabled** it reaches the quality of having it disabled, while the four
-non-grazing cases stay consistently a little above their `samples=0` figures,
-which is the legitimate reuse still being accepted.
+A `preset=matrix` run on the same device, under the same `scale=0.25` throttle,
+records what the guard does. ReSTIR's Relative L2, against the two arms taken
+before it at the same scale:
+
+| case                    | throttled, no guard | **guarded** | baseline (`scale=0.75`) |
+| ----------------------- | ------------------: | ----------: | ----------------------: |
+| `classic/front`         |              0.0165 |  **0.0061** |                  0.0083 |
+| `classic/left`          |              0.0122 |  **0.0060** |                  0.0053 |
+| `classic/right-high`    |               0.347 |  **0.0058** |                  0.0153 |
+| `manyLights/front`      |              0.0271 |  **0.0118** |                  0.0113 |
+| `manyLights/left`       |              0.0797 |  **0.0137** |                  0.0114 |
+| `manyLights/right-high` |               35.97 |  **0.0144** |                  0.0449 |
+
+Every case lands below its unguarded figure, and the two grazing cases below
+their own baselines as well — `manyLights/right-high` by a factor of 2,500. The
+dispersion goes with it: repeat-to-repeat spread is **1.02–1.09×** across all
+six, against the 7.2× that arm reached unguarded and the 188× the `radius=8`
+arm reached. Spatial reuse remains **enabled** throughout, so this is the reuse
+still being accepted with the over-long neighbours rejected, not reuse switched
+off.
 
 The `right-high` camera is the only one in the matrix that sees the floor and
 ceiling at a grazing angle, and `manyLights` puts 30 small emitters on a pitch
 comparable to the widened reuse radius, which is why those two cases were worst
-hit. The equal-time crossover device speed #80 asks about remains unmeasured —
-the throttle turned out to be reading this defect rather than the crossover.
+hit.
+
+The guarded run also re-answers the question the throttle was originally run to
+ask, on a reading no longer contaminated by the defect: Denoised PT still wins
+Relative L2 on all six cases, unanimously across four repeats. So the verdict
+swing the throttled run showed was not an artefact of the defect alone — it
+survives the defect's removal. What the equal-time model predicted still does
+not hold, though, because path tracing's frame advantage kept shrinking as the
+resolution fell (1.2–1.7× here, against 1.93–2.14× on the desktop) while the
+verdict moved further towards PT. The crossover device speed #80 asks about
+therefore remains unmeasured; the throttle does not stand in for it.
 
 ## Pipeline
 
