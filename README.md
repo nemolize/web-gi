@@ -110,10 +110,10 @@ of neighbours each spatial pass visits, accepting `0`, `1`, `2`, `4` and `8` (th
 preset's own count). `0` disables spatial reuse outright — both passes degenerate
 to a 1/Z pass-through — which separates the reuse radius from temporal
 reprojection as the cause of the grazing-angle cases the `radius` run left
-unexplained. `scale` is also the throttle #80 asks for — the equal-time
-verdict is a function of achievable frame rate, so lowering the resolution on one
-machine tests the model that predicts the crossover without needing a second
-device. It cannot rule out a device-specific cause on its own.
+unexplained. `scale` is also the throttle #80 asks for, which tests on one
+machine whether the verdict follows achievable frame rate. It does not: the
+throttled run has the smaller frame advantage and still moves the verdict towards
+path tracing.
 
 Two things vary across repeats so the schedule does not bake in what it is trying
 to measure. Run order alternates on the camera index plus the repeat number,
@@ -179,12 +179,13 @@ winner. Budget the single-pass duration times the repeat count. Higher-confidenc
 one-off validation can still use the development controls to save a longer
 reference, with the actual frame count retained in the report.
 
-**Which renderer wins depends on the device, so any claim about it has to name
-one.** Recorded runs put ReSTIR ahead on Relative L2 on a phone and Denoised PT
-ahead on a desktop, which is what an equal-time model predicts: the faster the
-machine, the further path tracing's larger frame count carries against what
-resampling buys per frame. The crossover between them is not measured (#80), and
-a run's own report is the place to read its figures rather than this page.
+**Which renderer wins depends on the condition, so any claim about it has to
+name one.** Recorded runs put ReSTIR ahead on Relative L2 on a phone at full
+resolution and Denoised PT ahead on a desktop, and also ahead on that same phone
+once throttled. What separates them is open (#80): the equal-time reading — the
+faster the machine, the further path tracing's larger frame count carries —
+predicts the throttled phone should favour ReSTIR, and it does not. A run's own
+report is the place to read its figures rather than this page.
 
 ### Spatial reuse is bounded in world units
 
@@ -237,8 +238,8 @@ visibility ray, so it degrades more gracefully. The path tracer dispatches
 neither spatial pass, so it is structurally unaffected.
 
 The defect surfaced through the `scale` throttle, which had been added to test
-the equal-time model of #80 on one machine; it dominated that reading rather than
-the crossover, so throttling one device still does not measure the crossover.
+the equal-time model of #80 on one machine and read this instead. With the defect
+gone the throttle measures what it was built for, and what it returns is on #80.
 Issue #90 records the measurements behind all of it — the diagnosis, the in-plane
 bound, and the world-unit radius — and the `scale`, `radius` and `samples`
 overrides above are what reproduces them. Doubling the radius from its default
