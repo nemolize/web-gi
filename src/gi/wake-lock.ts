@@ -11,68 +11,39 @@ export type WakeLockRequester = {
   readonly request: (type: "screen") => Promise<WakeLockHandle>;
 };
 
-export type VisibilitySource = {
-  readonly visibilityState: DocumentVisibilityState;
-  readonly addEventListener: (
-    type: "visibilitychange",
-    listener: () => void,
-  ) => void;
-  readonly removeEventListener: (
-    type: "visibilitychange",
-    listener: () => void,
-  ) => void;
-};
-
 const browserWakeLock = (): WakeLockRequester | undefined =>
   "wakeLock" in navigator ? navigator.wakeLock : undefined;
 
 export const createWakeLockSession = (
   wakeLock: WakeLockRequester | undefined = browserWakeLock(),
-  page: VisibilitySource = document,
 ): WakeLockSession => {
   let handle: WakeLockHandle | null = null;
   let held = false;
 
-  const request = async (): Promise<void> => {
-    if (wakeLock === undefined || page.visibilityState !== "visible") return;
-    try {
-      const acquired = await wakeLock.request("screen");
-      if (held) handle = acquired;
-      else await acquired.release().catch(() => undefined);
-    } catch {
-      handle = null;
-    }
-  };
-
-  // The browser drops the lock whenever the page hides, so a benchmark that
-  // outlives one tab switch needs it taken again on return.
-  const onVisibilityChange = (): void => {
-    if (!held) return;
-    if (page.visibilityState === "visible") {
-      void request();
-      return;
-    }
-    // Releasing the dropped handle rather than only forgetting it: a browser
-    // that did not auto-drop it would otherwise keep the screen on for good.
-    const dropped = handle;
-    handle = null;
-    if (dropped !== null) void dropped.release().catch(() => undefined);
+  const discard = async (lock: WakeLockHandle): Promise<void> => {
+    await lock.release().catch(() => undefined);
   };
 
   return {
     acquire: async () => {
-      if (held) return;
+      if (held || wakeLock === undefined) return;
       held = true;
-      page.addEventListener("visibilitychange", onVisibilityChange);
-      await request();
+      try {
+        const acquired = await wakeLock.request("screen");
+        // Because release() can land while this request is still in flight, a
+        // lock arriving after it must go straight back instead of being kept.
+        if (held) handle = acquired;
+        else await discard(acquired);
+      } catch {
+        handle = null;
+      }
     },
     release: async () => {
       if (!held) return;
       held = false;
-      page.removeEventListener("visibilitychange", onVisibilityChange);
       const active = handle;
       handle = null;
-      if (active !== null) await active.release().catch(() => undefined);
+      if (active !== null) await discard(active);
     },
   };
 };
