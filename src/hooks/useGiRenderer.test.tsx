@@ -142,7 +142,13 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
       <button
         type="button"
         onClick={() => {
-          void runAutomaticComparison("path-traced", 2_048, 5_000);
+          void runAutomaticComparison("path-traced", 2_048, 5_000).catch(
+            (error: unknown) => {
+              setCaptureError(
+                error instanceof Error ? error.message : String(error),
+              );
+            },
+          );
         }}
       >
         Auto compare
@@ -753,5 +759,46 @@ describe("useGiRenderer", () => {
 
     expect(request).toHaveBeenCalledWith("screen");
     await waitFor(() => expect(order).toEqual(["request", "release"]));
+  });
+
+  it("leaves the screen alone while the renderer is merely running", async () => {
+    const request = vi.fn<WakeLockRequester["request"]>(() =>
+      Promise.resolve({ release: () => Promise.resolve() }),
+    );
+    vi.stubGlobal("navigator", { ...navigator, wakeLock: { request } });
+
+    const fake = createFakeRenderer();
+    const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+
+    render(<RendererHarness rendererFactory={create} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reset view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lower resolution" }));
+
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("releases the screen wake lock when a comparison fails", async () => {
+    const release = vi.fn(() => Promise.resolve());
+    const request = vi.fn<WakeLockRequester["request"]>(() =>
+      Promise.resolve({ release }),
+    );
+    vi.stubGlobal("navigator", { ...navigator, wakeLock: { request } });
+
+    const fake = createFakeRenderer();
+    vi.mocked(
+      fake.renderer.saveComparisonReferenceAfterFrames,
+    ).mockResolvedValue(false);
+    const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+
+    render(<RendererHarness rendererFactory={create} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Auto compare" }));
+
+    await waitFor(() => expect(release).toHaveBeenCalledOnce());
   });
 });
