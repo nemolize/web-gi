@@ -17,6 +17,7 @@ import {
 import type { LinearComparisonReport } from "@/gi/comparison-session";
 import type { DeviceLossInfo, RendererStats } from "@/gi/renderer";
 import { DEFAULT_SETTINGS } from "@/gi/settings";
+import type { WakeLockRequester } from "@/gi/wake-lock";
 import type { RendererFactory, RendererHandle } from "@/hooks/useGiRenderer";
 import {
   PERFORMANCE_CAPTURE_TIMEOUT_MS,
@@ -723,5 +724,34 @@ describe("useGiRenderer", () => {
     );
     expect(screen.getByTestId("error")).toBeEmptyDOMElement();
     expect(first.destroy).toHaveBeenCalled();
+  });
+
+  it("takes and releases a screen wake lock around an automatic comparison", async () => {
+    const order: string[] = [];
+    const release = vi.fn(() => {
+      order.push("release");
+      return Promise.resolve();
+    });
+    const request = vi.fn<WakeLockRequester["request"]>(() => {
+      order.push("request");
+      return Promise.resolve({ release });
+    });
+    vi.stubGlobal("navigator", { ...navigator, wakeLock: { request } });
+
+    const fake = createFakeRenderer();
+    const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+
+    render(<RendererHarness rendererFactory={create} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Auto compare" }));
+
+    await waitFor(() =>
+      expect(fake.renderer.releaseComparisonResources).toHaveBeenCalled(),
+    );
+
+    expect(request).toHaveBeenCalledWith("screen");
+    await waitFor(() => expect(order).toEqual(["request", "release"]));
   });
 });

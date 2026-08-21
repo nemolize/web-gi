@@ -20,6 +20,8 @@ import type { RendererStats } from "@/gi/renderer";
 import { GiRenderer, WebGpuUnsupportedError } from "@/gi/renderer";
 import type { ComparisonMode, RenderSettings } from "@/gi/settings";
 import { settingsFromSearch } from "@/gi/settings";
+import type { WakeLockSession } from "@/gi/wake-lock";
+import { createWakeLockSession } from "@/gi/wake-lock";
 
 export type RendererStatus =
   "initializing" | "running" | "unsupported" | "error";
@@ -124,6 +126,24 @@ export const useGiRenderer = (
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rendererVersion, setRendererVersion] = useState(0);
   const measurementRef = useRef<ActiveMeasurement | null>(null);
+  const wakeLockRef = useRef<WakeLockSession | null>(null);
+
+  const keepingScreenAwake = useCallback(
+    async <T>(benchmark: () => Promise<T>): Promise<T> => {
+      wakeLockRef.current ??= createWakeLockSession();
+      const session = wakeLockRef.current;
+      // Because a capture registers its frame callbacks synchronously, awaiting
+      // the lock first would drop every frame rendered in that gap.
+      const running = benchmark();
+      void session.acquire();
+      try {
+        return await running;
+      } finally {
+        await session.release();
+      }
+    },
+    [],
+  );
 
   const cancelMeasurement = useCallback((message: string): void => {
     const measurement = measurementRef.current;
@@ -429,22 +449,25 @@ export const useGiRenderer = (
       renderer.setGpuTimingEnabled(true);
       renderer.takeGpuSamples();
 
-      return new Promise((resolve, reject) => {
-        const timeoutId = window.setTimeout(() => {
-          cancelMeasurement(
-            "Performance capture timed out before enough frames were rendered.",
-          );
-        }, PERFORMANCE_CAPTURE_TIMEOUT_MS);
-        measurementRef.current = {
-          recorder: createPerformanceRecorder(),
-          resolve,
-          reject,
-          timeoutId,
-          renderContext: null,
-          lastFrameAt: null,
-        };
-      });
-    }, [cancelMeasurement]);
+      return keepingScreenAwake(
+        () =>
+          new Promise((resolve, reject) => {
+            const timeoutId = window.setTimeout(() => {
+              cancelMeasurement(
+                "Performance capture timed out before enough frames were rendered.",
+              );
+            }, PERFORMANCE_CAPTURE_TIMEOUT_MS);
+            measurementRef.current = {
+              recorder: createPerformanceRecorder(),
+              resolve,
+              reject,
+              timeoutId,
+              renderContext: null,
+              lastFrameAt: null,
+            };
+          }),
+      );
+    }, [cancelMeasurement, keepingScreenAwake]);
 
   const saveComparisonReference = useCallback((): Promise<boolean> => {
     const renderer = rendererRef.current;
@@ -477,25 +500,27 @@ export const useGiRenderer = (
       if (measurementRef.current !== null) {
         throw new Error("A performance capture is already running.");
       }
-      try {
-        const saved =
-          await renderer.saveComparisonReferenceAfterFrames(referenceFrames);
-        if (!saved) throw new Error("No stable reference frame to save.");
-        if (rendererRef.current !== renderer) {
-          throw new Error("The renderer restarted during the comparison.");
-        }
+      return keepingScreenAwake(async () => {
+        try {
+          const saved =
+            await renderer.saveComparisonReferenceAfterFrames(referenceFrames);
+          if (!saved) throw new Error("No stable reference frame to save.");
+          if (rendererRef.current !== renderer) {
+            throw new Error("The renderer restarted during the comparison.");
+          }
 
-        const targetSettings = { ...settingsRef.current, mode };
-        settingsRef.current = targetSettings;
-        renderer.setSettings(targetSettings);
-        setSettings(targetSettings);
-        renderer.renderFrame(cameraRef.current);
-        return await renderer.compareReferenceAfter(mode, durationMs);
-      } finally {
-        renderer.releaseComparisonResources();
-      }
+          const targetSettings = { ...settingsRef.current, mode };
+          settingsRef.current = targetSettings;
+          renderer.setSettings(targetSettings);
+          setSettings(targetSettings);
+          renderer.renderFrame(cameraRef.current);
+          return await renderer.compareReferenceAfter(mode, durationMs);
+        } finally {
+          renderer.releaseComparisonResources();
+        }
+      });
     },
-    [],
+    [keepingScreenAwake],
   );
 
   const runAutomaticComparisonMatrix = useCallback(
@@ -533,65 +558,69 @@ export const useGiRenderer = (
         renderer.renderFrame(camera);
       };
 
-      const schedule = comparisonMatrixRuns(repeats);
-      const runs: LinearComparisonMatrixReport["runs"][number][] = [];
-      for (const [runOffset, entry] of schedule.entries()) {
-        try {
-          const runIndex = runOffset + 1;
-          const { runOrder } = entry;
-          onProgress({
-            runIndex,
-            totalRuns: schedule.length,
-            entry,
-            phase: "reference",
-          });
-          applyView(entry.scene, "reference", entry.camera);
-          const saved =
-            await renderer.saveComparisonReferenceAfterFrames(referenceFrames);
-          requireActiveRenderer();
-          if (!saved) throw new Error("No stable reference frame to save.");
-
-          let restir: LinearComparisonReport | null = null;
-          let pathTraced: LinearComparisonReport | null = null;
-          for (const mode of runOrder) {
+      return keepingScreenAwake(async () => {
+        const schedule = comparisonMatrixRuns(repeats);
+        const runs: LinearComparisonMatrixReport["runs"][number][] = [];
+        for (const [runOffset, entry] of schedule.entries()) {
+          try {
+            const runIndex = runOffset + 1;
+            const { runOrder } = entry;
             onProgress({
               runIndex,
               totalRuns: schedule.length,
               entry,
-              phase: mode,
+              phase: "reference",
             });
-            applyView(entry.scene, mode, entry.camera);
-            const report = await renderer.compareReferenceAfter(
-              mode,
-              durationMs,
-            );
+            applyView(entry.scene, "reference", entry.camera);
+            const saved =
+              await renderer.saveComparisonReferenceAfterFrames(
+                referenceFrames,
+              );
             requireActiveRenderer();
-            if (report === null) {
-              throw new Error("The comparison did not produce a capture.");
+            if (!saved) throw new Error("No stable reference frame to save.");
+
+            let restir: LinearComparisonReport | null = null;
+            let pathTraced: LinearComparisonReport | null = null;
+            for (const mode of runOrder) {
+              onProgress({
+                runIndex,
+                totalRuns: schedule.length,
+                entry,
+                phase: mode,
+              });
+              applyView(entry.scene, mode, entry.camera);
+              const report = await renderer.compareReferenceAfter(
+                mode,
+                durationMs,
+              );
+              requireActiveRenderer();
+              if (report === null) {
+                throw new Error("The comparison did not produce a capture.");
+              }
+              if (mode === "restir") restir = report;
+              else pathTraced = report;
             }
-            if (mode === "restir") restir = report;
-            else pathTraced = report;
+            if (restir === null || pathTraced === null) {
+              throw new Error("The comparison matrix is incomplete.");
+            }
+            runs.push({
+              ...entry,
+              comparisons: { restir, "path-traced": pathTraced },
+            });
+          } finally {
+            renderer.releaseComparisonResources();
           }
-          if (restir === null || pathTraced === null) {
-            throw new Error("The comparison matrix is incomplete.");
-          }
-          runs.push({
-            ...entry,
-            comparisons: { restir, "path-traced": pathTraced },
-          });
-        } finally {
-          renderer.releaseComparisonResources();
         }
-      }
-      return {
-        kind: "comparison-matrix",
-        requestedReferenceFrames: referenceFrames,
-        requestedDurationMs: durationMs,
-        repeats: schedule.length / COMPARISON_MATRIX_CASES.length,
-        runs,
-      };
+        return {
+          kind: "comparison-matrix",
+          requestedReferenceFrames: referenceFrames,
+          requestedDurationMs: durationMs,
+          repeats: schedule.length / COMPARISON_MATRIX_CASES.length,
+          runs,
+        };
+      });
     },
-    [],
+    [keepingScreenAwake],
   );
 
   return {
