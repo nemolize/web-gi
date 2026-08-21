@@ -239,10 +239,11 @@ neither spatial pass, so it is structurally unaffected.
 The defect surfaced through the `scale` throttle, which had been added to test
 the equal-time model of #80 on one machine; it dominated that reading rather than
 the crossover, so throttling one device still does not measure the crossover.
-Issue #90 records the measurements behind the diagnosis and behind the in-plane
-bound, and the `scale`, `radius` and `samples` overrides above are what reproduces
-them. **Stating the radius in world units is not covered by them** — those runs
-predate it, and collapsing two knobs into one changes what a sweep value means.
+Issue #90 records the measurements behind all of it — the diagnosis, the in-plane
+bound, and the world-unit radius — and the `scale`, `radius` and `samples`
+overrides above are what reproduces them. Doubling the radius from its default
+did not move the error, so the default is not a tuned optimum — it is a value the
+measurement could not distinguish from a wider one.
 
 One property of the primary metric is worth knowing before reading any figure it
 produces: Relative L2 divides by `b² + 1e-3` (`src/gi/compare.ts`), so a stray
