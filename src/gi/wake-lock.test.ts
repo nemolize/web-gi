@@ -81,6 +81,60 @@ describe("createWakeLockSession", () => {
     });
   });
 
+  it("releases every lock it took across a hide and show cycle", async () => {
+    const released: string[] = [];
+    let issued = 0;
+    const request = vi.fn<WakeLockRequester["request"]>(() => {
+      issued += 1;
+      const id = `lock${String(issued)}`;
+      return Promise.resolve({
+        release: () => {
+          released.push(id);
+          return Promise.resolve();
+        },
+      });
+    });
+    const page = createFakePage();
+    const session = createWakeLockSession({ request }, page);
+
+    await session.acquire();
+    page.hide();
+    page.show();
+    await vi.waitFor(() => {
+      expect(issued).toBe(2);
+    });
+    await session.release();
+
+    expect(released.sort()).toEqual(["lock1", "lock2"]);
+  });
+
+  it("releases the lock it took when the page hides and never returns", async () => {
+    const release = vi.fn(() => Promise.resolve());
+    const request = createRequester(release);
+    const page = createFakePage();
+    const session = createWakeLockSession({ request }, page);
+
+    await session.acquire();
+    page.hide();
+    await session.release();
+
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("takes a fresh lock for each successive run", async () => {
+    const release = vi.fn(() => Promise.resolve());
+    const request = createRequester(release);
+    const session = createWakeLockSession({ request }, createFakePage());
+
+    await session.acquire();
+    await session.release();
+    await session.acquire();
+    await session.release();
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(release).toHaveBeenCalledTimes(2);
+  });
+
   it("does not request a lock while the page is hidden", async () => {
     const request = createRequester();
     const page = createFakePage();

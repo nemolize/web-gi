@@ -48,8 +48,15 @@ export const createWakeLockSession = (
   // outlives one tab switch needs it taken again on return.
   const onVisibilityChange = (): void => {
     if (!held) return;
-    if (page.visibilityState === "visible") void request();
-    else handle = null;
+    if (page.visibilityState === "visible") {
+      void request();
+      return;
+    }
+    // Releasing the dropped handle rather than only forgetting it: a browser
+    // that did not auto-drop it would otherwise keep the screen on for good.
+    const dropped = handle;
+    handle = null;
+    if (dropped !== null) void dropped.release().catch(() => undefined);
   };
 
   return {
