@@ -4,7 +4,7 @@ How `web-gi` measures ReSTIR against a denoised path tracer, and how a verdict
 is decided. All of it runs in the browser from a query string — no build step
 and no local checkout required.
 
-Numbers quoted anywhere in the project come from `preset=matrix`.
+Equal-time figures quoted in these docs come from `preset=matrix`.
 
 ## Presets and query strings
 
@@ -40,13 +40,12 @@ durations, and linear-radiance error metrics, and remain available through
 `Copy result`. Keep the page visible and unchanged while the several-minute
 matrix is running.
 
-`preset=probe` runs the same six cases and the same pairing on a tenth of the
-wall clock — around 30 seconds against roughly five and a half minutes — by
-taking two repeats instead of four, a 256-frame oracle instead of 1,024, and
-750 ms per renderer instead of five seconds. It is for iterating on a change,
+`preset=probe` runs the same six cases and the same pairing on roughly a tenth of
+the wall clock, by cutting the repeat count to **two** and shortening both the
+oracle and each renderer's measured window. It is for iterating on a change,
 never for recording a verdict: at two repeats a unanimous case is one in two by
 chance, so the repeat-to-repeat spread a low-resolution ReSTIR run turns out to
-need cannot be separated from noise, and the oracle is below the 512 frames that
+need cannot be separated from noise, and its oracle is below the 512 frames that
 already flipped a Relative L2 winner once.
 
 Four parameters override one setting each while leaving the rest of the preset
@@ -128,6 +127,17 @@ is naming it before the run rather than after: with five metrics on offer, a
 verdict picked from whichever came out favourably is a verdict about the picking.
 The other four are diagnostic — they say _how_ the images differ, and they
 routinely run opposite to the primary one on the same case.
+
+### Reading Relative L2
+
+It divides by the reference value (`src/gi/compare.ts`), so a stray bright sample
+where the reference is near black contributes enormously — the ratio is not a
+perceptual scale, and a large one can be a handful of pixels rather than a
+broadly worse image. Read it beside mean absolute error, which does not have that
+sensitivity: when the two disagree by orders of magnitude, the disagreement is
+the finding. A
+[recorded case](spatial-reuse.md#spatial-reuse-is-bounded-in-world-units) had
+Relative L2 move 800× where mean absolute error moved 6×.
 
 The completion line shows the relative-L2 split by scene along with how many of
 those wins were unanimous, without opening the JSON.

@@ -58,10 +58,8 @@ are what reproduces them. Doubling the radius from its default
 did not move the error, so the default is not a tuned optimum — it is a value the
 measurement could not distinguish from a wider one.
 
-One property of the primary metric is worth knowing before reading any figure it
-produces: Relative L2 divides by `b² + 1e-3` (`src/gi/compare.ts`), so a stray
-bright sample where the reference is black contributes enormously. On the worst
-case recorded there, one channel at the observed maximum accounted for about 38%
-of the whole figure, and mean absolute error moved by a factor of 6 where
-Relative L2 moved by a factor of 800. The defect was real; the image was not 800×
-worse.
+The figures here show why Relative L2 needs reading with its
+[outlier sensitivity](benchmarking.md#reading-relative-l2) in mind. On the worst
+case recorded, one channel at the observed maximum accounted for about 38% of
+the whole figure, and mean absolute error moved by a factor of 6 where Relative
+L2 moved by a factor of 800. The defect was real; the image was not 800× worse.

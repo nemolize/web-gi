@@ -49,15 +49,16 @@ inverted through the sphere.</sub>
 
 [![The renderer UI, with the stats overlay and the control panel](docs/images/ui.png)](https://web-gi.nemolize.workers.dev)
 
-<sub>Every stage has its own toggle, so each part of the algorithm can be turned
-off and looked at in isolation. The overlay reports resolution, frame time and
-how many frames have accumulated.</sub>
+<sub>The overlay reports resolution, frame time and how many frames have
+accumulated; the panel holds the per-stage toggles and sliders.</sub>
 
 - **Drag** to orbit, **scroll** to dolly.
 - The panel exposes RIS candidate count, spatial neighbour count and radius, GI
   bounce depth, accumulation window, resolution scale, and exposure.
 - The room is a closed box; primary rays cull back-facing surfaces, so the near
   wall becomes a cutaway and the interior stays visible from any angle.
+
+## Scenes
 
 Six scenes are staged in the same unit-cube room, all primarily Lambertian so
 diffuse interreflection stays the core of the image:
@@ -88,15 +89,27 @@ Two things the script names do not tell you:
 - `E2E_PREVIEW=1 pnpm run test:e2e` builds first and runs against `vite preview`
   instead of the dev server. That is what CI does, and the only way to exercise
   Worker asset serving and the hashed production bundle locally.
-- Development builds add `Save ref` and `Compare 5 s` to the stats overlay and
-  expose `window.__gi` for scripted experiments. WGSL compile errors reach the
-  console with the shader name and `line:column`; without that they surface only
-  as invalid-pipeline warnings at dispatch time.
+- Development builds add an in-page renderer comparison to the stats overlay and
+  expose `window.__gi` for scripted experiments — see
+  [manual comparison](docs/benchmarking.md#manual-comparison-in-development-builds).
+  WGSL compile errors reach the console with the shader name and `line:column`;
+  without that they surface only as invalid-pipeline warnings at dispatch time.
+
+## Deployment
+
+`main` deploys to Cloudflare Workers; pull requests upload a preview version and
+post its URL as a sticky comment. The conditions live in
+`.github/workflows/deploy.yml`.
+
+One rule there is worth stating because the workflow cannot explain itself: fork
+and Dependabot pull requests are **deliberately** skipped rather than broken.
+Neither can read the Cloudflare token, so a deploy step would fail on every such
+PR; skipping keeps that signal honest.
 
 ## Technical details
 
 - [Pipeline and architecture](docs/architecture.md) — the per-frame pass order,
-  scene representation, accumulation behaviour, and deployment.
+  scene representation, and accumulation behaviour.
 - [Benchmark methodology](docs/benchmarking.md) — the equal-time comparison
   presets, how a verdict is decided, and why the tie threshold is provisional.
 - [Spatial reuse is bounded in world units](docs/spatial-reuse.md) — a unit
@@ -111,12 +124,11 @@ Two things the script names do not tell you:
 - ReSTIR reservoirs are restricted to **diffuse vertices**. Glass is evaluated
   as delta paths at shading time and never stored in a reservoir.
 - **Which renderer wins depends on the condition, so any claim about it has to
-  name one.** Recorded runs put ReSTIR ahead on a phone and the denoised path
-  tracer ahead on a desktop; what separates them is still open
-  ([#80](https://github.com/nemolize/web-gi/issues/80)).
-- The tiled à-trous filter needs 24 KiB of workgroup storage, above WebGPU's
-  guaranteed 16 KiB, so it is requested only where adapter limits allow it and an
-  8×8 texture-backed filter is kept for everything else.
+  name one** — see the [recorded runs](docs/benchmarking.md#how-a-verdict-is-decided).
+- The à-trous filter ships as a texture-backed pass. A workgroup-tiled variant
+  exists behind `?atrous=tiled`, but it measured slower on the device it was
+  written for and needs more workgroup storage than WebGPU guarantees, so it
+  stays an opt-in experiment rather than the default.
 
 ## References
 
