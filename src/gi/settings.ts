@@ -25,6 +25,8 @@ export type RenderSettings = {
   /** Spatial reuse radius in world units (#90): both the disc the shaders
    * sample and the in-plane distance at which a neighbour is rejected. */
   readonly spatialRadius: number;
+  /** World-distance falloff on how far along a surface an a-trous tap counts. */
+  readonly atrousTangentSigma: number;
   /** Bounces traced when evaluating the radiance of a GI sample point. */
   readonly maxBounces: number;
   /** Upper bound on the temporal accumulation window, in frames. */
@@ -46,6 +48,7 @@ export const DEFAULT_SETTINGS: RenderSettings = {
   diCandidates: 8,
   spatialSamples: 4,
   spatialRadius: 0.04,
+  atrousTangentSigma: 0.08,
   maxBounces: 3,
   maxHistory: 512,
   resolutionScale: 0.75,
@@ -92,6 +95,16 @@ export const MATRIX_SPATIAL_RADII = [
 /** `0` degenerates both spatial passes to 1/Z pass-through; #90's discriminator. */
 export const MATRIX_SPATIAL_SAMPLES = ["0", "1", "2", "4", "8"] as const;
 
+/** Spans the kernel's own head-on reach at either end; `0.08` is the default. */
+export const MATRIX_ATROUS_TANGENT_SIGMAS = [
+  "0.02",
+  "0.04",
+  "0.08",
+  "0.16",
+  "0.32",
+  "1000",
+] as const;
+
 type NumericSettingKey = {
   [K in keyof RenderSettings]: RenderSettings[K] extends number ? K : never;
 }[keyof RenderSettings];
@@ -100,6 +113,11 @@ type NumericSettingKey = {
 const MATRIX_OVERRIDES = [
   { param: "scale", key: "resolutionScale", values: MATRIX_RESOLUTION_SCALES },
   { param: "radius", key: "spatialRadius", values: MATRIX_SPATIAL_RADII },
+  {
+    param: "tangent",
+    key: "atrousTangentSigma",
+    values: MATRIX_ATROUS_TANGENT_SIGMAS,
+  },
   { param: "samples", key: "spatialSamples", values: MATRIX_SPATIAL_SAMPLES },
 ] as const satisfies readonly {
   readonly param: string;

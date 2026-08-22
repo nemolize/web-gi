@@ -68,7 +68,7 @@ export type RendererStats = {
 export type DeviceLossInfo = Pick<GPUDeviceLostInfo, "message" | "reason">;
 
 const WORKGROUP_SIZE = DEFAULT_WORKGROUP_SIZE;
-const UNIFORM_BYTES = 192;
+const UNIFORM_BYTES = 208;
 const DI_RESERVOIR_BYTES = 32;
 const GI_RESERVOIR_BYTES = 48;
 
@@ -1191,6 +1191,7 @@ export class GiRenderer {
     view.setUint32(180, this.scene.clusters.length, true);
     view.setUint32(184, this.scene.occluderClusterCount, true);
     view.setUint32(188, this.scene.glassShapes.length, true);
+    view.setFloat32(192, this.settings.atrousTangentSigma, true);
     this.device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData);
   }
 

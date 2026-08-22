@@ -85,7 +85,13 @@ fn main(
       let tapColor = atrousColor(tap, tileCoord);
 
       let normalWeight = normalFalloff(max(dot(n, tapNormal), 0.0));
-      let edge = abs(dot(n, tapPosition - x)) / SIGMA_PLANE
+      let offset = tapPosition - x;
+      let alongNormal = dot(n, offset);
+      // The plane term is identically zero for coplanar taps, so without the
+      // tangential one the kernel's world-space reach is whatever
+      // `worldPerPixel / cos(incidence)` happens to be.
+      let edge = abs(alongNormal) / SIGMA_PLANE
+        + length(offset - alongNormal * n) / uni.atrousTangentSigma
         + abs(luminance(tapColor) - centerLuminance) / (sigmaLuminance + 1e-4);
       let kernelWeight = KERNEL[dx + 2] * KERNEL[dy + 2];
       let weight = kernelWeight * normalWeight * exp(-edge);

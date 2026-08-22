@@ -321,6 +321,17 @@ const SettingsSections = memo(
             }}
           />
           <Slider
+            label="A-trous falloff (world)"
+            value={settings.atrousTangentSigma}
+            min={0.02}
+            max={0.32}
+            step={0.01}
+            format={(value) => value.toFixed(2)}
+            onChange={(atrousTangentSigma) => {
+              updateSettings({ atrousTangentSigma });
+            }}
+          />
+          <Slider
             label="Accumulation window"
             value={settings.maxHistory}
             min={1}

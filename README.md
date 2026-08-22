@@ -110,7 +110,10 @@ of neighbours each spatial pass visits, accepting `0`, `1`, `2`, `4` and `8` (th
 preset's own count). `0` disables spatial reuse outright — both passes degenerate
 to a 1/Z pass-through — which separates the reuse radius from temporal
 reprojection as the cause of the grazing-angle cases the `radius` run left
-unexplained. `scale` is also the throttle #80 asks for, which tests on one
+unexplained. `tangent` overrides how far along a surface an a-trous tap still
+counts, accepting `0.02`, `0.04`, `0.08` (the default), `0.16`, `0.32` and
+`1000`; the last is wide enough to restore the unbounded reach the term replaced.
+`scale` is also the throttle #80 asks for, which tests on one
 machine whether the verdict follows achievable frame rate. It does not: the
 throttled run has the smaller frame advantage and still moves the verdict towards
 path tracing.
