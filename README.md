@@ -47,6 +47,12 @@ inverted through the sphere.</sub>
 
 ## Controls
 
+[![The renderer UI, with the stats overlay and the control panel](docs/images/ui.png)](https://web-gi.nemolize.workers.dev)
+
+<sub>Every stage has its own toggle, so each part of the algorithm can be turned
+off and looked at in isolation. The overlay reports resolution, frame time and
+how many frames have accumulated.</sub>
+
 - **Drag** to orbit, **scroll** to dolly.
 - The panel exposes RIS candidate count, spatial neighbour count and radius, GI
   bounce depth, accumulation window, resolution scale, and exposure.
@@ -72,22 +78,20 @@ provisions them with `mise install`).
 
 ```bash
 pnpm install
-pnpm dev          # dev server on http://localhost:5173
-pnpm build        # type-check and build
-pnpm test         # unit tests
-pnpm test:e2e     # Playwright end-to-end tests against the dev server
-pnpm lint         # eslint, prettier and type-check
-pnpm fix          # auto-fixable lint and formatting
+pnpm dev
 ```
 
-`E2E_PREVIEW=1 pnpm run test:e2e` builds first and runs the suite against
-`vite preview`, which is what CI does — the only way to exercise `wrangler.json`
-asset serving and the hashed production bundle locally.
+`pnpm run` lists the rest — build, test, `test:e2e`, lint and fix.
 
-Development builds add `Save ref` and `Compare 5 s` to the stats overlay, and
-expose `window.__gi` hooks for scripted experiments. WGSL compile errors are
-reported to the console with the shader name and `line:column`; without that
-they only surface as invalid-pipeline warnings at dispatch time.
+Two things the script names do not tell you:
+
+- `E2E_PREVIEW=1 pnpm run test:e2e` builds first and runs against `vite preview`
+  instead of the dev server. That is what CI does, and the only way to exercise
+  Worker asset serving and the hashed production bundle locally.
+- Development builds add `Save ref` and `Compare 5 s` to the stats overlay and
+  expose `window.__gi` for scripted experiments. WGSL compile errors reach the
+  console with the shader name and `line:column`; without that they surface only
+  as invalid-pipeline warnings at dispatch time.
 
 ## Technical details
 

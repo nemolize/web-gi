@@ -13,10 +13,12 @@ Repeatable benchmark runs can start from short query strings:
 - `?preset=heavy&mode=restir&measure=auto`
 - `?preset=heavy&mode=path-traced&measure=auto`
 
-`preset=heavy` selects 30 lights, 32 DI candidates, eight spatial neighbours,
-six bounces, and 75% resolution. `measure=auto` starts the standard three-by-five
-second capture as soon as the renderer is ready; the completed report remains
-available through `Copy result`.
+`preset=heavy` loads a deliberately demanding configuration — many lights, a
+wide DI candidate count, and several bounces — so the renderers are compared
+where the work is, not at defaults. `measure=auto` starts the standard
+three-by-five second capture as soon as the renderer is ready; the completed
+report remains available through `Copy result`, and records the exact settings it
+ran at.
 
 Equal-time linear-radiance comparisons use similarly short URLs:
 
@@ -47,27 +49,30 @@ chance, so the repeat-to-repeat spread a low-resolution ReSTIR run turns out to
 need cannot be separated from noise, and the oracle is below the 512 frames that
 already flipped a Relative L2 winner once.
 
-`scale` throttles the matrix to a lower resolution, which raises both renderers'
-frame rates without touching anything else in the preset. It accepts `0.25`,
-`0.3`, `0.35`, `0.4`, `0.5`, `0.6`, `0.75` (the preset's own scale) and `1`;
-anything else is ignored and the run proceeds at `0.75`. The value it ran at is
-recorded in the report's `url`, so two runs at different scales stay
-distinguishable afterwards. `radius` overrides the spatial reuse radius the same
-way, accepting `0.005`, `0.01`, `0.02`, `0.03`, `0.04` (the preset's own radius),
-`0.06`, `0.08`, `0.12` and `0.16`. Those are world units, not pixels, since #90,
-and they move the neighbour-rejection distance with them — the guard is the
-radius. `samples` overrides the number
-of neighbours each spatial pass visits, accepting `0`, `1`, `2`, `4` and `8` (the
-preset's own count). `0` disables spatial reuse outright — both passes degenerate
-to a 1/Z pass-through — which separates the reuse radius from temporal
-reprojection as the cause of the grazing-angle cases the `radius` run left
-unexplained. `tangent` overrides how far along a surface an a-trous tap still
-counts, accepting `0.02`, `0.04`, `0.08` (the default), `0.16`, `0.32` and
-`1000`; the last is wide enough to restore the unbounded reach the term replaced.
-`scale` is also the throttle #80 asks for, which tests on one
-machine whether the verdict follows achievable frame rate. It does not: the
-throttled run has the smaller frame advantage and still moves the verdict towards
-path tracing.
+Four parameters override one setting each while leaving the rest of the preset
+alone. Each accepts a fixed set of values — the accepted lists live in
+`src/gi/settings.ts` — and anything else is ignored, so a run always proceeds at
+the preset's own value rather than failing. What ran is recorded in the report's
+`url`, which keeps two runs at different settings distinguishable afterwards.
+
+| Override  | Isolates                                        |
+| --------- | ----------------------------------------------- |
+| `scale`   | Resolution, raising both renderers' frame rates |
+| `radius`  | The spatial reuse radius, in world units        |
+| `samples` | How many neighbours each spatial pass visits    |
+| `tangent` | How far along a surface an à-trous tap counts   |
+
+Three of them exist because a specific question needed separating:
+
+- `samples=0` disables spatial reuse outright — both passes degenerate to a 1/Z
+  pass-through. That separates the reuse radius from temporal reprojection as the
+  cause of the grazing-angle cases the `radius` run left unexplained.
+- `tangent` at its widest value restores the unbounded reach the in-plane term
+  replaced, which is what makes the regression measurable rather than asserted.
+- `scale` is the throttle [#80](https://github.com/nemolize/web-gi/issues/80)
+  asks for: it tests on one machine whether the verdict follows achievable frame
+  rate. It does not — the throttled run has the smaller frame advantage and still
+  moves the verdict towards path tracing.
 
 Two things vary across repeats so the schedule does not bake in what it is trying
 to measure. Run order alternates on the camera index plus the repeat number,
