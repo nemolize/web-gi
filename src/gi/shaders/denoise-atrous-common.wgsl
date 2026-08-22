@@ -15,16 +15,6 @@ struct AtrousStep {
 }
 
 const SIGMA_PLANE: f32 = 0.02;
-/**
- * Bounds how far along the surface a tap may sit. Without it the filter's reach
- * is `14 * worldPerPixel / cos(incidence)` — it grows as pixels get larger and
- * again as the surface tilts, so the same kernel averages a hand's width of a
- * wall head-on and a third of the room at a grazing angle (#80).
- *
- * Derived rather than swept: `0.08` is roughly what the kernel already spanned
- * head-on at the preset's own resolution, so it leaves that case alone.
- */
-const SIGMA_TANGENT: f32 = 0.08;
 const SIGMA_LUMINANCE: f32 = 6.0;
 // Module scope avoids rebuilding a mutable, dynamically indexed private array
 // for every invocation and keeps the filter weights immutable.
@@ -97,8 +87,11 @@ fn main(
       let normalWeight = normalFalloff(max(dot(n, tapNormal), 0.0));
       let offset = tapPosition - x;
       let alongNormal = dot(n, offset);
+      // The plane term is identically zero for coplanar taps, so without the
+      // tangential one the kernel's world-space reach is whatever
+      // `worldPerPixel / cos(incidence)` happens to be.
       let edge = abs(alongNormal) / SIGMA_PLANE
-        + length(offset - alongNormal * n) / SIGMA_TANGENT
+        + length(offset - alongNormal * n) / uni.atrousTangentSigma
         + abs(luminance(tapColor) - centerLuminance) / (sigmaLuminance + 1e-4);
       let kernelWeight = KERNEL[dx + 2] * KERNEL[dy + 2];
       let weight = kernelWeight * normalWeight * exp(-edge);

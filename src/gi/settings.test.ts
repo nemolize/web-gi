@@ -12,6 +12,7 @@ import {
   FLAG_GI_ENABLED,
   FLAG_GI_SPATIAL,
   FLAG_GI_TEMPORAL,
+  MATRIX_ATROUS_TANGENT_SIGMAS,
   MATRIX_RESOLUTION_SCALES,
   MATRIX_SPATIAL_RADII,
   MATRIX_SPATIAL_SAMPLES,
@@ -165,6 +166,41 @@ describe("render query", () => {
     expect(sanitizedRenderQueryParams(search).toString()).toBe(
       "preset=matrix&radius=0.02",
     );
+  });
+
+  it("overrides the a-trous tangential sigma for the matrix", () => {
+    const search = "?preset=matrix&tangent=0.32";
+    expect(settingsFromSearch("?preset=matrix").atrousTangentSigma).toBe(0.08);
+    expect(settingsFromSearch(search).atrousTangentSigma).toBe(0.32);
+    expect(sanitizedRenderQueryParams(search).toString()).toBe(
+      "preset=matrix&tangent=0.32",
+    );
+  });
+
+  it("keeps every allowlisted tangential sigma usable by the renderer", () => {
+    for (const sigma of MATRIX_ATROUS_TANGENT_SIGMAS) {
+      const resolved = settingsFromSearch(
+        `?preset=matrix&tangent=${sigma}`,
+      ).atrousTangentSigma;
+      expect(resolved).toBe(Number(sigma));
+      expect(resolved).toBeGreaterThan(0);
+    }
+  });
+
+  it("ignores a tangential sigma outside the allowlist", () => {
+    for (const search of [
+      "?preset=matrix&tangent=0.05",
+      "?preset=matrix&tangent=0.08m",
+      "?preset=matrix&tangent=abc",
+      "?preset=matrix&tangent=",
+      "?preset=matrix&tangent=-0.08",
+      "?preset=matrix&tangent=0",
+    ]) {
+      expect(settingsFromSearch(search).atrousTangentSigma).toBe(0.08);
+      expect(sanitizedRenderQueryParams(search).toString()).toBe(
+        "preset=matrix",
+      );
+    }
   });
 
   it("keeps every allowlisted radius a number the renderer can use", () => {

@@ -52,6 +52,7 @@ struct Uniforms {
   clusterCount: u32,
   occluderClusterCount: u32,
   glassShapeCount: u32,
+  atrousTangentSigma: f32,
 }
 
 /** vec4f throughout for the same reason as `Camera`; layout is unchanged. */
