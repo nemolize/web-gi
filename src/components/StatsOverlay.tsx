@@ -89,7 +89,7 @@ const formatLinearComparisonReport = (
 ): string =>
   JSON.stringify(
     {
-      schemaVersion: 2,
+      schemaVersion: 3,
       ...createEnvironmentReportContext(),
       ...comparison,
       ...(summary === null ? {} : { summary }),

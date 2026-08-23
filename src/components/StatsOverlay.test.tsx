@@ -285,7 +285,7 @@ describe("StatsOverlay performance capture", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
     const copied = JSON.parse(writeText.mock.calls[0]?.[0] ?? "");
     expect(copied).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       mode: "path-traced",
       referenceFrames: 1_024,
       targetFrames: 240,
@@ -407,7 +407,7 @@ describe("StatsOverlay performance capture", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
     const copied = JSON.parse(writeText.mock.calls[0]?.[0] ?? "");
     expect(copied).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: "comparison-matrix",
       requestedReferenceFrames: 1_024,
       runs: [{ label: "classic/front" }],
