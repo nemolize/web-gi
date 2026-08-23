@@ -298,12 +298,9 @@ fn spatialPixelRadius(cam: Camera, depth: f32) -> f32 {
  * Uniform over the disc of `pixelRadius`, floored at one pixel of offset so the
  * tap cannot land back on the centre pixel and merge the reservoir into itself.
  *
- * Rounds to nearest rather than outward: rounding both axes away from zero
- * lengthens every offset, and on a surface seen at a grazing angle the accepted
- * region is an ellipse whose screen-space minor axis is only `pixelRadius`
- * times the incidence cosine — so the lengthening pushes most taps past the
- * guard, the more so the fewer pixels that minor axis spans. That made reuse
- * resolution-dependent exactly where the guard is tightest (#80).
+ * Rounds to nearest, not outward: outward lengthens every offset, and at a
+ * grazing angle the guard accepts an ellipse only `pixelRadius * cos(incidence)`
+ * pixels across, so the lengthening pushes most taps outside it.
  */
 fn spatialOffset(pixelRadius: f32, angle: f32, u: f32) -> vec2i {
   let radius = max(pixelRadius * sqrt(u), SPATIAL_MIN_PIXEL_RADIUS);
