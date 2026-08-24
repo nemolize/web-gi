@@ -15,6 +15,7 @@ import {
   COMPARISON_MATRIX_PROBE_BUDGET,
   DEFAULT_COMPARISON_MATRIX_REPEATS,
 } from "@/gi/comparison-matrix";
+import type { LinearComparisonReport } from "@/gi/comparison-session";
 import type { PerformanceMeasurement } from "@/gi/performance";
 import { DEFAULT_SETTINGS } from "@/gi/settings";
 
@@ -56,6 +57,11 @@ const comparisonReport = {
   maxAbsolute: 0.5,
   outliers: 2,
   pixels: 100,
+  relativeByReference: [
+    { from: 0, to: 0.001, channels: 10, relativeL2: 0.01, meanAbsolute: 0.04 },
+    { from: 1, channels: 20, relativeL2: 0.00234, meanAbsolute: 0.06 },
+  ],
+  referenceDigest: "1a2b3c4d",
   label: "path-traced",
   mode: "path-traced" as const,
   requestedDurationMs: 5_000,
@@ -79,7 +85,7 @@ const comparisonReport = {
     },
     settings: { ...DEFAULT_SETTINGS, mode: "path-traced" as const },
   },
-};
+} satisfies LinearComparisonReport;
 
 const inertComparisonProps = () => ({
   saveComparisonReference: vi.fn().mockResolvedValue(false),
@@ -290,7 +296,12 @@ describe("StatsOverlay performance capture", () => {
       referenceFrames: 1_024,
       targetFrames: 240,
       relativeL2: 0.01234,
+      referenceDigest: "1a2b3c4d",
     });
+    // The diagnostics are only worth adding if they reach the copied artefact;
+    // the unbounded band must arrive without a `to` rather than a null one.
+    expect(copied.relativeByReference).toHaveLength(2);
+    expect(copied.relativeByReference.at(-1)).not.toHaveProperty("to");
   });
 
   it("keeps automatic comparison failures visible after renderer state changes", async () => {

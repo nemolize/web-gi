@@ -50,8 +50,11 @@ export type ComparisonStats = {
 export type ReferenceBin = {
   /** Inclusive lower bound on the reference channel value. */
   readonly from: number;
-  /** Exclusive upper bound; `Infinity` on the brightest band. */
-  readonly to: number;
+  /**
+   * Exclusive upper bound, absent on the brightest band. Omitted rather than
+   * `Infinity`, which the report's `JSON.stringify` would write as `null`.
+   */
+  readonly to?: number;
   readonly channels: number;
   /** This band's contribution to `relativeL2`, in the same units. */
   readonly relativeL2: number;
@@ -159,9 +162,10 @@ export const compareLinear = (
   const channels = pixels * 3;
   const relativeByReference = Array.from({ length: bins }, (_, bin) => {
     const count = binChannels[bin] ?? 0;
+    const bound = REFERENCE_BIN_EDGES[bin];
     return {
       from: bin === 0 ? 0 : (REFERENCE_BIN_EDGES[bin - 1] ?? 0),
-      to: REFERENCE_BIN_EDGES[bin] ?? Number.POSITIVE_INFINITY,
+      ...(bound === undefined ? {} : { to: bound }),
       channels: count,
       // Divided by the whole frame, not by the band, so the bands sum to
       // `relativeL2` and each one reads as its share of the reported figure.

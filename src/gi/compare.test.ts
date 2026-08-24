@@ -116,6 +116,18 @@ describe("compareLinear", () => {
     expect(brightest?.relativeL2).toBeCloseTo(stats.relativeL2, 12);
   });
 
+  // The report is plain `JSON.stringify`, which writes `Infinity` as `null` —
+  // so the unbounded band carries no `to` rather than one that cannot survive.
+  it("omits the brightest band's upper bound so the report keeps its shape", () => {
+    const stats = compareLinear(flat(0.5), flat(0.25));
+    const brightest = stats.relativeByReference.at(-1);
+    expect(brightest?.to).toBeUndefined();
+    expect(
+      JSON.parse(JSON.stringify(stats.relativeByReference)).at(-1),
+    ).not.toHaveProperty("to");
+    expect(stats.relativeByReference[0]?.to).toBe(0.001);
+  });
+
   // Repeats of one case build their own oracle, so the digest is what tells
   // two runs apart when only the reference-magnitude metric moves.
   it("digests equal references alike and unequal ones differently", () => {
