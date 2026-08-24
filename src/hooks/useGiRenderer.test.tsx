@@ -598,6 +598,8 @@ describe("useGiRenderer", () => {
         meanAbsolute: 0.02,
         maxAbsolute: 0.5,
         outliers: 1,
+        relativeByReference: [],
+        referenceDigest: "00000000",
         pixels: 640 * 480,
         label,
         mode,

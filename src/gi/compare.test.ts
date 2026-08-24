@@ -68,6 +68,80 @@ describe("compareLinear", () => {
     expect(stats.luminanceRatio).toBe(0);
   });
 
+  // The bands are the whole point of the split: a reader has to be able to
+  // add them up and land on the figure the run reported.
+  it("splits the relative term into bands that sum to the reported total", () => {
+    const stats = compareLinear(
+      image([
+        [0.0005, 0.02, 0.5],
+        [2, 0.05, 0.005],
+      ]),
+      image([
+        [0, 0.03, 0.4],
+        [3, 0.05, 0.008],
+      ]),
+    );
+    const summed = stats.relativeByReference.reduce(
+      (total, bin) => total + bin.relativeL2,
+      0,
+    );
+    expect(summed).toBeCloseTo(stats.relativeL2, 12);
+    expect(
+      stats.relativeByReference.reduce((total, bin) => total + bin.channels, 0),
+    ).toBe(stats.pixels * 3);
+  });
+
+  // The diagnostic exists to answer one question: did an outlying figure come
+  // from the bins where the epsilon, not the reference, is the denominator?
+  it("attributes a near-black error to the darkest band", () => {
+    const reference = flat(0, 4);
+    const render = flat(0, 4);
+    render.data[0] = 0.1;
+    const stats = compareLinear(render, reference);
+    const darkest = stats.relativeByReference[0];
+    expect(darkest?.to).toBe(0.001);
+    expect(darkest?.relativeL2).toBeCloseTo(stats.relativeL2, 12);
+  });
+
+  // A lit pixel with the same absolute error must not land in the dark bands,
+  // or the diagnostic would blame the denominator for ordinary render error.
+  it("attributes a lit error to a bright band, not the dark ones", () => {
+    const reference = flat(1, 4);
+    const render = flat(1, 4);
+    render.data[0] = 1.1;
+    const stats = compareLinear(render, reference);
+    expect(stats.relativeByReference[0]?.relativeL2).toBe(0);
+    const brightest = stats.relativeByReference.at(-1);
+    expect(brightest?.from).toBe(1);
+    expect(brightest?.relativeL2).toBeCloseTo(stats.relativeL2, 12);
+  });
+
+  // The report is plain `JSON.stringify`, which writes `Infinity` as `null` —
+  // so the unbounded band carries no `to` rather than one that cannot survive.
+  it("omits the brightest band's upper bound so the report keeps its shape", () => {
+    const stats = compareLinear(flat(0.5), flat(0.25));
+    const brightest = stats.relativeByReference.at(-1);
+    expect(brightest?.to).toBeUndefined();
+    expect(
+      JSON.parse(JSON.stringify(stats.relativeByReference)).at(-1),
+    ).not.toHaveProperty("to");
+    expect(stats.relativeByReference[0]?.to).toBe(0.001);
+  });
+
+  // Repeats of one case build their own oracle, so the digest is what tells
+  // two runs apart when only the reference-magnitude metric moves.
+  it("digests equal references alike and unequal ones differently", () => {
+    const render = flat(0.5);
+    expect(compareLinear(render, flat(0.25)).referenceDigest).toBe(
+      compareLinear(render, flat(0.25)).referenceDigest,
+    );
+    const nudged = flat(0.25);
+    nudged.data[5] = 0.2500001;
+    expect(compareLinear(render, nudged).referenceDigest).not.toBe(
+      compareLinear(render, flat(0.25)).referenceDigest,
+    );
+  });
+
   it("rejects a size mismatch rather than comparing the overlap", () => {
     expect(() => compareLinear(flat(1, 4), flat(1, 5))).toThrow("dimensions");
   });

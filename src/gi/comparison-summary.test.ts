@@ -42,6 +42,8 @@ const report = (
   maxAbsolute: 1,
   outliers: 1,
   pixels: 100,
+  relativeByReference: [],
+  referenceDigest: "00000000",
   label: mode,
   mode,
   requestedDurationMs: 5_000,
