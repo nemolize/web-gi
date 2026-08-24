@@ -1,6 +1,10 @@
 // Brute-force progressive path tracer used as the ground-truth comparison for
 // the ReSTIR pipeline. Same light transport, no resampling and no denoiser:
 // one path per pixel per frame, averaged over time.
+//
+// Seeded from `accumFrames`, not the free-running `frame`: every comparison
+// divides by this image, so two builds of one case have to replay the same
+// samples. Seeding from `frame` averaged a different sequence each time (#113).
 
 @group(1) @binding(0) var texPrevAccum: texture_2d<f32>;
 @group(1) @binding(1) var outAccum: texture_storage_2d<rgba32float, write>;
@@ -11,7 +15,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   if (pixel.x >= uni.resolution.x || pixel.y >= uni.resolution.y) {
     return;
   }
-  rngInit(pixel, uni.frame, 7u);
+  rngInit(pixel, uni.accumFrames, 7u);
 
   let jitter = rand2() - 0.5;
   let uv = (vec2f(pixel) + 0.5 + jitter) / vec2f(uni.resolution);
