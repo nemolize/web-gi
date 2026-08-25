@@ -4,7 +4,7 @@
 //
 // Seeded from `accumFrames`, not the free-running `frame`: every comparison
 // divides by this image, so two builds of one case have to replay the same
-// samples. Seeding from `frame` averaged a different sequence each time (#113).
+// samples.
 
 @group(1) @binding(0) var texPrevAccum: texture_2d<f32>;
 @group(1) @binding(1) var outAccum: texture_storage_2d<rgba32float, write>;
