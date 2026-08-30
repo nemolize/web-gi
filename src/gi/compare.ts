@@ -39,9 +39,9 @@ export type ComparisonStats = {
    */
   readonly relativeByReference: readonly ReferenceBin[];
   /**
-   * Digest of the reference's channels. Repeats of one case build their own
-   * oracle, so this is what tells two runs apart when only the
-   * reference-magnitude metric moves between them.
+   * FNV-1a over the reference's RGB, ignoring alpha as every other term here
+   * does. Repeats of one case build their own oracle, so this tells two runs
+   * apart when only the reference-magnitude metric moves between them.
    */
   readonly referenceDigest: string;
 };
@@ -68,11 +68,8 @@ const LUMINANCE = [0.2126, 0.7152, 0.0722] as const;
 const RELATIVE_EPSILON = 1e-3;
 
 /**
- * Bin edges straddling `sqrt(RELATIVE_EPSILON)` — the reference value where
- * `b^2` overtakes the epsilon. Below it the denominator is essentially the
- * epsilon, so the term reports absolute error scaled by 1/eps rather than
- * relative error, and a run's excess landing there means the denominator
- * rather than the render.
+ * `0.0316` rounds `sqrt(RELATIVE_EPSILON)`, where `b^2` overtakes the epsilon,
+ * because a report reads better on the round value than on the exact one.
  */
 const REFERENCE_BIN_EDGES = [0.001, 0.01, 0.0316, 0.1, 1] as const;
 
@@ -84,15 +81,13 @@ const binIndexFor = (value: number): number => {
   return REFERENCE_BIN_EDGES.length;
 };
 
-/**
- * FNV-1a over the reference's raw bits. Position-sensitive by construction, so
- * two oracles differing in a single channel digest differently; it identifies
- * a reference, and carries no claim about which of two is the better one.
- */
-const digestOf = (data: Float32Array): string => {
-  const bits = new Uint32Array(data.buffer, data.byteOffset, data.length);
+const digestOf = (data: Float32Array, pixels: number): string => {
+  const bits = new Uint32Array(data.buffer, data.byteOffset, pixels * 4);
   let hash = 0x811c9dc5;
   for (let index = 0; index < bits.length; index++) {
+    // Alpha carries `capture.wgsl`'s glass diagnostic mask, not radiance, so
+    // hashing it would separate two oracles over a channel nothing compares.
+    if (index % 4 === 3) continue;
     hash ^= bits[index] ?? 0;
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
@@ -122,6 +117,11 @@ export const compareLinear = (
   const pixels = render.width * render.height;
   if (pixels === 0) {
     throw new Error("Cannot compare an empty image");
+  }
+  // Every term reads `pixels * 4`, so a longer buffer would leave the tail
+  // hashed by the digest but compared by nothing.
+  if (reference.data.length !== pixels * 4) {
+    throw new Error("Images must hold one RGBA quad per pixel");
   }
 
   let renderLuminance = 0;
@@ -182,6 +182,6 @@ export const compareLinear = (
     outliers,
     pixels,
     relativeByReference,
-    referenceDigest: digestOf(reference.data),
+    referenceDigest: digestOf(reference.data, pixels),
   };
 };

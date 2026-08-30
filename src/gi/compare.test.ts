@@ -142,6 +142,26 @@ describe("compareLinear", () => {
     );
   });
 
+  // Alpha carries `capture.wgsl`'s glass diagnostic mask, so hashing it would
+  // manufacture a cross-commit mismatch over bit-identical compared RGB.
+  it("digests alike when only alpha differs", () => {
+    const render = flat(0.5);
+    const masked = flat(0.25);
+    masked.data[3] = 0;
+    masked.data[7] = 0.5;
+    expect(compareLinear(render, masked).referenceDigest).toBe(
+      compareLinear(render, flat(0.25)).referenceDigest,
+    );
+  });
+
+  // Every term reads `pixels * 4`, so a longer buffer would reach the digest
+  // and nothing else — the spurious-mismatch shape the alpha skip closes.
+  it("rejects a buffer longer than one RGBA quad per pixel", () => {
+    const padded = { width: 2, height: 1, data: new Float32Array(2 * 4 + 4) };
+    const render = { width: 2, height: 1, data: new Float32Array(2 * 4 + 4) };
+    expect(() => compareLinear(render, padded)).toThrow("RGBA quad");
+  });
+
   it("rejects a size mismatch rather than comparing the overlap", () => {
     expect(() => compareLinear(flat(1, 4), flat(1, 5))).toThrow("dimensions");
   });

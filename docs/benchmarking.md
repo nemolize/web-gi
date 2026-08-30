@@ -139,6 +139,20 @@ the finding. A
 [recorded case](spatial-reuse.md#spatial-reuse-is-bounded-in-world-units) had
 Relative L2 move 800× where mean absolute error moved 6×.
 
+When the two do disagree, `relativeByReference` in the report says which
+reference brightnesses the term came from: it splits relative L2 into bands that
+sum back to the reported figure, each carrying the `from`/`to` bounds it covers.
+The band starting at 0.0316 is the one to find first — that is where the
+denominator stops behaving like a ratio, so error concentrated below it came
+from the epsilon rather than from the render. Read each band's `channels` across
+two runs before its error term: a reference that changed migrates channels
+between bands, where a render-side change leaves the counts alone and moves only
+the error. `referenceDigest` asks the same question directly for repeats of one
+case, which build their own oracle: a mismatch means the references differ, and
+a match is strong evidence they agree rather than a proof, since the digest is
+32 bits. It hashes RGB only, so it is stable across sessions and commits unless
+the reference's radiance itself changed.
+
 The completion line shows the relative-L2 split by scene along with how many of
 those wins were unanimous, without opening the JSON.
 
