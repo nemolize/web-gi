@@ -25,6 +25,7 @@ Equal-time linear-radiance comparisons use similarly short URLs:
 - `?preset=matrix`
 - `?preset=matrix&scale=0.4`
 - `?preset=matrix&candidates=64`
+- `?preset=matrix&repeats=8`
 - `?preset=probe`
 - `?preset=heavy&compare=restir`
 - `?preset=heavy&compare=path-traced`
@@ -40,6 +41,13 @@ Reports include the camera basis, settings, a-trous variant, frame counts, actua
 durations, and linear-radiance error metrics, and remain available through
 `Copy result`. Keep the page visible and unchanged while the several-minute
 matrix is running.
+
+`repeats=4`, `8`, or `12` changes the number of full sweeps for `preset=matrix`.
+The reference and per-renderer time budgets stay fixed; eight repeats take roughly
+twice as long as four, and twelve roughly three times as long. All accepted counts
+are even to preserve balanced renderer order. Unsupported values fall back to four
+and are omitted from the report URL. Other presets ignore `repeats`. Use additional
+repeats to inspect consistency; unanimity alone still does not establish significance.
 
 `preset=probe` runs the same six cases and the same pairing on roughly a tenth of
 the wall clock, by cutting the repeat count to **two** and shortening both the

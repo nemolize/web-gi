@@ -97,6 +97,8 @@ export const MATRIX_SPATIAL_SAMPLES = ["0", "1", "2", "4", "8"] as const;
 
 export const MATRIX_DI_CANDIDATES = ["8", "16", "32", "64", "128"] as const;
 
+export const MATRIX_REPEAT_COUNTS = ["4", "8", "12"] as const;
+
 /** Spans the kernel's own head-on reach at either end; `0.08` is the default. */
 export const MATRIX_ATROUS_TANGENT_SIGMAS = [
   "0.02",
@@ -145,6 +147,10 @@ export const sanitizedRenderQueryParams = (search: string): URLSearchParams => {
   const matrix = enumValue(source, "preset", MATRIX_PRESETS);
   if (matrix !== undefined) {
     sanitized.set("preset", matrix);
+    if (matrix === "matrix") {
+      const repeats = enumValue(source, "repeats", MATRIX_REPEAT_COUNTS);
+      if (repeats !== undefined) sanitized.set("repeats", repeats);
+    }
     for (const { param, values } of MATRIX_OVERRIDES) {
       const value = enumValue(source, param, values);
       if (value !== undefined) sanitized.set(param, value);

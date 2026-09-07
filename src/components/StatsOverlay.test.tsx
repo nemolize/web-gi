@@ -114,6 +114,7 @@ describe("StatsOverlay performance capture", () => {
 
   afterEach(() => {
     cleanup();
+    window.history.replaceState({}, "", "/");
     vi.restoreAllMocks();
   });
 
@@ -434,9 +435,13 @@ describe("StatsOverlay performance capture", () => {
   // A swapped budget would still produce a well-formed report, so only the call
   // arguments distinguish a probe run from a verdict-grade one.
   it.each([
-    ["matrix" as const, COMPARISON_MATRIX_BUDGET],
-    ["probe" as const, COMPARISON_MATRIX_PROBE_BUDGET],
-  ])("runs %s on its own budget", async (preset, budget) => {
+    ["matrix" as const, COMPARISON_MATRIX_BUDGET, ""],
+    ["matrix" as const, { ...COMPARISON_MATRIX_BUDGET, repeats: 8 }, "8"],
+    ["matrix" as const, { ...COMPARISON_MATRIX_BUDGET, repeats: 12 }, "12"],
+    ["matrix" as const, COMPARISON_MATRIX_BUDGET, "3"],
+    ["probe" as const, COMPARISON_MATRIX_PROBE_BUDGET, "8"],
+  ])("runs %s on its own budget", async (preset, budget, repeats) => {
+    window.history.replaceState({}, "", `?preset=${preset}&repeats=${repeats}`);
     const runAutomaticComparisonMatrix = vi.fn().mockResolvedValue({
       kind: "comparison-matrix" as const,
       requestedReferenceFrames: budget.referenceFrames,
@@ -475,6 +480,13 @@ describe("StatsOverlay performance capture", () => {
     expect(
       completion.textContent?.includes("probe budget, not a verdict"),
     ).toBe(preset === "probe");
+    fireEvent.click(screen.getByRole("button", { name: "Copy result" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+    const copied = JSON.parse(writeText.mock.calls[0]?.[0] ?? "");
+    expect(copied.repeats).toBe(budget.repeats);
+    expect(new URL(copied.url).searchParams.get("repeats")).toBe(
+      preset === "matrix" && ["8", "12"].includes(repeats) ? repeats : null,
+    );
   });
 
   it("allows retrying after capture failure", async () => {
