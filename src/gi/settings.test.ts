@@ -24,6 +24,39 @@ import {
 } from "@/gi/settings";
 
 describe("render query", () => {
+  it.each(["4", "8", "12"])(
+    "records matrix repeats=%s without changing render settings",
+    (repeats) => {
+      const search = `?preset=matrix&repeats=${repeats}`;
+      expect(sanitizedRenderQueryParams(search).get("repeats")).toBe(repeats);
+      expect(settingsFromSearch(search)).toEqual(
+        settingsFromSearch("?preset=matrix"),
+      );
+    },
+  );
+
+  it.each(["", "0", "2", "3", "5", "16", "8.0", "08", "NaN", "Infinity"])(
+    "ignores unsupported matrix repeats=%s",
+    (repeats) => {
+      expect(
+        sanitizedRenderQueryParams(`?preset=matrix&repeats=${repeats}`).has(
+          "repeats",
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it.each(["", "heavy", "probe"])(
+    "ignores repeats outside the matrix preset: %s",
+    (preset) => {
+      expect(
+        sanitizedRenderQueryParams(`?preset=${preset}&repeats=8`).has(
+          "repeats",
+        ),
+      ).toBe(false);
+    },
+  );
+
   it("loads the heavy benchmark preset with a selected renderer", () => {
     expect(
       settingsFromSearch("?preset=heavy&mode=path-traced&measure=auto"),

@@ -35,6 +35,7 @@ import type {
   ComparisonMode,
   RenderSettings,
 } from "@/gi/settings";
+import { sanitizedRenderQueryParams } from "@/gi/settings";
 
 export type StatsOverlayProps = {
   readonly stats: RendererStats;
@@ -210,10 +211,20 @@ export const StatsOverlay = ({
       setReport(null);
       setCaptureError(null);
       setCaptureStatus("idle");
-      const budget =
+      const presetBudget =
         autoCompareMode === "probe"
           ? COMPARISON_MATRIX_PROBE_BUDGET
           : COMPARISON_MATRIX_BUDGET;
+      const repeats = sanitizedRenderQueryParams(window.location.search).get(
+        "repeats",
+      );
+      const budget = {
+        ...presetBudget,
+        repeats:
+          autoCompareMode === "matrix" && repeats !== null
+            ? Number(repeats)
+            : presetBudget.repeats,
+      };
       const isMatrix =
         autoCompareMode === "matrix" || autoCompareMode === "probe";
       setAutoComparisonStatus(
