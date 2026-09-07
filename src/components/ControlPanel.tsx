@@ -250,7 +250,7 @@ const SettingsSections = memo(
             label="RIS candidates"
             value={settings.diCandidates}
             min={1}
-            max={32}
+            max={128}
             step={1}
             format={(value) => `M = ${String(value)}`}
             onChange={(diCandidates) => {

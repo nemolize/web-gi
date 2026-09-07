@@ -24,6 +24,7 @@ Equal-time linear-radiance comparisons use similarly short URLs:
 
 - `?preset=matrix`
 - `?preset=matrix&scale=0.4`
+- `?preset=matrix&candidates=64`
 - `?preset=probe`
 - `?preset=heavy&compare=restir`
 - `?preset=heavy&compare=path-traced`
@@ -48,18 +49,26 @@ chance, so the repeat-to-repeat spread a low-resolution ReSTIR run turns out to
 need cannot be separated from noise, and its oracle is below the 512 frames that
 already flipped a Relative L2 winner once.
 
-Four parameters override one setting each while leaving the rest of the preset
+Five parameters override one setting each while leaving the rest of the preset
 alone. Each accepts a fixed set of values — the accepted lists live in
 `src/gi/settings.ts` — and anything else is ignored, so a run always proceeds at
 the preset's own value rather than failing. What ran is recorded in the report's
 `url`, which keeps two runs at different settings distinguishable afterwards.
 
-| Override  | Isolates                                        |
-| --------- | ----------------------------------------------- |
-| `scale`   | Resolution, raising both renderers' frame rates |
-| `radius`  | The spatial reuse radius, in world units        |
-| `samples` | How many neighbours each spatial pass visits    |
-| `tangent` | How far along a surface an à-trous tap counts   |
+| Override     | Isolates                                        |
+| ------------ | ----------------------------------------------- |
+| `scale`      | Resolution, raising both renderers' frame rates |
+| `radius`     | The spatial reuse radius, in world units        |
+| `samples`    | How many neighbours each spatial pass visits    |
+| `tangent`    | How far along a surface an à-trous tap counts   |
+| `candidates` | Fresh DI light candidates per pixel per frame   |
+
+`candidates` accepts `8`, `16`, `32`, `64`, or `128` on both `matrix` and
+`probe`; the preset default is `32`. It changes ReSTIR's direct-light sampling
+and its temporal reservoir cap, leaving Denoised PT and the reference oracle
+unchanged. Hold `scale` fixed to compare candidate budgets. This changes both
+estimator quality and GPU work, so it does not isolate frame rate alone or settle
+the resolution-dependent verdict in [#80](https://github.com/nemolize/web-gi/issues/80).
 
 Three of them exist because a specific question needed separating:
 
