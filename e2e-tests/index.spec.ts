@@ -110,6 +110,15 @@ test("loads the paired comparison matrix from one preset", async ({ page }) => {
   await expect(page.getByLabel("Bounces")).toHaveValue("6");
 });
 
+test("preserves the extended DI candidate budget in comparison controls", async ({
+  page,
+}) => {
+  await page.goto("/?preset=probe&candidates=128");
+  await expect(page.getByLabel("RIS candidates")).toHaveValue("128");
+  await expect(page.getByLabel("RIS candidates")).toHaveAttribute("max", "128");
+  await expect(page.getByLabel("Bounces")).toHaveValue("6");
+});
+
 test("renders finite glass-shape output when WebGPU is available", async ({
   page,
 }) => {

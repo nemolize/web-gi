@@ -95,6 +95,8 @@ export const MATRIX_SPATIAL_RADII = [
 /** `0` degenerates both spatial passes to 1/Z pass-through; #90's discriminator. */
 export const MATRIX_SPATIAL_SAMPLES = ["0", "1", "2", "4", "8"] as const;
 
+export const MATRIX_DI_CANDIDATES = ["8", "16", "32", "64", "128"] as const;
+
 /** Spans the kernel's own head-on reach at either end; `0.08` is the default. */
 export const MATRIX_ATROUS_TANGENT_SIGMAS = [
   "0.02",
@@ -119,6 +121,7 @@ const MATRIX_OVERRIDES = [
     values: MATRIX_ATROUS_TANGENT_SIGMAS,
   },
   { param: "samples", key: "spatialSamples", values: MATRIX_SPATIAL_SAMPLES },
+  { param: "candidates", key: "diCandidates", values: MATRIX_DI_CANDIDATES },
 ] as const satisfies readonly {
   readonly param: string;
   readonly key: NumericSettingKey;

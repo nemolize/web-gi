@@ -214,14 +214,57 @@ describe("render query", () => {
   });
 
   it("combines every matrix override", () => {
-    const search = "?preset=matrix&scale=0.25&radius=0.02&samples=0";
+    const search =
+      "?preset=matrix&scale=0.25&radius=0.02&tangent=0.16&samples=0&candidates=64";
     const settings = settingsFromSearch(search);
     expect(settings.resolutionScale).toBe(0.25);
     expect(settings.spatialRadius).toBe(0.02);
     expect(settings.spatialSamples).toBe(0);
-    expect(sanitizedRenderQueryParams(search).toString()).toBe(
-      "preset=matrix&scale=0.25&radius=0.02&samples=0",
-    );
+    expect(settings.atrousTangentSigma).toBe(0.16);
+    expect(settings.diCandidates).toBe(64);
+    expect(sanitizedRenderQueryParams(search).toString()).toBe(search.slice(1));
+  });
+
+  it.each(["matrix", "probe"])(
+    "records and applies DI candidates for %s",
+    (preset) => {
+      for (const candidates of [8, 16, 32, 64, 128]) {
+        const search = `?preset=${preset}&candidates=${candidates}`;
+        expect(settingsFromSearch(search)).toEqual({
+          ...settingsFromSearch(`?preset=${preset}`),
+          diCandidates: candidates,
+        });
+        expect(sanitizedRenderQueryParams(search).toString()).toBe(
+          search.slice(1),
+        );
+      }
+      for (const value of [
+        "",
+        "0",
+        "-1",
+        "256",
+        "33",
+        "64.0",
+        "64x",
+        "NaN",
+        "Infinity",
+      ]) {
+        const search = `?preset=${preset}&candidates=${value}`;
+        expect(settingsFromSearch(search).diCandidates).toBe(32);
+        expect(sanitizedRenderQueryParams(search).toString()).toBe(
+          `preset=${preset}`,
+        );
+      }
+    },
+  );
+
+  it("limits DI candidate overrides to comparison presets", () => {
+    for (const search of ["?candidates=128", "?preset=heavy&candidates=128"]) {
+      expect(settingsFromSearch(search)).toEqual(
+        settingsFromSearch(search.replace(/&?candidates=128/, "")),
+      );
+      expect(sanitizedRenderQueryParams(search).has("candidates")).toBe(false);
+    }
   });
 
   it("overrides the neighbour count the matrix preset would otherwise set (#90's discriminator)", () => {
