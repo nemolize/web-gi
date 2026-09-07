@@ -77,6 +77,7 @@ export type CaseVerdict = {
   readonly scene: SceneVariant;
   readonly cameraLabel: string;
   readonly repeats: number;
+  readonly frameRatio: MetricSamples | null;
   readonly metrics: Readonly<Record<ComparisonMetric, MetricVerdict>>;
 };
 
@@ -133,6 +134,24 @@ const summarizeSamples = (values: readonly number[]): MetricSamples => {
 const relativeDifference = (restir: number, pathTraced: number): number => {
   const total = pathTraced + restir;
   return total === 0 ? 0 : (2 * (pathTraced - restir)) / total;
+};
+
+const summarizeFrameRatios = (
+  runs: readonly ComparisonMatrixRunReport[],
+): MetricSamples | null => {
+  const ratios = runs.map(({ comparisons }) => {
+    const restir = comparisons.restir.targetFrames;
+    const pathTraced = comparisons["path-traced"].targetFrames;
+    return Number.isSafeInteger(restir) &&
+      restir > 0 &&
+      Number.isSafeInteger(pathTraced) &&
+      pathTraced > 0
+      ? pathTraced / restir
+      : Number.NaN;
+  });
+  return ratios.length > 0 && ratios.every(Number.isFinite)
+    ? summarizeSamples(ratios)
+    : null;
 };
 
 const verdictFor = (
@@ -233,6 +252,7 @@ export const summarizeComparisonMatrix = (
       scene: first.scene,
       cameraLabel: first.cameraLabel,
       repeats: runs.length,
+      frameRatio: summarizeFrameRatios(runs),
       metrics: byMetric((metric) => verdictFor(runs, metric)),
     }),
   );
@@ -333,6 +353,18 @@ export const formatComparisonMatrixSummary = (
     `| case | metric | ${MODE_LABELS.restir} | ${MODE_LABELS["path-traced"]} | paired diff | repeats lower | winner |`,
     "| --- | --- | --- | --- | --- | --- | --- |",
     ...rows,
+    "",
+    "## Frame counts",
+    "",
+    "Denoised PT / ReSTIR target frames, paired within each repeat. These are frame-count ratios, not FPS ratios; actual run durations can differ. Values above 1 mean Denoised PT rendered more frames. They do not affect the quality verdicts.",
+    "",
+    "| case | median ratio | min | max | repeats |",
+    "| --- | --- | --- | --- | --- |",
+    ...summary.cases.map(({ label, frameRatio, repeats }) =>
+      frameRatio === null
+        ? `| ${label} | n/a | n/a | n/a | ${String(repeats)} |`
+        : `| ${label} | ${frameRatio.median.toFixed(3)} | ${frameRatio.min.toFixed(3)} | ${frameRatio.max.toFixed(3)} | ${String(frameRatio.count)} |`,
+    ),
     "",
     "## Per-scene",
     "",
