@@ -559,3 +559,111 @@ describe("formatComparisonMatrixSummary", () => {
     );
   });
 });
+
+describe("frame-count ratios", () => {
+  it("summarizes paired ratios instead of dividing independent medians", () => {
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase(
+          "classic",
+          "front",
+          { targetFrames: 10 },
+          { targetFrames: 20 },
+          0,
+        ),
+        matrixCase(
+          "manyLights",
+          "front",
+          { targetFrames: 10 },
+          { targetFrames: 5 },
+          0,
+        ),
+        matrixCase(
+          "classic",
+          "front",
+          { targetFrames: 100 },
+          { targetFrames: 30 },
+          1,
+        ),
+        matrixCase(
+          "classic",
+          "front",
+          { targetFrames: 101 },
+          { targetFrames: 202 },
+          2,
+        ),
+      ]),
+    );
+    expect(summary.cases[0]?.frameRatio).toEqual({
+      median: 2,
+      min: 0.3,
+      max: 2,
+      count: 3,
+    });
+    expect(summary.cases[1]?.frameRatio).toEqual({
+      median: 0.5,
+      min: 0.5,
+      max: 0.5,
+      count: 1,
+    });
+    const text = formatComparisonMatrixSummary(summary);
+    expect(text).toContain("| classic/front | 2.000 | 0.300 | 2.000 | 3 |");
+    expect(text).toContain("| manyLights/front | 0.500 | 0.500 | 0.500 | 1 |");
+    expect(text).toContain("not FPS ratios");
+    expect(summary.overall.tallies.relativeL2.ties).toBe(2);
+  });
+
+  it("uses the midpoint for an even repeat count without normalizing duration", () => {
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase(
+          "classic",
+          "front",
+          { targetFrames: 10 },
+          { targetFrames: 20, actualDurationMs: 6000 },
+          0,
+        ),
+        matrixCase(
+          "classic",
+          "front",
+          { targetFrames: 10 },
+          { targetFrames: 40 },
+          1,
+        ),
+      ]),
+    );
+    expect(summary.cases[0]?.frameRatio).toEqual({
+      median: 3,
+      min: 2,
+      max: 4,
+      count: 2,
+    });
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "reports unavailable when either frame count is invalid: %s",
+    (targetFrames) => {
+      for (const mode of ["restir", "path-traced"] as const) {
+        const summary = summarizeComparisonMatrix(
+          matrix([
+            matrixCase("classic", "front", {}, {}, 0),
+            matrixCase(
+              "classic",
+              "front",
+              mode === "restir" ? { targetFrames } : {},
+              mode === "path-traced" ? { targetFrames } : {},
+              1,
+            ),
+          ]),
+        );
+        expect(summary.cases[0]?.frameRatio).toBeNull();
+        expect(formatComparisonMatrixSummary(summary)).toContain(
+          "| classic/front | n/a | n/a | n/a | 2 |",
+        );
+        expect(
+          JSON.parse(JSON.stringify(summary)).cases[0].frameRatio,
+        ).toBeNull();
+      }
+    },
+  );
+});
