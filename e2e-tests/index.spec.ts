@@ -119,6 +119,15 @@ test("preserves the extended DI candidate budget in comparison controls", async 
   await expect(page.getByLabel("Bounces")).toHaveValue("6");
 });
 
+test("preserves the extended bounce budget in comparison controls", async ({
+  page,
+}) => {
+  await page.goto("/?preset=probe&bounces=12");
+  await expect(page.getByLabel("Bounces")).toHaveValue("12");
+  await expect(page.getByLabel("Bounces")).toHaveAttribute("max", "12");
+  await expect(page.getByLabel("RIS candidates")).toHaveValue("32");
+});
+
 test("renders finite glass-shape output when WebGPU is available", async ({
   page,
 }) => {

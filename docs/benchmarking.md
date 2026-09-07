@@ -25,6 +25,7 @@ Equal-time linear-radiance comparisons use similarly short URLs:
 - `?preset=matrix`
 - `?preset=matrix&scale=0.4`
 - `?preset=matrix&candidates=64`
+- `?preset=matrix&bounces=12`
 - `?preset=matrix&repeats=8`
 - `?preset=probe`
 - `?preset=heavy&compare=restir`
@@ -57,19 +58,20 @@ chance, so the repeat-to-repeat spread a low-resolution ReSTIR run turns out to
 need cannot be separated from noise, and its oracle is below the 512 frames that
 already flipped a Relative L2 winner once.
 
-Five parameters override one setting each while leaving the rest of the preset
+Six parameters override one setting each while leaving the rest of the preset
 alone. Each accepts a fixed set of values — the accepted lists live in
 `src/gi/settings.ts` — and anything else is ignored, so a run always proceeds at
 the preset's own value rather than failing. What ran is recorded in the report's
 `url`, which keeps two runs at different settings distinguishable afterwards.
 
-| Override     | Isolates                                        |
-| ------------ | ----------------------------------------------- |
-| `scale`      | Resolution, raising both renderers' frame rates |
-| `radius`     | The spatial reuse radius, in world units        |
-| `samples`    | How many neighbours each spatial pass visits    |
-| `tangent`    | How far along a surface an à-trous tap counts   |
-| `candidates` | Fresh DI light candidates per pixel per frame   |
+| Override     | Isolates                                            |
+| ------------ | --------------------------------------------------- |
+| `scale`      | Resolution, raising both renderers' frame rates     |
+| `radius`     | The spatial reuse radius, in world units            |
+| `samples`    | How many neighbours each spatial pass visits        |
+| `tangent`    | How far along a surface an à-trous tap counts       |
+| `candidates` | Fresh DI light candidates per pixel per frame       |
+| `bounces`    | Path depth for ReSTIR GI, Denoised PT and reference |
 
 `candidates` accepts `8`, `16`, `32`, `64`, or `128` on both `matrix` and
 `probe`; the preset default is `32`. It changes ReSTIR's direct-light sampling
@@ -77,6 +79,15 @@ and its temporal reservoir cap, leaving Denoised PT and the reference oracle
 unchanged. Hold `scale` fixed to compare candidate budgets. This changes both
 estimator quality and GPU work, so it does not isolate frame rate alone or settle
 the resolution-dependent verdict in [#80](https://github.com/nemolize/web-gi/issues/80).
+
+`bounces` accepts `1`, `2`, `3`, `4`, `6`, `8`, or `12` on both `matrix` and
+`probe`; the preset default is `6`. It sets `maxBounces` for ReSTIR's GI sample
+evaluation. Denoised PT and Reference PT trace with one additional bounce to
+match ReSTIR's initial reconnection vertex. Each run builds its reference with
+the selected budget. Hold `scale` fixed when sweeping path depth, and retain
+the report URL and settings: this changes the light transport being compared
+as well as GPU work, so it does not isolate frame rate. Russian roulette can
+terminate paths early, so doubling the limit does not imply twice the work.
 
 Three of them exist because a specific question needed separating:
 

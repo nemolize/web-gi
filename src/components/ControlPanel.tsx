@@ -288,7 +288,7 @@ const SettingsSections = memo(
             label="Bounces"
             value={settings.maxBounces}
             min={1}
-            max={6}
+            max={12}
             step={1}
             format={(value) => String(value)}
             onChange={(maxBounces) => {

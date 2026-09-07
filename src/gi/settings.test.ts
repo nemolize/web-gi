@@ -248,13 +248,14 @@ describe("render query", () => {
 
   it("combines every matrix override", () => {
     const search =
-      "?preset=matrix&scale=0.25&radius=0.02&tangent=0.16&samples=0&candidates=64";
+      "?preset=matrix&scale=0.25&radius=0.02&tangent=0.16&samples=0&candidates=64&bounces=12";
     const settings = settingsFromSearch(search);
     expect(settings.resolutionScale).toBe(0.25);
     expect(settings.spatialRadius).toBe(0.02);
     expect(settings.spatialSamples).toBe(0);
     expect(settings.atrousTangentSigma).toBe(0.16);
     expect(settings.diCandidates).toBe(64);
+    expect(settings.maxBounces).toBe(12);
     expect(sanitizedRenderQueryParams(search).toString()).toBe(search.slice(1));
   });
 
@@ -299,6 +300,54 @@ describe("render query", () => {
       expect(sanitizedRenderQueryParams(search).has("candidates")).toBe(false);
     }
   });
+
+  it.each(["matrix", "probe"])(
+    "records and applies bounce budgets for %s",
+    (preset) => {
+      for (const bounces of [1, 2, 3, 4, 6, 8, 12]) {
+        const search = `?preset=${preset}&bounces=${bounces}`;
+        expect(settingsFromSearch(search)).toEqual({
+          ...settingsFromSearch(`?preset=${preset}`),
+          maxBounces: bounces,
+        });
+        expect(sanitizedRenderQueryParams(search).toString()).toBe(
+          search.slice(1),
+        );
+      }
+      for (const value of [
+        "",
+        "0",
+        "-1",
+        "5",
+        "13",
+        "8.0",
+        "8x",
+        "NaN",
+        "Infinity",
+      ]) {
+        const search = `?preset=${preset}&bounces=${value}`;
+        expect(settingsFromSearch(search)).toEqual(
+          settingsFromSearch(`?preset=${preset}`),
+        );
+        expect(sanitizedRenderQueryParams(search).toString()).toBe(
+          `preset=${preset}`,
+        );
+      }
+    },
+  );
+
+  it.each(["", "heavy"])(
+    "ignores bounce overrides outside comparison presets: %s",
+    (preset) => {
+      const search = `?preset=${preset}`;
+      expect(settingsFromSearch(`${search}&bounces=12`)).toEqual(
+        settingsFromSearch(search),
+      );
+      expect(
+        sanitizedRenderQueryParams(`${search}&bounces=12`).has("bounces"),
+      ).toBe(false);
+    },
+  );
 
   it("overrides the neighbour count the matrix preset would otherwise set (#90's discriminator)", () => {
     const search = "?preset=matrix&samples=0";
