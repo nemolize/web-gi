@@ -97,6 +97,16 @@ export const MATRIX_SPATIAL_SAMPLES = ["0", "1", "2", "4", "8"] as const;
 
 export const MATRIX_DI_CANDIDATES = ["8", "16", "32", "64", "128"] as const;
 
+export const MATRIX_BOUNCE_COUNTS = [
+  "1",
+  "2",
+  "3",
+  "4",
+  "6",
+  "8",
+  "12",
+] as const;
+
 export const MATRIX_REPEAT_COUNTS = ["4", "8", "12"] as const;
 
 /** Spans the kernel's own head-on reach at either end; `0.08` is the default. */
@@ -124,6 +134,7 @@ const MATRIX_OVERRIDES = [
   },
   { param: "samples", key: "spatialSamples", values: MATRIX_SPATIAL_SAMPLES },
   { param: "candidates", key: "diCandidates", values: MATRIX_DI_CANDIDATES },
+  { param: "bounces", key: "maxBounces", values: MATRIX_BOUNCE_COUNTS },
 ] as const satisfies readonly {
   readonly param: string;
   readonly key: NumericSettingKey;
