@@ -28,6 +28,7 @@ Equal-time linear-radiance comparisons use similarly short URLs:
 - `?preset=matrix&bounces=12`
 - `?preset=matrix&repeats=8`
 - `?preset=matrix&reference=2048`
+- `?preset=matrix&duration=10`
 - `?preset=probe`
 - `?preset=heavy&compare=restir`
 - `?preset=heavy&compare=path-traced`
@@ -45,7 +46,7 @@ durations, and linear-radiance error metrics, and remain available through
 matrix is running.
 
 `repeats=4`, `8`, or `12` changes the number of full sweeps for `preset=matrix`.
-The reference and per-renderer time budgets stay fixed; eight repeats take roughly
+With other budget settings fixed, eight repeats take roughly
 twice as long as four, and twelve roughly three times as long. All accepted counts
 are even to preserve balanced renderer order. Unsupported values fall back to four
 and are omitted from the report URL. Other presets ignore `repeats`. Use additional
@@ -53,7 +54,7 @@ repeats to inspect consistency; unanimity alone still does not establish signifi
 
 `reference=1024`, `2048`, or `4096` changes the reference frame budget for
 `preset=matrix`. Each paired comparison still shares one oracle, and the
-five-second renderer windows and repeat count stay fixed unless `repeats` is also
+renderer windows and repeat count stay fixed unless `duration` or `repeats` is also
 specified. Only the reference work scales with this setting; doubling it does
 not double the whole session. Unsupported values fall back to 1,024 and are
 omitted from the report URL. Other presets ignore `reference`.
@@ -62,6 +63,18 @@ Use this to check whether oracle convergence changes a verdict while keeping
 the render settings fixed. The report records `requestedReferenceFrames` and
 each comparison's actual `referenceFrames`; retain the URL when comparing runs.
 A longer reference alone does not establish the cause of #80's resolution split.
+
+`duration=5`, `10`, or `20` sets each renderer's comparison window in seconds for
+`preset=matrix`. Both renderers receive the same time budget, while the reference
+frame budget, repeat count, and render settings remain unchanged unless separately
+overridden. Unsupported values fall back to five seconds and are omitted from
+the report URL. Other presets ignore `duration`.
+
+Use this to compare accumulation over longer windows at fixed resolution. The
+report records `requestedDurationMs` and each comparison's actual duration and
+frame count. Doubling the window doubles only the timed renderer work; reference
+generation and other overhead still contribute to the total session time. This
+does not equalize the renderers' frame rates or establish the cause of #80's split.
 
 `preset=probe` runs the same six cases and the same pairing on roughly a tenth of
 the wall clock, by cutting the repeat count to **two** and shortening both the

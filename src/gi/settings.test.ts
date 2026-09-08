@@ -24,6 +24,48 @@ import {
 } from "@/gi/settings";
 
 describe("render query", () => {
+  it.each(["5", "10", "20"])(
+    "records matrix duration=%s without changing render settings",
+    (duration) => {
+      const search = `?preset=matrix&duration=${duration}`;
+      expect(sanitizedRenderQueryParams(search).get("duration")).toBe(duration);
+      expect(settingsFromSearch(search)).toEqual(
+        settingsFromSearch("?preset=matrix"),
+      );
+    },
+  );
+
+  it.each([
+    "",
+    "0",
+    "-5",
+    "1",
+    "30",
+    "10.0",
+    "010",
+    "1e1",
+    "10s",
+    "NaN",
+    "Infinity",
+  ])("ignores unsupported matrix duration=%s", (duration) => {
+    expect(
+      sanitizedRenderQueryParams(`?preset=matrix&duration=${duration}`).has(
+        "duration",
+      ),
+    ).toBe(false);
+  });
+
+  it.each(["", "heavy", "probe"])(
+    "ignores duration outside the matrix preset: %s",
+    (preset) => {
+      expect(
+        sanitizedRenderQueryParams(`?preset=${preset}&duration=10`).has(
+          "duration",
+        ),
+      ).toBe(false);
+    },
+  );
+
   it.each(["1024", "2048", "4096"])(
     "records matrix reference=%s without changing render settings",
     (reference) => {
