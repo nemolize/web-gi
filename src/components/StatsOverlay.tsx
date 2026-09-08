@@ -215,11 +215,15 @@ export const StatsOverlay = ({
         autoCompareMode === "probe"
           ? COMPARISON_MATRIX_PROBE_BUDGET
           : COMPARISON_MATRIX_BUDGET;
-      const repeats = sanitizedRenderQueryParams(window.location.search).get(
-        "repeats",
-      );
+      const params = sanitizedRenderQueryParams(window.location.search);
+      const repeats = params.get("repeats");
+      const reference = params.get("reference");
       const budget = {
         ...presetBudget,
+        referenceFrames:
+          autoCompareMode === "matrix" && reference !== null
+            ? Number(reference)
+            : presetBudget.referenceFrames,
         repeats:
           autoCompareMode === "matrix" && repeats !== null
             ? Number(repeats)

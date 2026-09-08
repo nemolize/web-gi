@@ -432,62 +432,99 @@ describe("StatsOverlay performance capture", () => {
     });
   });
 
-  // A swapped budget would still produce a well-formed report, so only the call
-  // arguments distinguish a probe run from a verdict-grade one.
   it.each([
     ["matrix" as const, COMPARISON_MATRIX_BUDGET, ""],
-    ["matrix" as const, { ...COMPARISON_MATRIX_BUDGET, repeats: 8 }, "8"],
-    ["matrix" as const, { ...COMPARISON_MATRIX_BUDGET, repeats: 12 }, "12"],
-    ["matrix" as const, COMPARISON_MATRIX_BUDGET, "3"],
-    ["probe" as const, COMPARISON_MATRIX_PROBE_BUDGET, "8"],
-  ])("runs %s on its own budget", async (preset, budget, repeats) => {
-    window.history.replaceState({}, "", `?preset=${preset}&repeats=${repeats}`);
-    const runAutomaticComparisonMatrix = vi.fn().mockResolvedValue({
-      kind: "comparison-matrix" as const,
-      requestedReferenceFrames: budget.referenceFrames,
-      requestedDurationMs: budget.durationMs,
-      repeats: budget.repeats,
-      runs: [],
-    });
+    [
+      "matrix" as const,
+      { ...COMPARISON_MATRIX_BUDGET, repeats: 8 },
+      "repeats=8",
+    ],
+    [
+      "matrix" as const,
+      { ...COMPARISON_MATRIX_BUDGET, repeats: 12 },
+      "repeats=12",
+    ],
+    ["matrix" as const, COMPARISON_MATRIX_BUDGET, "repeats=3"],
+    ["probe" as const, COMPARISON_MATRIX_PROBE_BUDGET, "repeats=8"],
+    ["matrix" as const, COMPARISON_MATRIX_BUDGET, "reference=1024"],
+    [
+      "matrix" as const,
+      { ...COMPARISON_MATRIX_BUDGET, referenceFrames: 2048 },
+      "reference=2048",
+    ],
+    [
+      "matrix" as const,
+      { ...COMPARISON_MATRIX_BUDGET, referenceFrames: 4096, repeats: 8 },
+      "reference=4096&repeats=8",
+    ],
+    ["matrix" as const, COMPARISON_MATRIX_BUDGET, "reference=512"],
+    ["matrix" as const, COMPARISON_MATRIX_BUDGET, "reference=2048.0"],
+    [
+      "probe" as const,
+      COMPARISON_MATRIX_PROBE_BUDGET,
+      "reference=4096&repeats=8",
+    ],
+  ])(
+    "runs %s on its own budget with %s and %s",
+    async (preset, budget, query) => {
+      window.history.replaceState({}, "", `?preset=${preset}&${query}`);
+      const runAutomaticComparisonMatrix = vi.fn().mockResolvedValue({
+        kind: "comparison-matrix" as const,
+        requestedReferenceFrames: budget.referenceFrames,
+        requestedDurationMs: budget.durationMs,
+        repeats: budget.repeats,
+        runs: [],
+      });
 
-    render(
-      <StatsOverlay
-        {...inertComparisonProps()}
-        runAutomaticComparisonMatrix={runAutomaticComparisonMatrix}
-        measurePerformance={vi.fn()}
-        autoCompareMode={preset}
-        stats={{
-          width: 640,
-          height: 480,
-          accumFrames: 1,
-          frameMs: 12,
-          atrousVariant: "fallback",
-        }}
-        settings={{ ...DEFAULT_SETTINGS, mode: "reference" }}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(runAutomaticComparisonMatrix).toHaveBeenCalledWith(
-        budget.referenceFrames,
-        budget.durationMs,
-        budget.repeats,
-        expect.any(Function),
+      render(
+        <StatsOverlay
+          {...inertComparisonProps()}
+          runAutomaticComparisonMatrix={runAutomaticComparisonMatrix}
+          measurePerformance={vi.fn()}
+          autoCompareMode={preset}
+          stats={{
+            width: 640,
+            height: 480,
+            accumFrames: 1,
+            frameMs: 12,
+            atrousVariant: "fallback",
+          }}
+          settings={{ ...DEFAULT_SETTINGS, mode: "reference" }}
+        />,
       );
-    });
 
-    const completion = await screen.findByText(/cases × .* repeats/);
-    expect(
-      completion.textContent?.includes("probe budget, not a verdict"),
-    ).toBe(preset === "probe");
-    fireEvent.click(screen.getByRole("button", { name: "Copy result" }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
-    const copied = JSON.parse(writeText.mock.calls[0]?.[0] ?? "");
-    expect(copied.repeats).toBe(budget.repeats);
-    expect(new URL(copied.url).searchParams.get("repeats")).toBe(
-      preset === "matrix" && ["8", "12"].includes(repeats) ? repeats : null,
-    );
-  });
+      await waitFor(() => {
+        expect(runAutomaticComparisonMatrix).toHaveBeenCalledWith(
+          budget.referenceFrames,
+          budget.durationMs,
+          budget.repeats,
+          expect.any(Function),
+        );
+      });
+
+      const completion = await screen.findByText(/cases × .* repeats/);
+      expect(
+        completion.textContent?.includes("probe budget, not a verdict"),
+      ).toBe(preset === "probe");
+      fireEvent.click(screen.getByRole("button", { name: "Copy result" }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+      const copied = JSON.parse(writeText.mock.calls[0]?.[0] ?? "");
+      expect(copied.requestedReferenceFrames).toBe(budget.referenceFrames);
+      expect(copied.requestedDurationMs).toBe(budget.durationMs);
+      expect(copied.repeats).toBe(budget.repeats);
+      const params = new URLSearchParams(query);
+      const repeats = params.get("repeats") ?? "";
+      const reference = params.get("reference") ?? "";
+      expect(new URL(copied.url).searchParams.get("reference")).toBe(
+        preset === "matrix" && ["1024", "2048", "4096"].includes(reference)
+          ? reference
+          : null,
+      );
+      expect(new URL(copied.url).searchParams.get("repeats")).toBe(
+        preset === "matrix" && ["8", "12"].includes(repeats) ? repeats : null,
+      );
+    },
+  );
 
   it("allows retrying after capture failure", async () => {
     const measurePerformance = vi

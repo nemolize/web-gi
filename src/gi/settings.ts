@@ -109,6 +109,8 @@ export const MATRIX_BOUNCE_COUNTS = [
 
 export const MATRIX_REPEAT_COUNTS = ["4", "8", "12"] as const;
 
+export const MATRIX_REFERENCE_FRAME_COUNTS = ["1024", "2048", "4096"] as const;
+
 /** Spans the kernel's own head-on reach at either end; `0.08` is the default. */
 export const MATRIX_ATROUS_TANGENT_SIGMAS = [
   "0.02",
@@ -161,6 +163,12 @@ export const sanitizedRenderQueryParams = (search: string): URLSearchParams => {
     if (matrix === "matrix") {
       const repeats = enumValue(source, "repeats", MATRIX_REPEAT_COUNTS);
       if (repeats !== undefined) sanitized.set("repeats", repeats);
+      const reference = enumValue(
+        source,
+        "reference",
+        MATRIX_REFERENCE_FRAME_COUNTS,
+      );
+      if (reference !== undefined) sanitized.set("reference", reference);
     }
     for (const { param, values } of MATRIX_OVERRIDES) {
       const value = enumValue(source, param, values);
