@@ -24,6 +24,48 @@ import {
 } from "@/gi/settings";
 
 describe("render query", () => {
+  it.each(["1024", "2048", "4096"])(
+    "records matrix reference=%s without changing render settings",
+    (reference) => {
+      const search = `?preset=matrix&reference=${reference}`;
+      expect(sanitizedRenderQueryParams(search).get("reference")).toBe(
+        reference,
+      );
+      expect(settingsFromSearch(search)).toEqual(
+        settingsFromSearch("?preset=matrix"),
+      );
+    },
+  );
+
+  it.each([
+    "",
+    "0",
+    "512",
+    "8192",
+    "2048.0",
+    "02048",
+    "2e3",
+    "NaN",
+    "Infinity",
+  ])("ignores unsupported matrix reference=%s", (reference) => {
+    expect(
+      sanitizedRenderQueryParams(`?preset=matrix&reference=${reference}`).has(
+        "reference",
+      ),
+    ).toBe(false);
+  });
+
+  it.each(["", "heavy", "probe"])(
+    "ignores reference outside the matrix preset: %s",
+    (preset) => {
+      expect(
+        sanitizedRenderQueryParams(`?preset=${preset}&reference=2048`).has(
+          "reference",
+        ),
+      ).toBe(false);
+    },
+  );
+
   it.each(["4", "8", "12"])(
     "records matrix repeats=%s without changing render settings",
     (repeats) => {
