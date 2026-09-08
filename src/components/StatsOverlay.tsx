@@ -218,8 +218,13 @@ export const StatsOverlay = ({
       const params = sanitizedRenderQueryParams(window.location.search);
       const repeats = params.get("repeats");
       const reference = params.get("reference");
+      const duration = params.get("duration");
       const budget = {
         ...presetBudget,
+        durationMs:
+          autoCompareMode === "matrix" && duration !== null
+            ? Number(duration) * 1_000
+            : presetBudget.durationMs,
         referenceFrames:
           autoCompareMode === "matrix" && reference !== null
             ? Number(reference)

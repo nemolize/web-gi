@@ -434,6 +434,25 @@ describe("StatsOverlay performance capture", () => {
 
   it.each([
     ["matrix" as const, COMPARISON_MATRIX_BUDGET, ""],
+    ["matrix" as const, COMPARISON_MATRIX_BUDGET, "duration=5"],
+    [
+      "matrix" as const,
+      { ...COMPARISON_MATRIX_BUDGET, durationMs: 10_000 },
+      "duration=10",
+    ],
+    [
+      "matrix" as const,
+      {
+        ...COMPARISON_MATRIX_BUDGET,
+        durationMs: 20_000,
+        referenceFrames: 2048,
+        repeats: 8,
+      },
+      "duration=20&reference=2048&repeats=8",
+    ],
+    ["matrix" as const, COMPARISON_MATRIX_BUDGET, "duration=1"],
+    ["matrix" as const, COMPARISON_MATRIX_BUDGET, "duration=10.0"],
+    ["probe" as const, COMPARISON_MATRIX_PROBE_BUDGET, "duration=20"],
     [
       "matrix" as const,
       { ...COMPARISON_MATRIX_BUDGET, repeats: 8 },
@@ -515,6 +534,12 @@ describe("StatsOverlay performance capture", () => {
       const params = new URLSearchParams(query);
       const repeats = params.get("repeats") ?? "";
       const reference = params.get("reference") ?? "";
+      const duration = params.get("duration") ?? "";
+      expect(new URL(copied.url).searchParams.get("duration")).toBe(
+        preset === "matrix" && ["5", "10", "20"].includes(duration)
+          ? duration
+          : null,
+      );
       expect(new URL(copied.url).searchParams.get("reference")).toBe(
         preset === "matrix" && ["1024", "2048", "4096"].includes(reference)
           ? reference
