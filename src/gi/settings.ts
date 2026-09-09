@@ -93,7 +93,15 @@ export const MATRIX_SPATIAL_RADII = [
 ] as const;
 
 /** `0` degenerates both spatial passes to 1/Z pass-through; #90's discriminator. */
-export const MATRIX_SPATIAL_SAMPLES = ["0", "1", "2", "4", "8"] as const;
+export const MATRIX_SPATIAL_SAMPLES = [
+  "0",
+  "1",
+  "2",
+  "4",
+  "8",
+  "16",
+  "32",
+] as const;
 
 export const MATRIX_DI_CANDIDATES = ["8", "16", "32", "64", "128"] as const;
 

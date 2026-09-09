@@ -119,6 +119,77 @@ test("preserves the extended DI candidate budget in comparison controls", async 
   await expect(page.getByLabel("Bounces")).toHaveValue("6");
 });
 
+test("preserves the extended spatial budget in comparison controls", async ({
+  page,
+}) => {
+  await page.goto("/?preset=probe&samples=32");
+  await expect(page.getByLabel("Spatial neighbours")).toHaveValue("32");
+  await expect(page.getByLabel("Spatial neighbours")).toHaveAttribute(
+    "max",
+    "32",
+  );
+  await expect(page.getByLabel("RIS candidates")).toHaveValue("32");
+});
+
+test("renders finite output at the extended spatial budget when WebGPU is available", async ({
+  page,
+}) => {
+  const gpuErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") gpuErrors.push(message.text());
+  });
+  await page.goto("/?preset=heavy");
+  const accumulated = page.getByTestId("stat-accumulated");
+  const notice = page.getByRole("alert");
+  await expect
+    .poll(
+      async () => {
+        const message = await notice.allTextContents();
+        if (message.some((text) => text.includes("WebGPU is not available")))
+          return "unsupported";
+        if (message.some((text) => text.includes("Renderer unavailable")))
+          return "error";
+        return Number((await accumulated.textContent()) ?? "0") > 0
+          ? "ready"
+          : "pending";
+      },
+      { timeout: 20_000 },
+    )
+    .not.toBe("pending");
+  test.skip(
+    (await notice.allTextContents()).some((text) =>
+      text.includes("WebGPU is not available"),
+    ),
+    "requires a WebGPU adapter",
+  );
+  await expect(notice).toHaveCount(0);
+  await page.getByLabel("Spatial neighbours").fill("32");
+  await expect(page.getByLabel("Spatial neighbours")).toHaveValue("32");
+  await waitForAccumulatedFrames(accumulated, 30);
+  const output = await page.evaluate(async () => {
+    const hooks: unknown = Reflect.get(globalThis, "__gi");
+    if (hooks === null || typeof hooks !== "object") return null;
+    const capture: unknown = Reflect.get(hooks, "capture");
+    if (typeof capture !== "function") return null;
+    const image: unknown = await Reflect.apply(capture, hooks, []);
+    if (image === null || typeof image !== "object") return null;
+    const data: unknown = Reflect.get(image, "data");
+    if (!(data instanceof Float32Array)) return null;
+    let energy = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      for (let channel = 0; channel < 3; channel++) {
+        const value = data[i + channel];
+        if (value === undefined || !Number.isFinite(value)) return null;
+        energy += value;
+      }
+    }
+    return energy;
+  });
+  expect(output).not.toBeNull();
+  expect(output).toBeGreaterThan(0);
+  expect(gpuErrors).toEqual([]);
+});
+
 test("preserves the extended bounce budget in comparison controls", async ({
   page,
 }) => {

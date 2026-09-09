@@ -453,10 +453,26 @@ describe("render query", () => {
     }
   });
 
+  it.each(["matrix", "probe"])(
+    "accepts extended spatial budgets for %s without changing other settings",
+    (preset) => {
+      for (const samples of [16, 32]) {
+        const search = `?preset=${preset}&samples=${String(samples)}`;
+        expect(settingsFromSearch(search)).toEqual({
+          ...settingsFromSearch(`?preset=${preset}`),
+          spatialSamples: samples,
+        });
+        expect(sanitizedRenderQueryParams(search).get("samples")).toBe(
+          String(samples),
+        );
+      }
+    },
+  );
+
   it("ignores a neighbour count outside the allowlist", () => {
     for (const search of [
       "?preset=matrix&samples=3",
-      "?preset=matrix&samples=16",
+      "?preset=matrix&samples=64",
       "?preset=matrix&samples=0px",
       "?preset=matrix&samples=abc",
       "?preset=matrix&samples=",

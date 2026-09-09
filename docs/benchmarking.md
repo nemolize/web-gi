@@ -24,6 +24,7 @@ Equal-time linear-radiance comparisons use similarly short URLs:
 
 - `?preset=matrix`
 - `?preset=matrix&scale=0.4`
+- `?preset=matrix&samples=32`
 - `?preset=matrix&candidates=64`
 - `?preset=matrix&bounces=12`
 - `?preset=matrix&repeats=8`
@@ -98,6 +99,13 @@ the preset's own value rather than failing. What ran is recorded in the report's
 | `tangent`    | How far along a surface an à-trous tap counts       |
 | `candidates` | Fresh DI light candidates per pixel per frame       |
 | `bounces`    | Path depth for ReSTIR GI, Denoised PT and reference |
+
+`samples` accepts `0`, `1`, `2`, `4`, `8`, `16`, or `32` on both `matrix` and
+`probe`; the preset default is `8`. It sets the attempted neighbour count in
+both ReSTIR spatial passes; geometry and reservoir validity can reject taps.
+Denoised PT and Reference PT do not use these passes. Hold `scale` fixed when
+sweeping this budget. It changes both reuse and GPU work, so it does not isolate
+frame rate or establish the cause of #80's resolution split.
 
 `candidates` accepts `8`, `16`, `32`, `64`, or `128` on both `matrix` and
 `probe`; the preset default is `32`. It changes ReSTIR's direct-light sampling
