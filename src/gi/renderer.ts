@@ -233,9 +233,9 @@ type Layouts = {
 type RendererPipelines<TCompute extends object, TRender extends object> = {
   readonly gbuffer: TCompute;
   readonly di: TCompute;
-  readonly diSpatial: TCompute;
+  readonly getDiSpatialPipeline: (samples: number) => TCompute;
   readonly gi: TCompute;
-  readonly giSpatial: TCompute;
+  readonly getGiSpatialPipeline: (samples: number) => TCompute;
   readonly shade: TCompute;
   readonly getPathTracePipeline: () => TCompute;
   readonly reference: TCompute;
@@ -332,13 +332,29 @@ export const assembleRendererPipelines = <
   compute: ComputePipelineFactory<TLayout, TCompute>,
   present: PresentPipelineFactory<TLayout, TRender>,
 ): RendererPipelines<TCompute, TRender> => {
+  const spatialPipeline = (label: string, body: string) => {
+    const create = (capacity: number) =>
+      compute(
+        `${label}-${String(capacity)}`,
+        `const MAX_NEIGHBORS: u32 = ${String(capacity)}u;\n${body}`,
+        layouts.spatial,
+      );
+    // Larger per-pixel arrays slow the existing eight-neighbour budget too.
+    const standard = create(8);
+    let extended: TCompute | null = null;
+    return (samples: number): TCompute => {
+      if (samples <= 8) return standard;
+      extended ??= create(32);
+      return extended;
+    };
+  };
   let pathTracePipeline: TCompute | null = null;
   return {
     gbuffer: compute("gbuffer", gbufferWgsl, layouts.gbuffer),
     di: compute("restir-di", diWgsl, layouts.resample),
-    diSpatial: compute("restir-di-spatial", diSpatialWgsl, layouts.spatial),
+    getDiSpatialPipeline: spatialPipeline("restir-di-spatial", diSpatialWgsl),
     gi: compute("restir-gi", giWgsl, layouts.resample),
-    giSpatial: compute("restir-gi-spatial", giSpatialWgsl, layouts.spatial),
+    getGiSpatialPipeline: spatialPipeline("restir-gi-spatial", giSpatialWgsl),
     shade: compute("shade", shadeWgsl, layouts.shade),
     getPathTracePipeline: () => {
       pathTracePipeline ??= compute(
@@ -1290,13 +1306,13 @@ export class GiRenderer {
       } else {
         dispatch(this.pipelines.di, at(targets.di, parity), "di");
         dispatch(
-          this.pipelines.diSpatial,
+          this.pipelines.getDiSpatialPipeline(this.settings.spatialSamples),
           at(targets.diSpatial, parity),
           "diSpatial",
         );
         dispatch(this.pipelines.gi, at(targets.gi, parity), "gi");
         dispatch(
-          this.pipelines.giSpatial,
+          this.pipelines.getGiSpatialPipeline(this.settings.spatialSamples),
           at(targets.giSpatial, parity),
           "giSpatial",
         );

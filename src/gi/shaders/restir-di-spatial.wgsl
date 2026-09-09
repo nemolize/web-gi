@@ -7,7 +7,6 @@
 @group(1) @binding(3) var<storage, read> srcReservoirs: array<DiReservoir>;
 @group(1) @binding(4) var<storage, read_write> dstReservoirs: array<DiReservoir>;
 
-const MAX_NEIGHBORS: u32 = 8u;
 const PLANE_TOLERANCE: f32 = 0.05;
 const NORMAL_TOLERANCE: f32 = 0.9;
 

@@ -302,7 +302,7 @@ const SettingsSections = memo(
             label="Spatial neighbours"
             value={settings.spatialSamples}
             min={0}
-            max={8}
+            max={32}
             step={1}
             format={(value) => String(value)}
             onChange={(spatialSamples) => {
