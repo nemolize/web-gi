@@ -54,6 +54,7 @@ import giWgsl from "@/gi/shaders/restir-gi.wgsl?raw";
 import giSpatialWgsl from "@/gi/shaders/restir-gi-spatial.wgsl?raw";
 import sceneWgsl from "@/gi/shaders/scene.wgsl?raw";
 import shadeWgsl from "@/gi/shaders/shade.wgsl?raw";
+import snapshotWgsl from "@/gi/shaders/snapshot.wgsl?raw";
 
 export class WebGpuUnsupportedError extends Error {
   constructor(message: string) {
@@ -73,7 +74,7 @@ export type RendererStats = {
 export type DeviceLossInfo = Pick<GPUDeviceLostInfo, "message" | "reason">;
 
 const WORKGROUP_SIZE = DEFAULT_WORKGROUP_SIZE;
-const UNIFORM_BYTES = 208;
+const UNIFORM_BYTES = 224;
 const DI_RESERVOIR_BYTES = 32;
 const GI_RESERVOIR_BYTES = 48;
 
@@ -236,6 +237,7 @@ type Layouts = {
 };
 
 type RendererPipelines<TCompute extends object, TRender extends object> = {
+  readonly snapshot: TCompute;
   readonly gbuffer: TCompute;
   readonly di: TCompute;
   readonly getDiSpatialPipeline: (samples: number) => TCompute;
@@ -254,6 +256,7 @@ type Pipelines = RendererPipelines<GPUComputePipeline, GPURenderPipeline>;
 
 /** Everything whose size depends on the render resolution. */
 type Targets = {
+  readonly snapshot: GPUBindGroup;
   readonly width: number;
   readonly height: number;
   readonly textures: readonly GPUTexture[];
@@ -305,6 +308,7 @@ const at = <T>(items: readonly T[], index: number): T => {
 };
 
 type PipelineAssemblyLayouts<TLayout extends object> = {
+  readonly capture: TLayout;
   readonly gbuffer: TLayout;
   readonly resample: TLayout;
   readonly spatial: TLayout;
@@ -355,6 +359,7 @@ export const assembleRendererPipelines = <
   };
   let pathTracePipeline: TCompute | null = null;
   return {
+    snapshot: compute("snapshot", snapshotWgsl, layouts.capture),
     gbuffer: compute("gbuffer", gbufferWgsl, layouts.gbuffer),
     di: compute("restir-di", diWgsl, layouts.resample),
     getDiSpatialPipeline: spatialPipeline("restir-di-spatial", diSpatialWgsl),
@@ -471,6 +476,12 @@ export class GiRenderer {
   private targetCapacity: RenderSize | null = null;
   private motionUntil = 0;
   private measuringPerformance = false;
+  private presentationTransition: {
+    readonly size: RenderSize;
+    updatedAt: number;
+    blend: number;
+    pending: boolean;
+  } | null = null;
 
   private settings: RenderSettings;
   private pixelBudget: number;
@@ -478,6 +489,8 @@ export class GiRenderer {
   private deviceIsLost = false;
   private frame = 0;
   private accumFrames = 0;
+  private historyFrames = 0;
+  private previousResolution: RenderSize | null = null;
   private parity = 0;
   private previousBasis: CameraBasis | null = null;
   private lastCamera: OrbitCamera | null = null;
@@ -704,6 +717,7 @@ export class GiRenderer {
         floatTexture,
         rawTexture,
         storageTexture("rgba32float"),
+        floatTexture,
       ]),
       atrous: createLayout(device, "atrous", compute, [
         rawTexture,
@@ -719,6 +733,7 @@ export class GiRenderer {
         floatTexture,
         floatTexture,
         floatTexture,
+        rawTexture,
       ]),
       presentReference: createLayout(device, "present-reference", fragment, [
         rawTexture,
@@ -840,6 +855,7 @@ export class GiRenderer {
   setSettings(next: RenderSettings): void {
     const previous = this.settings;
     if (JSON.stringify(previous) !== JSON.stringify(next)) {
+      this.presentationTransition = null;
       this.comparisonGeneration += 1;
       this.abortComparison("Render settings changed during the comparison.");
     }
@@ -864,6 +880,7 @@ export class GiRenderer {
 
   /** Diffuse irradiance is view-independent; glass and reference radiance are not. */
   notifyCameraChanged(): void {
+    this.presentationTransition = null;
     this.motionUntil = performance.now() + 200;
     this.comparisonGeneration += 1;
     this.abortComparison("The camera moved during the comparison.");
@@ -876,7 +893,9 @@ export class GiRenderer {
   }
 
   resetAccumulation(): void {
+    this.presentationTransition = null;
     this.accumFrames = 0;
+    this.historyFrames = 0;
   }
 
   get deviceLost(): Promise<DeviceLossInfo> {
@@ -994,6 +1013,14 @@ export class GiRenderer {
     return {
       width,
       height,
+      // Denoised modes leave reference targets idle, so a transition needs no
+      // additional image allocation. Switching modes cancels the transition.
+      snapshot: createBindGroup(device, this.layouts.capture, [
+        view(at(atrous, 0)),
+        view(at(albedo, 0)),
+        view(at(emission, 0)),
+        view(at(reference, 0)),
+      ]),
       textures: [
         ...depth,
         ...normal,
@@ -1084,6 +1111,7 @@ export class GiRenderer {
           view(at(normal, 1 - p)),
           view(at(history, 1 - p)),
           view(at(history, p)),
+          view(at(atrous, 0)),
         ]),
       ),
       // Iteration 0 filters the accumulated history; the chain then ping-pongs
@@ -1108,6 +1136,7 @@ export class GiRenderer {
         view(at(atrous, 0)),
         view(at(albedo, 0)),
         view(at(emission, 0)),
+        view(at(reference, 0)),
       ]),
       presentReference: parities.map((p) =>
         createBindGroup(device, this.layouts.presentReference, [
@@ -1126,6 +1155,7 @@ export class GiRenderer {
     if (current === null) return;
     this.releaseCapture();
     this.targets = null;
+    this.presentationTransition = null;
     this.targetCapacity = null;
     for (const t of current.textures) t.destroy();
     for (const b of current.buffers) b.destroy();
@@ -1152,14 +1182,27 @@ export class GiRenderer {
       ) {
         return current;
       }
-      // Reuse the allocation; reservoir indexing and texture bounds follow the
-      // active size, so history must restart when its row stride changes.
+      // Reservoir row strides change; illumination history is reprojected
+      // separately using the previous frame's dimensions.
       const resized = { ...current, ...size };
+      this.presentationTransition =
+        this.settings.smoothMotion &&
+        this.settings.mode !== "reference" &&
+        !this.measuringPerformance &&
+        this.historyFrames > 0 &&
+        (size.width > current.width || size.height > current.height)
+          ? {
+              size: { width: current.width, height: current.height },
+              updatedAt: performance.now(),
+              blend: 1,
+              pending: true,
+            }
+          : null;
       this.targets = resized;
       this.canvas.width = size.width;
       this.canvas.height = size.height;
       this.comparisonGeneration += 1;
-      this.resetAccumulation();
+      this.accumFrames = 0;
       return resized;
     }
     this.releaseTargets();
@@ -1243,6 +1286,27 @@ export class GiRenderer {
     view.setUint32(184, this.scene.occluderClusterCount, true);
     view.setUint32(188, this.scene.glassShapes.length, true);
     view.setFloat32(192, this.settings.atrousTangentSigma, true);
+    view.setUint32(196, this.historyFrames, true);
+    view.setUint32(200, this.previousResolution?.width ?? targets.width, true);
+    view.setUint32(
+      204,
+      this.previousResolution?.height ?? targets.height,
+      true,
+    );
+    const transition = this.presentationTransition;
+    if (transition !== null) {
+      const now = performance.now();
+      if (!transition.pending) {
+        const step = Math.min(0.25, (now - transition.updatedAt) / 120);
+        transition.blend = Math.max(0, transition.blend - step);
+      }
+      transition.updatedAt = now;
+    }
+    const blend = transition?.blend ?? 0;
+    view.setFloat32(208, transition?.size.width ?? 1, true);
+    view.setFloat32(212, transition?.size.height ?? 1, true);
+    view.setFloat32(216, blend, true);
+    if (blend === 0) this.presentationTransition = null;
     this.device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData);
   }
 
@@ -1309,6 +1373,7 @@ export class GiRenderer {
       passBindGroup: GPUBindGroup,
       label: string,
       workgroupSize = WORKGROUP_SIZE,
+      size: RenderSize = targets,
     ): void => {
       const pass =
         sharedPass ?? encoder.beginComputePass(timestampWrites(label));
@@ -1316,8 +1381,8 @@ export class GiRenderer {
       pass.setBindGroup(0, this.sceneBindGroup);
       pass.setBindGroup(1, passBindGroup);
       pass.dispatchWorkgroups(
-        Math.ceil(targets.width / workgroupSize),
-        Math.ceil(targets.height / workgroupSize),
+        Math.ceil(size.width / workgroupSize),
+        Math.ceil(size.height / workgroupSize),
       );
       if (sharedPass === null) pass.end();
     };
@@ -1330,6 +1395,17 @@ export class GiRenderer {
         "reference",
       );
     } else {
+      const transition = this.presentationTransition;
+      if (transition?.pending === true) {
+        dispatch(
+          this.pipelines.snapshot,
+          targets.snapshot,
+          "snapshot",
+          WORKGROUP_SIZE,
+          transition.size,
+        );
+        transition.pending = false;
+      }
       dispatch(this.pipelines.gbuffer, at(targets.gbuffer, parity), "gbuffer");
       if (this.settings.mode === "path-traced") {
         dispatch(
@@ -1456,9 +1532,11 @@ export class GiRenderer {
     }
 
     this.previousBasis = basis;
+    this.previousResolution = { width: targets.width, height: targets.height };
     this.parity = 1 - parity;
     this.frame += 1;
     this.accumFrames += 1;
+    this.historyFrames += 1;
   }
 
   /**
@@ -1687,6 +1765,7 @@ export class GiRenderer {
   }
 
   setGpuTimingEnabled(enabled: boolean): void {
+    if (enabled) this.presentationTransition = null;
     this.measuringPerformance = enabled;
     const probe = this.passProbe;
     if (probe === null) return;

@@ -9,7 +9,18 @@ The selected resolution returns after 200 ms without camera movement.
 `src/gi/renderer.ts` separates active dimensions from allocation capacity. The
 existing textures and reservoirs hold the smaller image in their active region;
 dispatches and shader bounds use those dimensions. Switching sizes resets
-accumulation but does not rebuild the GPU buffers, textures, or bind groups.
+ReSTIR reservoirs but retains temporal illumination. The temporal pass uses the
+previous dimensions to interpolate the last filtered image, accepting only taps
+on the same surface. Reused confidence is capped at 16 frames so interpolated
+detail can be replaced by new samples. Scene and transport changes, explicit
+resets, and view-dependent glass motion still discard illumination history.
+The transition does not rebuild GPU buffers, textures, or bind groups.
+On restoration, a snapshot pass saves the last displayed colors into an idle
+reference texture before the G-buffer is overwritten. Presentation blends this
+snapshot into the new full-resolution image over 120 ms, with a maximum blend
+step of 25% per frame on slower devices, smoothing the change
+in silhouette coverage as well as illumination. New camera input, settings
+changes, and explicit resets cancel the blend. Measurements bypass it.
 The canvas backing size changes, and the browser scales its image to the same
 CSS rectangle. GPU memory use therefore stays at the full-resolution capacity.
 
@@ -40,9 +51,10 @@ Other approaches remain candidates for separate measured experiments:
   to avoid repeated history resets. This change does not implement a target-FPS
   controller or alter GPU queue pacing.
 
-The accepted costs are softer moving edges and restarting convergence when
-motion begins and ends. Full detail returning is not instantaneous convergence;
-new samples accumulate after the resolution is restored.
+The accepted cost is softer moving edges. After restoration, previously visible
+surfaces refine their inherited illumination instead of starting from a single
+sample across the entire screen. Disoccluded pixels still need new samples;
+the higher-resolution silhouette and fine detail do not become converged instantly.
 
 ## Desktop measurement, 2026-09-10
 

@@ -49,7 +49,9 @@ At a fixed resolution, ReSTIR and the denoised path tracer preserve diffuse
 irradiance history across camera motion and reject it on disocclusion. The
 default **Smooth camera motion** option halves each render dimension during
 motion and restores it after 200 ms without movement. Both transitions reset
-history because reservoir row strides change. GPU target allocations retain
+ReSTIR reservoirs because their row strides change. Temporal illumination instead
+reprojects the previous filtered image with its original dimensions, rejecting
+samples across depth or normal discontinuities. GPU target allocations retain
 their full capacity; only the active rectangle and canvas backing size change.
 Reference rendering stays at full resolution, and glass scenes restart
 accumulation on motion because their radiance is view-dependent. See
