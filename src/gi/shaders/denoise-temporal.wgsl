@@ -11,6 +11,7 @@
 @group(1) @binding(4) var texPrevNormal: texture_2d<f32>;
 @group(1) @binding(5) var texHistory: texture_2d<f32>;
 @group(1) @binding(6) var outHistory: texture_storage_2d<rgba32float, write>;
+@group(1) @binding(7) var texPreviousFiltered: texture_2d<f32>;
 
 const PLANE_TOLERANCE: f32 = 0.02;
 const NORMAL_TOLERANCE: f32 = 0.9;
@@ -20,12 +21,43 @@ const FIREFLY_SIGMA: f32 = 3.0;
 /** Stands in for "no ceiling", above any luminance the shading pass can emit. */
 const NO_CEILING: f32 = 1e20;
 
-/**
- * Luminance ceiling drawn from the neighbours that share this pixel's surface,
- * or `NO_CEILING` when too few of them do, or when they agree on darkness and
- * would otherwise zero a legitimate estimate. Excludes the centre so an outlier
- * cannot raise its own ceiling.
- */
+fn resizedHistory(uv: vec2f, x: vec3f, n: vec3f) -> vec4f {
+  let texel = uv * vec2f(uni.previousResolution) - vec2f(0.5);
+  let origin = vec2i(floor(texel));
+  let fraction = fract(texel);
+  var sum = vec4f(0.0);
+  var weightSum = 0.0;
+  for (var dy = 0; dy < 2; dy++) {
+    for (var dx = 0; dx < 2; dx++) {
+      let coord = origin + vec2i(dx, dy);
+      if (any(coord < vec2i(0)) || any(coord >= vec2i(uni.previousResolution))) {
+        continue;
+      }
+      let depth = textureLoad(texPrevDepth, coord, 0).x;
+      let normal = textureLoad(texPrevNormal, coord, 0).xyz;
+      let ndc = (vec2f(coord) + vec2f(0.5)) / vec2f(uni.previousResolution)
+        * vec2f(2.0, -2.0) + vec2f(-1.0, 1.0);
+      let position = uni.prevCam.pos.xyz + viewRay(uni.prevCam, ndc) * depth;
+      if (!surfaceHit(depth) || dot(normal, n) <= NORMAL_TOLERANCE
+        || abs(dot(position - x, n)) >= PLANE_TOLERANCE) {
+        continue;
+      }
+      let weight = select(1.0 - fraction.x, fraction.x, dx == 1)
+        * select(1.0 - fraction.y, fraction.y, dy == 1);
+      sum += textureLoad(texPreviousFiltered, coord, 0) * weight;
+      weightSum += weight;
+    }
+  }
+  if (weightSum <= 1e-6) {
+    return vec4f(0.0);
+  }
+  let history = sum / weightSum;
+  // Interpolated samples are correlated; cap confidence so new detail can converge.
+  return vec4f(history.xyz, min(history.w, 16.0));
+}
+
+// Excluding the centre prevents an outlier from raising its own ceiling;
+// a zero ceiling is ignored so dark neighbours cannot erase a valid estimate.
 fn neighbourhoodCeiling(pixel: vec2u, x: vec3f, n: vec3f) -> f32 {
   var sum = 0.0;
   var sumSquares = 0.0;
@@ -83,21 +115,27 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   var history = vec3f(0.0);
   var historyLength = 0.0;
 
-  if (uni.accumFrames > 0u) {
+  if (uni.historyFrames > 0u) {
     let uv = projectToUv(uni.prevCam, x);
     if (uv.z > 0.5) {
-      let prevPixel = min(
-        vec2u(uv.xy * vec2f(uni.resolution)),
-        uni.resolution - vec2u(1u, 1u),
-      );
-      let prevDepth = textureLoad(texPrevDepth, prevPixel, 0).x;
-      let prevNormal = textureLoad(texPrevNormal, prevPixel, 0).xyz;
-      let prevPosition = surfacePosition(uni.prevCam, prevPixel, prevDepth);
-      let samePlane = abs(dot(prevPosition - x, n)) < PLANE_TOLERANCE;
-      if (surfaceHit(prevDepth) && samePlane && dot(prevNormal, n) > NORMAL_TOLERANCE) {
-        let stored = textureLoad(texHistory, prevPixel, 0);
+      if (any(uni.previousResolution != uni.resolution)) {
+        let stored = resizedHistory(uv.xy, x, n);
         history = stored.xyz;
         historyLength = stored.w;
+      } else {
+        let prevPixel = min(
+          vec2u(uv.xy * vec2f(uni.resolution)),
+          uni.resolution - vec2u(1u, 1u),
+        );
+        let prevDepth = textureLoad(texPrevDepth, prevPixel, 0).x;
+        let prevNormal = textureLoad(texPrevNormal, prevPixel, 0).xyz;
+        let prevPosition = surfacePosition(uni.prevCam, prevPixel, prevDepth);
+        let samePlane = abs(dot(prevPosition - x, n)) < PLANE_TOLERANCE;
+        if (surfaceHit(prevDepth) && samePlane && dot(prevNormal, n) > NORMAL_TOLERANCE) {
+          let stored = textureLoad(texHistory, prevPixel, 0);
+          history = stored.xyz;
+          historyLength = stored.w;
+        }
       }
     }
   }

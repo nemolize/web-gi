@@ -8,6 +8,17 @@ export const MAX_RENDER_PIXELS = 1_000_000;
 
 const MIN_RENDER_SIZE: RenderSize = { width: 1, height: 1 };
 
+export const resolveInteractionSize = (
+  size: RenderSize,
+  moving: boolean,
+): RenderSize =>
+  moving
+    ? {
+        width: Math.max(1, Math.floor(size.width / 2)),
+        height: Math.max(1, Math.floor(size.height / 2)),
+      }
+    : size;
+
 export type RenderSizeRequest = {
   readonly cssWidth: number;
   readonly cssHeight: number;

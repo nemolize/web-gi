@@ -5,6 +5,7 @@ import { assembleRendererPipelines, runCompletionBatches } from "@/gi/renderer";
 describe("optional renderer pipelines", () => {
   it("defers the path-trace pipeline until its getter is requested", () => {
     const layouts = {
+      capture: { label: "capture" },
       gbuffer: { label: "gbuffer" },
       resample: { label: "resample" },
       spatial: { label: "spatial" },

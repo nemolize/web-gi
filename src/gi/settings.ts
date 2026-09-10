@@ -32,6 +32,7 @@ export type RenderSettings = {
   /** Upper bound on the temporal accumulation window, in frames. */
   readonly maxHistory: number;
   readonly resolutionScale: number;
+  readonly smoothMotion: boolean;
   readonly exposure: number;
 };
 
@@ -52,6 +53,7 @@ export const DEFAULT_SETTINGS: RenderSettings = {
   maxBounces: 3,
   maxHistory: 512,
   resolutionScale: 0.75,
+  smoothMotion: true,
   exposure: 1,
 };
 

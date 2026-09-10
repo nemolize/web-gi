@@ -53,6 +53,9 @@ struct Uniforms {
   occluderClusterCount: u32,
   glassShapeCount: u32,
   atrousTangentSigma: f32,
+  historyFrames: u32,
+  previousResolution: vec2u,
+  transition: vec4f,
 }
 
 /** vec4f throughout for the same reason as `Camera`; layout is unchanged. */

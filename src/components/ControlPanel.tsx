@@ -353,6 +353,17 @@ const SettingsSections = memo(
         </Section>
 
         <Section title="Output">
+          <Toggle
+            label="Smooth camera motion"
+            checked={settings.smoothMotion}
+            disabled={!denoised}
+            onChange={(smoothMotion) => {
+              updateSettings({ smoothMotion });
+            }}
+          />
+          <p className="text-xs text-neutral-400">
+            Render at half resolution while moving, then restore full detail.
+          </p>
           <Slider
             label="Resolution scale"
             value={settings.resolutionScale}
