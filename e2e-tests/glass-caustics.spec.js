@@ -40,7 +40,7 @@ test("ReSTIR resolves glass-first diffuse paths without direct-light reservoirs"
       floats.set([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0]);
       integers.set([size, size, 0, 0, 1, 0], 32);
       integers[40] = 1;
-      integers[42] = 8;
+      integers[42] = 8 | 128;
       integers[45] = 1;
       integers[47] = 1;
       const uniform = buffer(uniforms, GPUBufferUsage.UNIFORM);
@@ -172,14 +172,16 @@ test("ReSTIR resolves glass-first diffuse paths without direct-light reservoirs"
         return { finite, rgb: rgb.map((value) => value / (size * size)) };
       };
       const enabled = await run();
-      integers[42] = 0;
-      const disabled = await run();
       integers[42] = 8;
+      const plainRestir = await run();
+      integers[42] = 128;
+      const disabled = await run();
+      integers[42] = 8 | 128;
       integers[47] = 0;
       const noGlass = await run();
       const validation = await device.popErrorScope();
       if (validation) errors.push(validation.message);
-      return { enabled, disabled, noGlass, errors };
+      return { enabled, plainRestir, disabled, noGlass, errors };
     } finally {
       device.destroy();
     }
@@ -192,5 +194,49 @@ test("ReSTIR resolves glass-first diffuse paths without direct-light reservoirs"
   expect(result.enabled.rgb[0] / result.enabled.rgb[2]).toBeCloseTo(0.8, 1);
   expect(result.enabled.rgb[1] / result.enabled.rgb[2]).toBeCloseTo(0.9, 1);
   expect(result.disabled.rgb).toEqual([0, 0, 0]);
+  expect(result.plainRestir.rgb).toEqual([0, 0, 0]);
   expect(result.noGlass.rgb).toEqual([0, 0, 0]);
+});
+
+test("switches ReSTIR methods and resets the glass-scene accumulation", async ({
+  page,
+}) => {
+  await page.goto("/?restir=gi");
+  const method = page.getByLabel("ReSTIR method", { exact: true });
+  await expect(method).toHaveValue("gi");
+  await page.getByLabel("Scene", { exact: true }).selectOption("glassShapes");
+  const accumulated = page.getByTestId("stat-accumulated");
+  await expect
+    .poll(
+      async () => {
+        if (await page.getByRole("alert").count()) return "unavailable";
+        return Number(await accumulated.textContent()) >= 60
+          ? "ready"
+          : "pending";
+      },
+      { timeout: 20_000 },
+    )
+    .not.toBe("pending");
+  const notice = page.getByRole("alert");
+  if (await notice.count()) {
+    await expect(notice).toContainText(
+      /WebGPU is not available|No WebGPU adapter/,
+    );
+    test.skip(true, "requires a WebGPU adapter");
+  }
+  for (const value of ["pt-fallback", "gi"]) {
+    const before = Number(await accumulated.textContent());
+    await method.selectOption(value);
+    await expect(method).toHaveValue(value);
+    await expect
+      .poll(async () => Number(await accumulated.textContent()))
+      .toBeLessThan(before);
+    await expect
+      .poll(async () => Number(await accumulated.textContent()))
+      .toBeGreaterThanOrEqual(60);
+  }
+  await page.getByRole("radio", { name: "Denoised PT", exact: true }).click();
+  await expect(method).toHaveCount(0);
+  await page.getByRole("radio", { name: "ReSTIR", exact: true }).click();
+  await expect(method).toHaveValue("gi");
 });

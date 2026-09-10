@@ -5,7 +5,7 @@
 @group(1) @binding(4) var outIllumination: texture_storage_2d<rgba16float, write>;
 
 fn unreusedGlassIllumination(x: vec3f, n: vec3f) -> vec3f {
-  if (uni.glassShapeCount == 0u || (uni.flags & FLAG_GI_ENABLED) == 0u) {
+  if (uni.glassShapeCount == 0u || (uni.flags & FLAG_GI_ENABLED) == 0u || (uni.flags & FLAG_PT_FALLBACK) == 0u) {
     return vec3f(0.0);
   }
   let dir = cosineSampleHemisphere(n, rand(), rand());
