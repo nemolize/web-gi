@@ -1265,6 +1265,18 @@ export class GiRenderer {
     this.releaseTargets();
   }
 
+  private advancePresentationTransition(now: number): void {
+    const transition = this.presentationTransition;
+    if (transition !== null) {
+      if (!transition.pending) {
+        const step = Math.min(0.25, (now - transition.updatedAt) / 120);
+        transition.blend = Math.max(0, transition.blend - step);
+      }
+      transition.updatedAt = now;
+    }
+    if (transition?.blend === 0) this.presentationTransition = null;
+  }
+
   private writeUniforms(basis: CameraBasis, targets: Targets): void {
     const view = new DataView(this.uniformData);
     writeCamera(view, 0, basis);
@@ -1294,19 +1306,10 @@ export class GiRenderer {
       true,
     );
     const transition = this.presentationTransition;
-    if (transition !== null) {
-      const now = performance.now();
-      if (!transition.pending) {
-        const step = Math.min(0.25, (now - transition.updatedAt) / 120);
-        transition.blend = Math.max(0, transition.blend - step);
-      }
-      transition.updatedAt = now;
-    }
     const blend = transition?.blend ?? 0;
     view.setFloat32(208, transition?.size.width ?? 1, true);
     view.setFloat32(212, transition?.size.height ?? 1, true);
     view.setFloat32(216, blend, true);
-    if (blend === 0) this.presentationTransition = null;
     this.device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData);
   }
 
@@ -1334,6 +1337,7 @@ export class GiRenderer {
     this.lastFrameAt = started;
     const targets = this.ensureTargets();
     const basis = cameraBasis(camera, targets.width / targets.height);
+    this.advancePresentationTransition(performance.now());
     this.writeUniforms(basis, targets);
 
     const parity = this.parity;
@@ -1539,10 +1543,6 @@ export class GiRenderer {
     this.historyFrames += 1;
   }
 
-  /**
-   * Runs one submitted frame at a time so the comparison window measures work
-   * the GPU has completed, independent of display refresh rate and queue depth.
-   */
   private abortComparison(message: string): void {
     this.comparisonAbortController?.abort(new Error(message));
   }

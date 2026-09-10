@@ -1,6 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { cameraBasis, DEFAULT_CAMERA } from "@/gi/camera";
 import { GiRenderer } from "@/gi/renderer";
 import { DEFAULT_SETTINGS } from "@/gi/settings";
 
@@ -65,39 +64,28 @@ describe("interaction target reuse", () => {
       const renderer = rendererWithTargets();
       renderer.ensureTargets();
       renderer.motionUntil = 0;
-      const targets = renderer.ensureTargets();
-      Object.assign(renderer, {
-        scene: { quads: [], lights: [], clusters: [], glassShapes: [] },
-        uniformData: new ArrayBuffer(224),
-        device: { queue: { writeBuffer: vi.fn() } },
-      });
+      renderer.ensureTargets();
       let now = renderer.presentationTransition.updatedAt;
-      const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
-      try {
-        const basis = cameraBasis(DEFAULT_CAMERA, 4 / 3);
-        const readBlend = () => {
-          renderer.writeUniforms(basis, targets);
-          return new DataView(renderer.uniformData).getFloat32(216, true);
-        };
-        now += 500;
-        expect(readBlend()).toBe(1);
-        renderer.presentationTransition.pending = false;
-        let previous = 1;
-        let frames = 0;
-        while (renderer.presentationTransition !== null && frames < 20) {
-          now += interval;
-          const blend = readBlend();
-          expect(blend).toBeLessThan(previous);
-          expect(previous - blend).toBeLessThanOrEqual(0.250001);
-          previous = blend;
-          frames += 1;
-        }
-        expect(previous).toBe(0);
-        expect(frames).toBeGreaterThanOrEqual(4);
-        expect(renderer.presentationTransition).toBeNull();
-      } finally {
-        clock.mockRestore();
+      const advance = () => {
+        renderer.advancePresentationTransition(now);
+        return renderer.presentationTransition?.blend ?? 0;
+      };
+      now += 500;
+      expect(advance()).toBe(1);
+      renderer.presentationTransition.pending = false;
+      let previous = 1;
+      let frames = 0;
+      while (renderer.presentationTransition !== null && frames < 20) {
+        now += interval;
+        const blend = advance();
+        expect(blend).toBeLessThan(previous);
+        expect(previous - blend).toBeLessThanOrEqual(0.250001);
+        previous = blend;
+        frames += 1;
       }
+      expect(previous).toBe(0);
+      expect(frames).toBeGreaterThanOrEqual(4);
+      expect(renderer.presentationTransition).toBeNull();
     },
   );
 
