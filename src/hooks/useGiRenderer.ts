@@ -359,18 +359,19 @@ export const useGiRenderer = (
     const canvas = canvasRef.current;
     if (canvas === null) return;
 
-    let dragging = false;
+    let activePointerId: number | null = null;
     let lastX = 0;
     let lastY = 0;
 
     const onPointerDown = (event: PointerEvent): void => {
-      dragging = true;
+      if (activePointerId !== null) return;
+      activePointerId = event.pointerId;
       lastX = event.clientX;
       lastY = event.clientY;
       canvas.setPointerCapture(event.pointerId);
     };
     const onPointerMove = (event: PointerEvent): void => {
-      if (!dragging) return;
+      if (event.pointerId !== activePointerId) return;
       cancelMeasurement(
         "Performance capture stopped because the camera moved.",
       );
@@ -386,7 +387,8 @@ export const useGiRenderer = (
       rendererRef.current?.notifyCameraChanged();
     };
     const onPointerUp = (event: PointerEvent): void => {
-      dragging = false;
+      if (event.pointerId !== activePointerId) return;
+      activePointerId = null;
       if (canvas.hasPointerCapture(event.pointerId)) {
         canvas.releasePointerCapture(event.pointerId);
       }
@@ -407,12 +409,14 @@ export const useGiRenderer = (
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerUp);
+    canvas.addEventListener("lostpointercapture", onPointerUp);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointercancel", onPointerUp);
+      canvas.removeEventListener("lostpointercapture", onPointerUp);
       canvas.removeEventListener("wheel", onWheel);
     };
   }, [cancelMeasurement]);
