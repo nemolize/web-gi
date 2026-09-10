@@ -18,7 +18,7 @@ export const createWakeLockSession = (
   wakeLock: WakeLockRequester | undefined = browserWakeLock(),
 ): WakeLockSession => {
   let handle: WakeLockHandle | null = null;
-  let held = false;
+  let activeRequest: symbol | null = null;
 
   const discard = async (lock: WakeLockHandle): Promise<void> => {
     await lock.release().catch(() => undefined);
@@ -26,21 +26,20 @@ export const createWakeLockSession = (
 
   return {
     acquire: async () => {
-      if (held || wakeLock === undefined) return;
-      held = true;
+      if (activeRequest !== null || wakeLock === undefined) return;
+      const request = Symbol();
+      activeRequest = request;
       try {
         const acquired = await wakeLock.request("screen");
-        // Because release() can land while this request is still in flight, a
-        // lock arriving after it must go straight back instead of being kept.
-        if (held) handle = acquired;
+        if (activeRequest === request) handle = acquired;
         else await discard(acquired);
       } catch {
-        handle = null;
+        if (activeRequest === request) handle = null;
       }
     },
     release: async () => {
-      if (!held) return;
-      held = false;
+      if (activeRequest === null) return;
+      activeRequest = null;
       const active = handle;
       handle = null;
       if (active !== null) await discard(active);
