@@ -1,7 +1,39 @@
 import type { RenderSizeRequest } from "@/gi/render-size";
-import { MAX_RENDER_PIXELS, resolveRenderSize } from "@/gi/render-size";
+import {
+  MAX_RENDER_PIXELS,
+  resolveInteractionSize,
+  resolveRenderSize,
+} from "@/gi/render-size";
 
 const MAX_RENDER_DIMENSION = 8192;
+
+describe("interaction resolution", () => {
+  it("reduces the already capped high-DPI size and restores its exact dimensions", () => {
+    const full = resolveRenderSize({
+      cssWidth: 412,
+      cssHeight: 915,
+      resolutionScale: 0.75,
+      devicePixelRatio: 3,
+      maxDimension: MAX_RENDER_DIMENSION,
+    });
+    const moving = resolveInteractionSize(full, true);
+    expect(moving.width * moving.height).toBeLessThanOrEqual(
+      MAX_RENDER_PIXELS / 4,
+    );
+    expect(moving.width / moving.height).toBeCloseTo(
+      full.width / full.height,
+      2,
+    );
+    expect(resolveInteractionSize(full, false)).toEqual(full);
+  });
+
+  it("keeps a one-pixel extent usable", () => {
+    expect(resolveInteractionSize({ width: 1, height: 3 }, true)).toEqual({
+      width: 1,
+      height: 1,
+    });
+  });
+});
 
 type Overrides = Partial<RenderSizeRequest> &
   Pick<RenderSizeRequest, "cssWidth" | "cssHeight">;

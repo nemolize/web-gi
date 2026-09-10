@@ -45,10 +45,15 @@ group 0 — it tone-maps the filtered illumination into the swap-chain.
 
 ## Accumulation and camera motion
 
-Diffuse irradiance does not depend on the eye, so ReSTIR and the denoised path
-tracer normally keep their history across camera motion and drop it only on
-disocclusion. Reference rendering and glass scenes restart accumulation because
-their full reflected and refracted radiance is view-dependent.
+At a fixed resolution, ReSTIR and the denoised path tracer preserve diffuse
+irradiance history across camera motion and reject it on disocclusion. The
+default **Smooth camera motion** option halves each render dimension during
+motion and restores it after 200 ms without movement. Both transitions reset
+history because reservoir row strides change. GPU target allocations retain
+their full capacity; only the active rectangle and canvas backing size change.
+Reference rendering stays at full resolution, and glass scenes restart
+accumulation on motion because their radiance is view-dependent. See
+[interaction rendering](interaction-rendering.md) for the trade-offs and measurements.
 
 ## Scene representation
 

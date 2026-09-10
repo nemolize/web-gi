@@ -18,7 +18,12 @@ import type {
 import { createComparisonSession } from "@/gi/comparison-session";
 import { installDevHooks } from "@/gi/dev-hooks";
 import type { GpuFrameSample } from "@/gi/performance";
-import { MAX_RENDER_PIXELS, resolveRenderSize } from "@/gi/render-size";
+import type { RenderSize } from "@/gi/render-size";
+import {
+  MAX_RENDER_PIXELS,
+  resolveInteractionSize,
+  resolveRenderSize,
+} from "@/gi/render-size";
 import type { Scene } from "@/gi/scene";
 import {
   buildScene,
@@ -463,6 +468,9 @@ export class GiRenderer {
   private sceneBindGroup: GPUBindGroup;
   private scene: Scene;
   private targets: Targets | null = null;
+  private targetCapacity: RenderSize | null = null;
+  private motionUntil = 0;
+  private measuringPerformance = false;
 
   private settings: RenderSettings;
   private pixelBudget: number;
@@ -856,6 +864,7 @@ export class GiRenderer {
 
   /** Diffuse irradiance is view-independent; glass and reference radiance are not. */
   notifyCameraChanged(): void {
+    this.motionUntil = performance.now() + 200;
     this.comparisonGeneration += 1;
     this.abortComparison("The camera moved during the comparison.");
     if (
@@ -1117,30 +1126,56 @@ export class GiRenderer {
     if (current === null) return;
     this.releaseCapture();
     this.targets = null;
+    this.targetCapacity = null;
     for (const t of current.textures) t.destroy();
     for (const b of current.buffers) b.destroy();
   }
 
   private ensureTargets(): Targets {
-    const { width, height } = this.resolveSize();
+    const capacity = this.resolveSize();
     const current = this.targets;
+    const size = resolveInteractionSize(
+      capacity,
+      this.settings.smoothMotion &&
+        this.settings.mode !== "reference" &&
+        !this.measuringPerformance &&
+        performance.now() < this.motionUntil,
+    );
     if (
       current !== null &&
-      current.width === width &&
-      current.height === height
+      this.targetCapacity?.width === capacity.width &&
+      this.targetCapacity.height === capacity.height
     ) {
-      return current;
+      if (
+        this.comparisonInProgress ||
+        (current.width === size.width && current.height === size.height)
+      ) {
+        return current;
+      }
+      // Reuse the allocation; reservoir indexing and texture bounds follow the
+      // active size, so history must restart when its row stride changes.
+      const resized = { ...current, ...size };
+      this.targets = resized;
+      this.canvas.width = size.width;
+      this.canvas.height = size.height;
+      this.comparisonGeneration += 1;
+      this.resetAccumulation();
+      return resized;
     }
     this.releaseTargets();
-    this.canvas.width = width;
-    this.canvas.height = height;
+    this.canvas.width = size.width;
+    this.canvas.height = size.height;
     this.device.pushErrorScope("out-of-memory");
     this.device.pushErrorScope("validation");
-    const targets = this.createTargets(width, height);
+    const targets = {
+      ...this.createTargets(capacity.width, capacity.height),
+      ...size,
+    };
     this.targets = targets;
+    this.targetCapacity = capacity;
     this.comparisonGeneration += 1;
     this.resetAccumulation();
-    void this.watchAllocation(width * height);
+    void this.watchAllocation(capacity.width * capacity.height);
     return targets;
   }
 
@@ -1213,8 +1248,7 @@ export class GiRenderer {
 
   renderFrame(camera: OrbitCamera): void {
     if (this.lastCamera !== null && !camerasEqual(this.lastCamera, camera)) {
-      this.comparisonGeneration += 1;
-      this.abortComparison("The camera moved during the comparison.");
+      this.notifyCameraChanged();
     }
     this.lastCamera = camera;
     if (this.comparisonInProgress) return;
@@ -1652,12 +1686,8 @@ export class GiRenderer {
     return this.passProbe !== null;
   }
 
-  /**
-   * Per-pass timestamp writes are off outside a capture: they can inhibit
-   * driver-level pass merging, so leaving them on would measure a renderer the
-   * user never runs.
-   */
   setGpuTimingEnabled(enabled: boolean): void {
+    this.measuringPerformance = enabled;
     const probe = this.passProbe;
     if (probe === null) return;
     probe.capturing = enabled;
