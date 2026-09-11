@@ -37,7 +37,7 @@ fn glassDiagnostic(ro: vec3f, rd: vec3f) -> f32 {
   return select(1.0, transmittedCode, backdrop.hit && backdrop.materialIndex == 0u);
 }
 
-/** Mirrors the demodulated present path, minus `display`. */
+
 @compute @workgroup_size(8, 8)
 fn denoised(@builtin(global_invocation_id) gid: vec3u) {
   let pixel = gid.xy;
@@ -52,7 +52,7 @@ fn denoised(@builtin(global_invocation_id) gid: vec3u) {
     outLinear,
     pixel,
     vec4f(
-      illumination * packedAlbedo.xyz + emission,
+      select(illumination * packedAlbedo.xyz + emission, illumination, (uni.flags & FLAG_BDPT) != 0u),
       glassDiagnostic(uni.cam.pos.xyz, primaryDirection),
     ),
   );

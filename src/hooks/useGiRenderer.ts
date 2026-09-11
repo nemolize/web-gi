@@ -232,11 +232,9 @@ export const useGiRenderer = (
           const currentStats =
             measurement !== null || shouldUpdateStats ? active.stats : null;
           if (measurement !== null && currentStats !== null) {
-            // A frame the capture will not count still reaches the recorder,
-            // marked rejected — the window and the sample set then advance on
-            // the same frames instead of drifting apart.
             const usable =
               currentStats.atrousVariant !== null &&
+              currentStats.accumFrames > 0 &&
               currentStats.width > 0 &&
               currentStats.height > 0;
             const currentContext = usable
@@ -421,9 +419,24 @@ export const useGiRenderer = (
     };
   }, [cancelMeasurement]);
 
-  const updateSettings = useCallback((patch: Partial<RenderSettings>): void => {
-    setSettings((current) => ({ ...current, ...patch }));
-  }, []);
+  const updateSettings = useCallback(
+    (patch: Partial<RenderSettings>): void => {
+      setSettings((current) => ({ ...current, ...patch }));
+      if (
+        status === "error" &&
+        ((patch.mode !== undefined &&
+          patch.mode !== settingsRef.current.mode) ||
+          (patch.restirMethod !== undefined &&
+            patch.restirMethod !== settingsRef.current.restirMethod))
+      ) {
+        setStatus("initializing");
+        setStats(EMPTY_STATS);
+        setErrorMessage(null);
+        setRendererVersion((version) => version + 1);
+      }
+    },
+    [status],
+  );
 
   const resetView = useCallback((): void => {
     cancelMeasurement("Performance capture stopped because the camera moved.");

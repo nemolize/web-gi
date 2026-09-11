@@ -1,92 +1,109 @@
-# BDPT resampling coordinates
+# ReSTIR BDPT coordinates and integration
+
+The `ReSTIR BDPT` method is selected inside the ReSTIR renderer, including with
+`?restir=bdpt`. It uses camera/light initial sampling, separate normal and caustic
+reservoirs, temporal reuse, and pairwise spatial reuse. Scene geometry is static;
+scene changes discard history. The supported BSDFs are Lambertian diffuse and
+ideal dielectric reflection/transmission.
+
+## Estimator coordinates
 
 `bdpt-candidate.wgsl` returns a Monte Carlo contribution before technique MIS:
-subpath throughputs already include reciprocal sampling probabilities.
-These values are estimators, not the paper's unweighted path-space contribution.
-For reservoir integration in primary-sample coordinates, use the target
-`luminance(estimator) * techniqueMisWeight`. The initial contribution weight is
-one for a camera technique and `1 / globallyLaunchedLightPaths` for a light
-technique. Compressing several initial candidates adds its own reservoir weight.
+subpath throughputs already include reciprocal proposal probabilities. The
+reservoir target is `luminance(estimator) * techniqueMisWeight`. Initial camera
+techniques have contribution weight one; light techniques use
+`1 / globallyLaunchedLightPaths`. Technique indices are preserved during reuse.
 
-`createBdptInitialPasses` generates a camera subpath and a paired light subpath
-per pixel. A separate light-tracing pass launches one additional light subpath
-per pixel; `lightPathCount` reports this latter count for normalization.
-Its dimensions must match the scene uniform. Light-tracing prefixes are compressed into
-separate normal and caustic samples, then routed through per-pixel linked lists.
-The gather pass sums the already-normalized estimates without dividing by the
-number of arrivals. Both output reservoirs have confidence one, even if empty.
-List heads are cleared before each frame; gathering runs after light generation.
+`createBdptInitialPasses` generates one camera subpath and paired light subpath
+per pixel. A separate light pass launches one additional subpath per pixel;
+`lightPathCount` reports this latter normalization count. Light-tracing prefixes
+are compressed into normal and caustic samples and routed through linked lists.
+Gathering sums their already-normalized estimates without dividing by arrivals.
+Both initial reservoirs have confidence one, including empty reservoirs.
 
-Candidate evaluation and replay share an ordered camera-to-emitter depth check.
+Candidate evaluation and replay share Reference PT's ordered depth budget.
 After the last permitted diffuse vertex, only a direct emitter connection is
-accepted, matching Reference PT's stopping rule. The total step allowance is
-also bounded by the BDPT vertex capacity.
+accepted. Full-path technique MIS is recomputed after shifts rather than cached
+with the paper's recursive acceleration. `bdptMisEdgeFactor` uses BDPT's
+relative delta-zero remapping; it is not an absolute proposal density.
 
-The technique remains part of the sample during reuse. Replaying a camera
-prefix with its original random variables and reconnecting it to the unchanged
-light prefix is the identity map in these coordinates, with Jacobian one.
-Camera-only paths replay their entire prefix.
+## Hybrid shifts
 
-For a non-caustic light-tracing sample, preserve its subpixel film offset and
-move its last vertex to the primary surface at the destination pixel. Keep the
-preceding light prefix fixed. Let `qA` be the density with which that prefix
-samples the last vertex, and `cA` the camera's conditional-pixel area density.
-The forward Jacobian in primary-sample coordinates is
+Camera-side shifts reconnect at the second of the first consecutive rough
+camera vertices. The reservoir stores that point and vertex index in
+`cameraReconnection`; `coordinates.cameraSurface` stores its quad index and side.
+Replaying the prefix consumes the same random draws, replaces the selected
+edge, and resumes sampling at the fixed diffuse vertex. Its outgoing Lambertian
+sample is independent of the changed incident direction, reconstructing the
+remaining suffix without storing all vertices.
+
+Both directions must find the same first eligible pair. The forced edge must
+remain visible and hit the same quad side. In primary-sample coordinates its
+Jacobian is `qA_destination / qA_source`, where `qA` is the density of sampling
+the fixed vertex from its preceding camera vertex. Repeated shifts evaluate
+that density from the actual reconstructed source path. When neither path has
+an internal pair, random replay has Jacobian one; the existing camera/light
+connection supplies the boundary reconnection. Camera-only paths also reconnect
+when an eligible pair exists.
+
+A non-caustic light-tracing shift preserves subpixel film coordinates and moves
+its last vertex to the destination primary surface, keeping the preceding light
+prefix fixed. Its Jacobian is
 
 ```
 J = (qA_destination / qA_source) * (cA_source / cA_destination).
 ```
 
-The first ratio converts the endpoint-area map back to light-sampling
-coordinates. The second is the area Jacobian for preserving film coordinates.
-The reverse map must recover the source endpoint and reciprocal Jacobian.
-Emitter-only paths use emitter selection per area for `qA`.
+Here `qA` is the light prefix's endpoint-area proposal density and `cA` is the
+camera's conditional-pixel area density. The second ratio accounts for the
+endpoint-area change when preserving film coordinates.
 
-Light-tracing samples whose preceding vertex is delta use replay only and
-cannot move to an arbitrary spatial neighbor. `bdptShiftCaustic` replays the
-light path for the destination camera, letting the endpoint projection select
-its new pixel. The random-variable map has Jacobian one. Normal reservoirs
-use `bdptShiftBetweenCameras` for temporal shifts and `bdptShiftReplay` for
-same-camera spatial shifts.
+Caustic light paths, whose preceding vertex is delta, cannot reconnect to an
+arbitrary spatial neighbor. Temporal reuse replays their light seeds and lets
+the endpoint projection select the destination pixel, with Jacobian one.
 
-`bdptTemporalReservoir` combines estimates from the same pixel domain using
-confidence-weighted averaging. Empty reservoirs retain their confidence and
-contribute zero radiance. This shortcut requires an unchanged camera. All reuse
-requires an unchanged scene, resolution, and sampling budget; callers must
-discard history when those change.
-The history confidence cap affects the averaging weight, not the cached estimate.
+## Reuse and lifetime
 
-`createBdptPasses` records initial sampling, caustic reprojection, temporal
-merging, and pairwise spatial resampling. Its `reservoirs` getter returns the latest output
-after `record`. `resetHistory` clears both history buffers on the next recording;
-the caller must invoke it when the scene or sampling budget changes. Resolution
-changes require destroying and recreating the passes at the new dimensions.
-The scene uniform must contain the current and previous frame's cameras.
+Temporal normal reuse evaluates forward and reverse mappings for pairwise MIS.
+Caustic samples are scattered through per-pixel lists. Their MIS weights use
+source and current initial confidence, while accumulated confidence uses a
+proxy from diffuse surface reprojection, independently of actual arrivals
+(paper Section 5.1 and Appendix A). An unchanged camera permits same-domain
+confidence-weighted averaging. Empty history retains confidence.
 
-During camera motion, normal temporal reuse uses pairwise MIS with forward and
-reverse shifts. Replayed caustic samples are routed through per-pixel linked
-lists. Their MIS weights use the source reservoir's confidence and the current
-initial reservoir's confidence. The accumulated caustic confidence instead uses
-a proxy from diffuse surface reprojection, independently of how many samples
-land in the pixel, as described in the paper's Section 5.1 and Appendix A.
+Spatial reuse selects geometry-compatible neighbors independently of their
+samples. Pairwise MIS scales center confidence by requested neighbor count,
+includes a defensive center term, and normalizes by accepted neighbors plus
+one. Reverse shifts provide competing density for the center. Empty neighbors
+retain confidence. Spatial reuse preserves the temporal caustic reservoir.
 
-Spatial reuse applies only to normal reservoirs. Geometry-compatible neighbors
-are selected independently of their reservoir samples. Pairwise MIS scales the
-center confidence by the requested neighbor count, includes a defensive center
-term, and normalizes by the accepted neighbor count plus one. Reverse shifts
-provide the competing density for the center sample. Empty neighbors still
-contribute confidence. The resulting confidence is capped by `maxHistory`;
-caustic reservoirs pass through spatial reuse unchanged.
+`createBdptPasses` records initialization, reprojection, temporal merging, and
+spatial reuse. Read its `reservoirs` getter after recording. `resetHistory`
+clears both histories on the next recording; scene or sampling changes require
+this reset. Resolution changes require recreating the fixed-size passes.
+Uniforms must contain the current and previous frame's cameras.
 
-These passes currently run in the development browser probes. The paper's
-camera-side hybrid shift, which reconnects at consecutive rough vertices and
-preserves the remaining suffix, is not implemented: camera prefixes currently
-use full random replay. That mapping and application renderer integration remain
-pending. Animated scene geometry is not supported by the replay history.
+## Application output
 
-`bdptMisEdgeFactor` produces relative scores using the delta-zero remapping
-convention of BDPT. Those scores must never be used as absolute proposal PDFs
-or substituted for the shift's `qA` and `cA`.
+BDPT resolves full radiance into the existing illumination texture. Presentation,
+linear capture, and transition snapshots bypass albedo remodulation and emission
+addition for this method. The shared denoiser remains optional; its filtering is
+separate from the raw estimator tests. Camera motion resets denoiser history but
+retains reservoir history unless adaptive resolution changes.
+
+Direct lighting controls camera–diffuse–emitter paths; indirect lighting controls
+longer paths, including glass transport. Primary emitter visibility remains.
+Both initial sampling and replay use this partition. The path-reuse controls
+apply to BDPT; separate ReSTIR DI candidate/reuse controls are hidden.
+
+Pipelines compile lazily and are cached per device and scene layout. Size-bound
+buffers are destroyed on recreation, method changes, and renderer destruction;
+stale asynchronous initializations are destroyed on completion. GPU allocation
+errors are captured. Render dimensions account for the largest 192-byte binding
+stride and total per-pixel allocation: 1,032 bytes for BDPT plus 364 bytes for
+existing targets. This retains the existing target-memory budget rather than
+allocating the extra buffers at the old pixel limit. This size limit also applies
+to reference/comparison modes while the BDPT method is selected.
 
 References: [ReSTIR BDPT](https://research.nvidia.com/labs/rtr/publication/hedstrom2025restir/)
-and [PBRT's BDPT density and MIS implementation](https://github.com/mmp/pbrt-v3/blob/master/src/integrators/bdpt.cpp).
+and [PBRT BDPT](https://github.com/mmp/pbrt-v3/blob/master/src/integrators/bdpt.cpp).

@@ -37,8 +37,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let random = (f32(id.x / 4u) + 0.5) / 256.0;
   var current = bdptEmptyReplayReservoir(1.0);
   var previous = bdptEmptyReplayReservoir(20.0);
-  let a = BdptReplaySample(vec4u(2u, 1u, 123u, 456u), vec4f(0.2, 0.3, 1.0, 0.0));
-  let b = BdptReplaySample(vec4u(3u, 1u, 789u, 987u), vec4f(0.7, 0.8, 1.0, 0.0));
+  let a = BdptReplaySample(vec4u(2u, 1u, 123u, 456u), BdptReplayCoordinates(vec2f(0.2, 0.3), 1u, 0u), vec4f(0.0));
+  let b = BdptReplaySample(vec4u(3u, 1u, 789u, 987u), BdptReplayCoordinates(vec2f(0.7, 0.8), 1u, 0u), vec4f(0.0));
   let candidateA = BdptCandidate(vec3f(2.0), 0.5, vec2u(0u));
   let candidateB = BdptCandidate(vec3f(6.0), 0.5, vec2u(0u));
   if (mode != 3u) {
@@ -52,7 +52,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let limit = select(4.0, 0.0, mode == 2u);
   let result = bdptTemporalReservoir(current, previous, limit, random);
   results[id.x] = Result(vec4f(bdptReservoirRadiance(result.path), result.path.confidence),
-    vec4f(result.path.sample.techniqueSeeds), result.filmOffsetOverride);
+    vec4f(result.path.sample.techniqueSeeds), vec4f(result.coordinates.filmOffset, f32(result.coordinates.overrideFilm), f32(result.coordinates.cameraSurface)));
 }
 `;
 

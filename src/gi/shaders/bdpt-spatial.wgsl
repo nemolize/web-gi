@@ -72,7 +72,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   gRngState = selectionState;
   let selectedCenter = bdptUpdateReservoir(&output.path, center.normal.path.sample,
     center.normal.path.contributionWeight, centerWeight / f32(count), 1.0, bdptRandom());
-  if (selectedCenter) { output.filmOffsetOverride = center.normal.filmOffsetOverride; }
+  if (selectedCenter) { output.coordinates = center.normal.coordinates; output.cameraReconnection = center.normal.cameraReconnection; }
   output.path.confidence = min(confidence, f32(max(1u, uni.maxHistory)));
   bdptFinalizeReservoir(&output.path);
   finalReservoirs[index] = BdptReservoirPair(output, center.caustic);

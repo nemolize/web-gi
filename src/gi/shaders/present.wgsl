@@ -36,7 +36,7 @@ fn fsRestir(@builtin(position) coord: vec4f) -> @location(0) vec4f {
   let illumination = textureLoad(texColor, pixel, 0).xyz;
   let albedo = textureLoad(texAlbedo, pixel, 0).xyz;
   let emission = textureLoad(texEmission, pixel, 0).xyz;
-  let color = display(illumination * albedo + emission);
+  let color = display(select(illumination * albedo + emission, illumination, (uni.flags & FLAG_BDPT) != 0u));
   if (uni.transition.z > 0.0) {
     return mix(color, transitionColor(coord.xy), uni.transition.z);
   }
