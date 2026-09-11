@@ -2,6 +2,8 @@ import type { SceneVariant } from "@/gi/scene";
 
 export const RENDER_MODES = ["restir", "path-traced", "reference"] as const;
 export type RenderMode = (typeof RENDER_MODES)[number];
+export const RESTIR_METHODS = ["gi", "pt-fallback"] as const;
+export type RestirMethod = (typeof RESTIR_METHODS)[number];
 export const COMPARISON_MODES = ["restir", "path-traced"] as const;
 export type ComparisonMode = (typeof COMPARISON_MODES)[number];
 export const MATRIX_PRESETS = ["matrix", "probe"] as const;
@@ -11,6 +13,7 @@ export type AutoComparisonMode = ComparisonMode | MatrixPreset;
 export type RenderSettings = {
   readonly scene: SceneVariant;
   readonly mode: RenderMode;
+  readonly restirMethod: RestirMethod;
   readonly diEnabled: boolean;
   readonly diTemporal: boolean;
   readonly diSpatial: boolean;
@@ -39,6 +42,7 @@ export type RenderSettings = {
 export const DEFAULT_SETTINGS: RenderSettings = {
   scene: "classic",
   mode: "restir",
+  restirMethod: "pt-fallback",
   diEnabled: true,
   diTemporal: true,
   diSpatial: true,
@@ -169,6 +173,8 @@ const enumValue = <T extends string>(
 export const sanitizedRenderQueryParams = (search: string): URLSearchParams => {
   const source = new URLSearchParams(search);
   const sanitized = new URLSearchParams();
+  const restirMethod = enumValue(source, "restir", RESTIR_METHODS);
+  if (restirMethod !== undefined) sanitized.set("restir", restirMethod);
   const matrix = enumValue(source, "preset", MATRIX_PRESETS);
   if (matrix !== undefined) {
     sanitized.set("preset", matrix);
@@ -223,6 +229,8 @@ export const settingsFromSearch = (search: string): RenderSettings => {
   return {
     ...base,
     ...overrides,
+    restirMethod:
+      enumValue(params, "restir", RESTIR_METHODS) ?? base.restirMethod,
     mode:
       autoComparisonMode(params) === null
         ? (enumValue(params, "mode", RENDER_MODES) ?? base.mode)
@@ -252,6 +260,7 @@ export const FLAG_GI_ENABLED = 1 << 3;
 export const FLAG_GI_TEMPORAL = 1 << 4;
 export const FLAG_GI_SPATIAL = 1 << 5;
 export const FLAG_DENOISE = 1 << 6;
+export const FLAG_PT_FALLBACK = 1 << 7;
 
 export const packFlags = (settings: RenderSettings): number =>
   (settings.diEnabled ? FLAG_DI_ENABLED : 0) |
@@ -260,7 +269,8 @@ export const packFlags = (settings: RenderSettings): number =>
   (settings.giEnabled ? FLAG_GI_ENABLED : 0) |
   (settings.giTemporal ? FLAG_GI_TEMPORAL : 0) |
   (settings.giSpatial ? FLAG_GI_SPATIAL : 0) |
-  (settings.denoise ? FLAG_DENOISE : 0);
+  (settings.denoise ? FLAG_DENOISE : 0) |
+  (settings.restirMethod === "pt-fallback" ? FLAG_PT_FALLBACK : 0);
 
 /**
  * Settings that invalidate accumulated history. Camera motion is deliberately
@@ -270,6 +280,7 @@ export const packFlags = (settings: RenderSettings): number =>
 const ACCUMULATION_KEYS = [
   "scene",
   "mode",
+  "restirMethod",
   "diEnabled",
   "diTemporal",
   "diSpatial",

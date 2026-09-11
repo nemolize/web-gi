@@ -8,7 +8,7 @@ import {
 
 import type { SceneVariant } from "@/gi/scene";
 import { SCENE_LABELS, SCENE_VARIANTS } from "@/gi/scene";
-import type { RenderMode, RenderSettings } from "@/gi/settings";
+import type { RenderMode, RenderSettings, RestirMethod } from "@/gi/settings";
 
 const SCENE_OPTIONS = SCENE_VARIANTS.map((value) => ({
   value,
@@ -211,6 +211,19 @@ const SettingsSections = memo(
               updateSettings({ mode });
             }}
           />
+          {restir && (
+            <Select<RestirMethod>
+              label="ReSTIR method"
+              value={settings.restirMethod}
+              options={[
+                { value: "gi", label: "ReSTIR" },
+                { value: "pt-fallback", label: "ReSTIR + PT fallback" },
+              ]}
+              onChange={(restirMethod) => {
+                updateSettings({ restirMethod });
+              }}
+            />
+          )}
           <Select<SceneVariant>
             label="Scene"
             value={settings.scene}

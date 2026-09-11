@@ -174,6 +174,7 @@ const FLAG_GI_ENABLED: u32 = 8u;
 const FLAG_GI_TEMPORAL: u32 = 16u;
 const FLAG_GI_SPATIAL: u32 = 32u;
 const FLAG_DENOISE: u32 = 64u;
+const FLAG_PT_FALLBACK: u32 = 128u;
 
 // ---------------------------------------------------------------- RNG
 
