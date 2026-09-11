@@ -5,7 +5,8 @@
 
 fn bdptSumReservoir(output: ptr<function, BdptReplayReservoir>, input: BdptReplayReservoir) {
   if (bdptUpdateReservoir(&(*output).path, input.path.sample, input.path.contributionWeight, 1.0, 1.0, bdptRandom())) {
-    (*output).filmOffsetOverride = input.filmOffsetOverride;
+    (*output).coordinates = input.coordinates;
+    (*output).cameraReconnection = input.cameraReconnection;
   }
 }
 

@@ -1,6 +1,13 @@
+struct BdptReplayCoordinates {
+  filmOffset: vec2f,
+  overrideFilm: u32,
+  cameraSurface: u32,
+}
+
 struct BdptReplaySample {
   techniqueSeeds: vec4u,
-  filmOffsetOverride: vec4f,
+  coordinates: BdptReplayCoordinates,
+  cameraReconnection: vec4f,
 }
 
 struct BdptReplayEvaluation {
@@ -38,9 +45,9 @@ fn bdptReplay(sample: BdptReplaySample, camera: Camera, pixel: vec2u, lightSubpa
     gRngState = sample.techniqueSeeds.z;
     let jitter = vec2f(bdptRandom(), bdptRandom());
     let pathSeed = gRngState;
-    bdptBuildCameraSubpath(camera, bdptFilmNdc(vec2f(pixel) + jitter), pathSeed, t - 1u, cameraPath);
-  } else if (sample.filmOffsetOverride.z > 0.0) {
-    let ray = primaryRayDir(camera, bdptFilmNdc(vec2f(pixel) + sample.filmOffsetOverride.xy));
+    bdptBuildCameraReplay(camera, bdptFilmNdc(vec2f(pixel) + jitter), pathSeed, t - 1u, sample.cameraReconnection, sample.coordinates.cameraSurface, cameraPath);
+  } else if (sample.coordinates.overrideFilm != 0u) {
+    let ray = primaryRayDir(camera, bdptFilmNdc(vec2f(pixel) + sample.coordinates.filmOffset));
     let endpoint = traceScenePrimary(camera.pos.xyz, ray);
     if (!endpoint.hit || endpoint.materialIndex > 0u || (*lightPath).count < max(1u, s - 1u)) {
       return evaluation;
@@ -94,8 +101,23 @@ fn bdptShiftBetweenCameras(sample: BdptReplaySample, sourceCamera: Camera, desti
   var shifted: BdptShift;
   shifted.sample = sample;
   if (sample.techniqueSeeds.y > 1u) {
-    shifted.evaluation = bdptReplay(sample, destinationCamera, destinationPixel, lightSubpathCount, workspace);
-    shifted.jacobian = 1.0;
+    let source = bdptReplay(sample, sourceCamera, sourcePixel, lightSubpathCount, workspace);
+    if (maxComponent(source.candidate.estimator) <= 0.0) { return shifted; }
+    let connection = bdptCameraReconnection(&(*workspace).cameraPath);
+    let sourcePdf = bdptCameraConnectionPdf(&(*workspace).cameraPath, connection);
+    if (connection > 0u) {
+      let surface = (*workspace).cameraPath.vertices[connection - 1u].surface;
+      shifted.sample.cameraReconnection = vec4f(surface.pos, f32(connection));
+      shifted.sample.coordinates.cameraSurface = surface.quadIndex * 2u + select(0u, 1u, surface.frontFace);
+    }
+    shifted.evaluation = bdptReplay(shifted.sample, destinationCamera, destinationPixel, lightSubpathCount, workspace);
+    if (maxComponent(shifted.evaluation.candidate.estimator) <= 0.0
+      || bdptCameraReconnection(&(*workspace).cameraPath) != connection) { return shifted; }
+    if (connection == 0u) {
+      shifted.jacobian = 1.0;
+    } else if (sourcePdf > 0.0) {
+      shifted.jacobian = bdptCameraConnectionPdf(&(*workspace).cameraPath, connection) / sourcePdf;
+    }
     return shifted;
   }
   let source = bdptReplay(sample, sourceCamera, sourcePixel, lightSubpathCount, workspace);
@@ -112,7 +134,7 @@ fn bdptShiftBetweenCameras(sample: BdptReplaySample, sourceCamera: Camera, desti
   if (source.caustic || source.lightPdfArea <= 0.0) {
     return shifted;
   }
-  shifted.sample.filmOffsetOverride = vec4f(fract(source.film), 1.0, 0.0);
+  shifted.sample.coordinates = BdptReplayCoordinates(fract(source.film), 1u, 0u);
   shifted.evaluation = bdptReplay(shifted.sample, destinationCamera, destinationPixel, lightSubpathCount, workspace);
   if (shifted.evaluation.cameraPdfArea > 0.0) {
     // The estimator includes proposal PDFs; convert the endpoint shift to primary-sample measure.
@@ -129,7 +151,7 @@ fn bdptShiftReplay(sample: BdptReplaySample, camera: Camera, sourcePixel: vec2u,
 fn bdptShiftCaustic(sample: BdptReplaySample, destinationCamera: Camera, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptShift {
   var shifted: BdptShift;
   shifted.sample = sample;
-  if (sample.techniqueSeeds.y != 1u || sample.filmOffsetOverride.z > 0.0) { return shifted; }
+  if (sample.techniqueSeeds.y != 1u || sample.coordinates.overrideFilm != 0u) { return shifted; }
   shifted.evaluation = bdptReplay(sample, destinationCamera, vec2u(0u), lightSubpathCount, workspace);
   if (shifted.evaluation.caustic && shifted.evaluation.cameraPdfArea > 0.0) {
     shifted.jacobian = 1.0;

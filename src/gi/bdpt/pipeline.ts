@@ -26,7 +26,7 @@ const prefix = [
   motion,
 ].join("\n");
 
-export const createBdptPipeline = async (
+const compileBdptPipeline = async (
   device: GPUDevice,
   sceneLayout: GPUBindGroupLayout,
   label: string,
@@ -52,4 +52,31 @@ export const createBdptPipeline = async (
     }),
     compute: { module, entryPoint: "main" },
   });
+};
+
+const pipelines = new WeakMap<
+  GPUDevice,
+  WeakMap<GPUBindGroupLayout, Map<string, Promise<GPUComputePipeline>>>
+>();
+
+export const createBdptPipeline = (
+  ...args: Parameters<typeof compileBdptPipeline>
+) => {
+  const [device, sceneLayout, label] = args;
+  let layouts = pipelines.get(device);
+  if (!layouts) {
+    layouts = new WeakMap();
+    pipelines.set(device, layouts);
+  }
+  let cache = layouts.get(sceneLayout);
+  if (!cache) {
+    cache = new Map();
+    layouts.set(sceneLayout, cache);
+  }
+  let pipeline = cache.get(label);
+  if (!pipeline) {
+    pipeline = compileBdptPipeline(...args);
+    cache.set(label, pipeline);
+  }
+  return pipeline;
 };

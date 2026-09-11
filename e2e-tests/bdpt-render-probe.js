@@ -68,7 +68,7 @@ export const runBdptRenderProbe = async (
         integers[40] = 3;
         integers[39] = spatialSamples;
         integers[41] = historyCap;
-        integers[42] = reuse ? 48 : 0;
+        integers[42] = 256 | 9 | (reuse ? 48 : 0);
         floats[43] = 0.15;
         integers.set(
           [
@@ -120,7 +120,7 @@ export const runBdptRenderProbe = async (
         });
         passes = await createPasses(device, layout, width, height);
         const staging = device.createBuffer({
-          size: pixels * 128,
+          size: pixels * 160,
           usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
         });
         const referenceLayout = device.createBindGroupLayout({
@@ -182,7 +182,7 @@ export const runBdptRenderProbe = async (
           usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
         });
         const initialStaging = device.createBuffer({
-          size: pixels * 128,
+          size: pixels * 160,
           usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
         });
         let spatialSelectionsChanged = 0;
@@ -208,7 +208,7 @@ export const runBdptRenderProbe = async (
               0,
               initialStaging,
               0,
-              pixels * 128,
+              pixels * 160,
             );
           }
           const referencePass = encoder.beginComputePass();
@@ -225,7 +225,7 @@ export const runBdptRenderProbe = async (
             0,
             staging,
             0,
-            pixels * 128,
+            pixels * 160,
           );
           device.queue.submit([encoder.finish()]);
           await staging.mapAsync(GPUMapMode.READ);
@@ -236,7 +236,7 @@ export const runBdptRenderProbe = async (
             const original = new Uint32Array(initialStaging.getMappedRange());
             const selected = new Uint32Array(values.buffer);
             for (let index = 0; index < pixels; index++) {
-              const offset = index * 32;
+              const offset = index * 40;
               if (
                 [0, 1, 2, 3].some(
                   (channel) =>
@@ -244,7 +244,7 @@ export const runBdptRenderProbe = async (
                 )
               )
                 spatialSelectionsChanged++;
-              for (let channel = 16; channel < 32; channel++)
+              for (let channel = 20; channel < 40; channel++)
                 causticsPreserved &&=
                   original[offset + channel] === selected[offset + channel];
             }
@@ -256,7 +256,7 @@ export const runBdptRenderProbe = async (
           const values = await read(frame);
           for (let pixel = 0; pixel < pixels; pixel++) {
             for (let kind = 0; kind < 2; kind++) {
-              const offset = pixel * 32 + kind * 16;
+              const offset = pixel * 40 + kind * 20;
               const mis = values[offset + 7];
               const weight = values[offset + 9];
               const target = values[offset + 11];
@@ -313,7 +313,7 @@ export const runBdptRenderProbe = async (
         let darkCleared = true;
         for (let frame = frames; frame < frames + 2; frame++) {
           const values = await read(frame);
-          for (let offset = 0; offset < values.length; offset += 16) {
+          for (let offset = 0; offset < values.length; offset += 20) {
             darkCleared &&=
               values[offset + 8] === 0 &&
               values[offset + 9] === 0 &&

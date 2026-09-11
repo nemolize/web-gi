@@ -33,6 +33,12 @@ fn bdptEvaluateCandidate(camera: Camera, cameraVertices: u32, lightVertices: u32
   if (!bdptPathWithinBudget(path)) {
     return candidate;
   }
+  if ((uni.flags & FLAG_BDPT) != 0u && (*path).count > 2u) {
+    let direct = (*path).count == 3u && !(*path).vertices[1].delta;
+    if ((direct && (uni.flags & FLAG_DI_ENABLED) == 0u) || (!direct && (uni.flags & FLAG_GI_ENABLED) == 0u)) {
+      return candidate;
+    }
+  }
   if (lightVertices == 0u) {
     let vertex = (*cameraPath).vertices[cameraVertices - 2u];
     candidate.estimator = vertex.throughput * vertex.surface.emission;

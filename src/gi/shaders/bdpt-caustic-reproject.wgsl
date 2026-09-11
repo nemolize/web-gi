@@ -18,7 +18,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   reservoir.path.sample = BdptPathSample(shifted.sample.techniqueSeeds,
     vec4f(shifted.evaluation.candidate.estimator, shifted.evaluation.candidate.misWeight));
   reservoir.path.targetDensity = bdptTarget(reservoir.path.sample);
-  reservoir.filmOffsetOverride = shifted.sample.filmOffsetOverride;
+  reservoir.coordinates = shifted.sample.coordinates;
+  reservoir.cameraReconnection = shifted.sample.cameraReconnection;
   temporalNodes[index].reservoir = reservoir;
   temporalNodes[index].sourceTarget = source.path.targetDensity;
   temporalNodes[index].sourceConfidence = confidence;

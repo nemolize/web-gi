@@ -6,6 +6,8 @@ import {
   TILED_ATROUS_STORAGE_BYTES,
   TILED_ATROUS_WORKGROUP_SIZE,
 } from "@/gi/atrous";
+import type { BdptRuntime } from "@/gi/bdpt/runtime";
+import { createBdptRuntime } from "@/gi/bdpt/runtime";
 import type { CameraBasis, OrbitCamera } from "@/gi/camera";
 import { cameraBasis } from "@/gi/camera";
 import type { LinearImage } from "@/gi/compare";
@@ -273,7 +275,7 @@ type Targets = {
   readonly atrous: readonly (readonly GPUBindGroup[])[];
   readonly presentRestir: GPUBindGroup;
   readonly presentReference: readonly GPUBindGroup[];
-  /** Kept for `captureLinearImage`, which binds them outside the frame graph. */
+  readonly illuminationView: GPUTextureView;
   readonly atrousView: GPUTextureView;
   readonly albedoView: GPUTextureView;
   readonly emissionView: GPUTextureView;
@@ -463,6 +465,13 @@ export class GiRenderer {
   private readonly atrousBuffers: readonly GPUBuffer[];
   private readonly uniformData = new ArrayBuffer(UNIFORM_BYTES);
 
+  private bdpt: BdptRuntime | null = null;
+  private bdptGeneration = 0;
+  private bdptPending: {
+    width: number;
+    height: number;
+    promise: Promise<void>;
+  } | null = null;
   private capture: CaptureResources | null = null;
   private capturePipelines: CapturePipelines | null = null;
   private captureInProgress = false;
@@ -878,13 +887,14 @@ export class GiRenderer {
     }
   }
 
-  /** Diffuse irradiance is view-independent; glass and reference radiance are not. */
   notifyCameraChanged(): void {
     this.presentationTransition = null;
     this.motionUntil = performance.now() + 200;
     this.comparisonGeneration += 1;
     this.abortComparison("The camera moved during the comparison.");
-    if (
+    if (this.usesBdpt()) {
+      this.historyFrames = 0;
+    } else if (
       this.settings.mode === "reference" ||
       this.scene.glassShapes.length > 0
     ) {
@@ -893,6 +903,7 @@ export class GiRenderer {
   }
 
   resetAccumulation(): void {
+    this.bdpt?.resetHistory();
     this.presentationTransition = null;
     this.accumFrames = 0;
     this.historyFrames = 0;
@@ -942,6 +953,74 @@ export class GiRenderer {
     this.abortComparison(message);
   }
 
+  private usesBdpt(): boolean {
+    return (
+      this.settings.mode === "restir" && this.settings.restirMethod === "bdpt"
+    );
+  }
+
+  private releaseBdpt(): void {
+    this.bdptGeneration++;
+    this.bdpt?.destroy();
+    this.bdpt = null;
+    this.bdptPending = null;
+  }
+
+  private prepareBdpt(targets: Targets): boolean {
+    if (!this.usesBdpt()) {
+      if (this.bdpt || this.bdptPending) this.releaseBdpt();
+      return true;
+    }
+    if (
+      this.bdpt?.width === targets.width &&
+      this.bdpt.height === targets.height
+    )
+      return true;
+    if (
+      this.bdptPending?.width === targets.width &&
+      this.bdptPending.height === targets.height
+    )
+      return false;
+    this.releaseBdpt();
+    const generation = this.bdptGeneration;
+    const promise = createBdptRuntime(
+      this.device,
+      this.layouts.scene,
+      targets.width,
+      targets.height,
+      targets.illuminationView,
+    )
+      .then((runtime) => {
+        if (this.destroyed || generation !== this.bdptGeneration) {
+          runtime.destroy();
+          return;
+        }
+        this.bdpt = runtime;
+        this.bdptPending = null;
+        this.accumFrames = 0;
+        this.historyFrames = 0;
+      })
+      .catch((error: unknown) => {
+        if (!this.destroyed && generation === this.bdptGeneration) {
+          this.bdptPending = null;
+          this.allocationFailure = `ReSTIR BDPT could not initialize: ${String(error)}`;
+        }
+      });
+    this.bdptPending = {
+      width: targets.width,
+      height: targets.height,
+      promise,
+    };
+    return false;
+  }
+
+  private async prepareComparisonRenderer(): Promise<void> {
+    this.prepareBdpt(this.ensureTargets());
+    await this.bdptPending?.promise;
+    if (this.allocationFailure !== null)
+      throw new Error(this.allocationFailure);
+  }
+
   private resolveSize(): { width: number; height: number } {
     const rect = this.canvas.getBoundingClientRect();
     return resolveRenderSize({
@@ -953,7 +1032,15 @@ export class GiRenderer {
         this.device.limits.maxTextureDimension2D,
         this.device.limits.maxComputeWorkgroupsPerDimension * WORKGROUP_SIZE,
       ),
-      maxPixels: this.pixelBudget,
+      maxPixels:
+        this.settings.restirMethod === "bdpt"
+          ? Math.min(
+              this.pixelBudget,
+              Math.floor((MAX_RENDER_PIXELS * 364) / (364 + 1032)),
+              Math.floor(this.device.limits.maxStorageBufferBindingSize / 192),
+              Math.floor(this.device.limits.maxBufferSize / 192),
+            )
+          : this.pixelBudget,
     });
   }
 
@@ -1143,6 +1230,7 @@ export class GiRenderer {
           view(at(reference, p)),
         ]),
       ),
+      illuminationView: view(at(illumination, 0)),
       atrousView: view(at(atrous, 0)),
       albedoView: view(at(albedo, 0)),
       emissionView: view(at(emission, 0)),
@@ -1151,6 +1239,7 @@ export class GiRenderer {
   }
 
   private releaseTargets(): void {
+    this.releaseBdpt();
     const current = this.targets;
     if (current === null) return;
     this.releaseCapture();
@@ -1336,6 +1425,7 @@ export class GiRenderer {
     }
     this.lastFrameAt = started;
     const targets = this.ensureTargets();
+    if (!this.prepareBdpt(targets)) return;
     const basis = cameraBasis(camera, targets.width / targets.height);
     this.advancePresentationTransition(performance.now());
     this.writeUniforms(basis, targets);
@@ -1368,10 +1458,8 @@ export class GiRenderer {
       };
     };
 
-    // A compute pass's usage scope is the single dispatch, so merging the chain
-    // into one pass is legal. Timestamps bracket a pass, so a capture restores
-    // the boundaries and therefore never measures the shipped structure.
-    const sharedPass = timing ? null : encoder.beginComputePass();
+    const sharedPass =
+      timing || this.usesBdpt() ? null : encoder.beginComputePass();
     const dispatch = (
       pipeline: GPUComputePipeline,
       passBindGroup: GPUBindGroup,
@@ -1416,6 +1504,12 @@ export class GiRenderer {
           this.pipelines.getPathTracePipeline(),
           at(targets.pathTrace, parity),
           "pathTrace",
+        );
+      } else if (this.usesBdpt()) {
+        this.bdpt?.record(
+          encoder,
+          this.sceneBindGroup,
+          (label) => timestampWrites(label)?.timestampWrites,
         );
       } else {
         dispatch(this.pipelines.di, at(targets.di, parity), "di");
@@ -1642,10 +1736,19 @@ export class GiRenderer {
       return null;
     }
     const controller = this.beginComparison();
-    const generation = this.comparisonGeneration;
     const deadline =
       performance.now() + durationMs + COMPLETION_WINDOW_TIMEOUT_PADDING_MS;
     try {
+      const preparation = this.prepareComparisonRenderer();
+      const generation = this.comparisonGeneration;
+      await this.waitForComparisonOperation(
+        preparation,
+        controller.signal,
+        deadline,
+        "Renderer preparation failed during the comparison.",
+      );
+      if (generation !== this.comparisonGeneration)
+        throw new Error("Render configuration changed during the comparison.");
       await this.waitForSubmittedWork(controller.signal, deadline);
       this.resetAccumulation();
       const started = performance.now();
@@ -1690,9 +1793,18 @@ export class GiRenderer {
       return null;
     }
     const controller = this.beginComparison();
-    const generation = this.comparisonGeneration;
     const deadline = performance.now() + REFERENCE_CAPTURE_TIMEOUT_MS;
     try {
+      const preparation = this.prepareComparisonRenderer();
+      const generation = this.comparisonGeneration;
+      await this.waitForComparisonOperation(
+        preparation,
+        controller.signal,
+        deadline,
+        "Renderer preparation failed during the comparison.",
+      );
+      if (generation !== this.comparisonGeneration)
+        throw new Error("Render configuration changed during the comparison.");
       await this.waitForSubmittedWork(controller.signal, deadline);
       this.resetAccumulation();
       const started = performance.now();
@@ -1835,7 +1947,18 @@ export class GiRenderer {
     );
     this.device.queue.submit([encoder.finish()]);
 
-    await capture.staging.mapAsync(GPUMapMode.READ);
+    try {
+      await capture.staging.mapAsync(GPUMapMode.READ);
+    } catch (error) {
+      if (
+        this.capture !== capture &&
+        error instanceof DOMException &&
+        error.name === "AbortError"
+      )
+        return null;
+      throw error;
+    }
+    if (this.capture !== capture) return null;
     // The copy pads each row to the 256-byte pitch, so the rows are gathered
     // rather than taken as one run.
     const padded = new Float32Array(capture.staging.getMappedRange());

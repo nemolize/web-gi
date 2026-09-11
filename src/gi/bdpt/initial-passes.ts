@@ -1,3 +1,4 @@
+import { allocateBdptResources } from "@/gi/bdpt/allocation";
 import { createBdptPipeline } from "@/gi/bdpt/pipeline";
 import cameraPass from "@/gi/shaders/bdpt-initial-camera.wgsl?raw";
 import gatherPass from "@/gi/shaders/bdpt-initial-gather.wgsl?raw";
@@ -6,7 +7,11 @@ import lightPass from "@/gi/shaders/bdpt-initial-light.wgsl?raw";
 export interface BdptInitialPasses {
   readonly reservoirs: GPUBuffer;
   readonly lightPathCount: number;
-  readonly record: (encoder: GPUCommandEncoder, scene: GPUBindGroup) => void;
+  readonly record: (
+    encoder: GPUCommandEncoder,
+    scene: GPUBindGroup,
+    timestampWrites?: GPUComputePassTimestampWrites,
+  ) => void;
   readonly destroy: () => void;
 }
 
@@ -22,7 +27,7 @@ export const createBdptInitialPasses = async (
     !Number.isSafeInteger(height) ||
     width <= 0 ||
     height <= 0 ||
-    pixels * 160 >
+    pixels * 192 >
       Math.min(
         device.limits.maxBufferSize,
         device.limits.maxStorageBufferBindingSize,
@@ -84,51 +89,59 @@ export const createBdptInitialPasses = async (
     return result;
   };
   try {
-    const cameraOutput = buffer("bdpt-camera-candidates", 64);
-    const heads = buffer(
-      "bdpt-light-heads",
-      8,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    );
-    const nodes = buffer("bdpt-light-nodes", 160);
-    const reservoirs = buffer(
-      "bdpt-initial-reservoirs",
-      128,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    );
-    const bind = (
-      passLayout: GPUBindGroupLayout,
-      buffers: readonly GPUBuffer[],
-    ) =>
-      device.createBindGroup({
-        layout: passLayout,
-        entries: buffers.map((buffer, binding) => ({
-          binding,
-          resource: { buffer },
-        })),
-      });
-    const groups = [
-      bind(cameraLayout, [cameraOutput]),
-      bind(lightLayout, [heads, nodes]),
-      bind(gatherLayout, [cameraOutput, heads, nodes, reservoirs]),
-    ];
-    const pipelines = [cameraPipeline, lightPipeline, gatherPipeline];
-    return {
-      reservoirs,
-      lightPathCount: pixels,
-      record: (encoder, sceneGroup) => {
-        encoder.clearBuffer(heads);
-        const pass = encoder.beginComputePass({ label: "bdpt-initial" });
-        pass.setBindGroup(0, sceneGroup);
-        pipelines.forEach((pipeline, index) => {
-          pass.setPipeline(pipeline);
-          pass.setBindGroup(1, groups[index]);
-          pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
+    return await allocateBdptResources(device, () => {
+      const cameraOutput = buffer("bdpt-camera-candidates", 80);
+      const heads = buffer(
+        "bdpt-light-heads",
+        8,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      );
+      const nodes = buffer("bdpt-light-nodes", 192);
+      const reservoirs = buffer(
+        "bdpt-initial-reservoirs",
+        160,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      );
+      const bind = (
+        passLayout: GPUBindGroupLayout,
+        buffers: readonly GPUBuffer[],
+      ) =>
+        device.createBindGroup({
+          layout: passLayout,
+          entries: buffers.map((buffer, binding) => ({
+            binding,
+            resource: { buffer },
+          })),
         });
-        pass.end();
-      },
-      destroy: () => resources.forEach((resource) => resource.destroy()),
-    };
+      const groups = [
+        bind(cameraLayout, [cameraOutput]),
+        bind(lightLayout, [heads, nodes]),
+        bind(gatherLayout, [cameraOutput, heads, nodes, reservoirs]),
+      ];
+      const pipelines = [cameraPipeline, lightPipeline, gatherPipeline];
+      return {
+        reservoirs,
+        lightPathCount: pixels,
+        record: (encoder, sceneGroup, timestampWrites) => {
+          encoder.clearBuffer(heads);
+          const pass = encoder.beginComputePass({
+            label: "bdpt-initial",
+            ...(timestampWrites ? { timestampWrites } : {}),
+          });
+          pass.setBindGroup(0, sceneGroup);
+          pipelines.forEach((pipeline, index) => {
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(1, groups[index]);
+            pass.dispatchWorkgroups(
+              Math.ceil(width / 8),
+              Math.ceil(height / 8),
+            );
+          });
+          pass.end();
+        },
+        destroy: () => resources.forEach((resource) => resource.destroy()),
+      };
+    });
   } catch (error) {
     resources.forEach((resource) => resource.destroy());
     throw error;

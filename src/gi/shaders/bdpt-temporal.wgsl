@@ -43,7 +43,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         confidence * bdptReplayTarget(inverse.evaluation, inverse.sample) * inverse.jacobian);
     }
     if (bdptUpdateReservoir(&merged.path, current.normal.path.sample, current.normal.path.contributionWeight, weight, 1.0, 0.0)) {
-      merged.filmOffsetOverride = current.normal.filmOffsetOverride;
+      merged.coordinates = current.normal.coordinates;
+      merged.cameraReconnection = current.normal.cameraReconnection;
     }
     if (previous.normal.path.targetDensity > 0.0 && confidence > 0.0) {
       let shifted = bdptShiftBetweenCameras(bdptReservoirSample(previous.normal), uni.prevCam, uni.cam,
@@ -73,7 +74,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     }
   }
   if (bdptUpdateReservoir(&caustic.path, current.caustic.path.sample, current.caustic.path.contributionWeight, weight, 1.0, 0.0)) {
-    caustic.filmOffsetOverride = current.caustic.filmOffsetOverride;
+    caustic.coordinates = current.caustic.coordinates;
+    caustic.cameraReconnection = current.caustic.cameraReconnection;
   }
   var node = atomicLoad(&temporalNodes[index].head);
   while (node != 0u) {
@@ -87,7 +89,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let random = bdptRandom();
     selectionState = gRngState;
     if (bdptUpdateReservoir(&caustic.path, source.path.sample, source.path.contributionWeight, weight, jacobian, random)) {
-      caustic.filmOffsetOverride = source.filmOffsetOverride;
+      caustic.coordinates = source.coordinates;
+      caustic.cameraReconnection = source.cameraReconnection;
     }
     node = temporalNodes[node - 1u].next;
   }

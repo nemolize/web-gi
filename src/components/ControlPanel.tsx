@@ -194,6 +194,7 @@ type SettingsSectionsProps = Pick<
 const SettingsSections = memo(
   ({ settings, updateSettings, resetView }: SettingsSectionsProps) => {
     const restir = settings.mode === "restir";
+    const bdpt = restir && settings.restirMethod === "bdpt";
     const denoised = settings.mode !== "reference";
 
     return (
@@ -218,6 +219,7 @@ const SettingsSections = memo(
               options={[
                 { value: "gi", label: "ReSTIR" },
                 { value: "pt-fallback", label: "ReSTIR + PT fallback" },
+                { value: "bdpt", label: "ReSTIR BDPT" },
               ]}
               onChange={(restirMethod) => {
                 updateSettings({ restirMethod });
@@ -234,7 +236,7 @@ const SettingsSections = memo(
           />
         </Section>
 
-        <Section title="Direct light (ReSTIR DI)">
+        <Section title={bdpt ? "Direct light" : "Direct light (ReSTIR DI)"}>
           <Toggle
             label="Enabled"
             checked={settings.diEnabled}
@@ -243,36 +245,44 @@ const SettingsSections = memo(
               updateSettings({ diEnabled });
             }}
           />
-          <Toggle
-            label="Temporal reuse"
-            checked={settings.diTemporal}
-            disabled={!restir || !settings.diEnabled}
-            onChange={(diTemporal) => {
-              updateSettings({ diTemporal });
-            }}
-          />
-          <Toggle
-            label="Spatial reuse"
-            checked={settings.diSpatial}
-            disabled={!restir || !settings.diEnabled}
-            onChange={(diSpatial) => {
-              updateSettings({ diSpatial });
-            }}
-          />
-          <Slider
-            label="RIS candidates"
-            value={settings.diCandidates}
-            min={1}
-            max={128}
-            step={1}
-            format={(value) => `M = ${String(value)}`}
-            onChange={(diCandidates) => {
-              updateSettings({ diCandidates });
-            }}
-          />
+          {!bdpt && (
+            <>
+              <Toggle
+                label="Temporal reuse"
+                checked={settings.diTemporal}
+                disabled={!restir || !settings.diEnabled}
+                onChange={(diTemporal) => {
+                  updateSettings({ diTemporal });
+                }}
+              />
+              <Toggle
+                label="Spatial reuse"
+                checked={settings.diSpatial}
+                disabled={!restir || !settings.diEnabled}
+                onChange={(diSpatial) => {
+                  updateSettings({ diSpatial });
+                }}
+              />
+              <Slider
+                label="RIS candidates"
+                value={settings.diCandidates}
+                min={1}
+                max={128}
+                step={1}
+                format={(value) => `M = ${String(value)}`}
+                onChange={(diCandidates) => {
+                  updateSettings({ diCandidates });
+                }}
+              />
+            </>
+          )}
         </Section>
 
-        <Section title="Indirect light (ReSTIR GI)">
+        <Section
+          title={
+            bdpt ? "Indirect light / path reuse" : "Indirect light (ReSTIR GI)"
+          }
+        >
           <Toggle
             label="Enabled"
             checked={settings.giEnabled}
@@ -284,7 +294,7 @@ const SettingsSections = memo(
           <Toggle
             label="Temporal reuse"
             checked={settings.giTemporal}
-            disabled={!restir || !settings.giEnabled}
+            disabled={!restir || (!bdpt && !settings.giEnabled)}
             onChange={(giTemporal) => {
               updateSettings({ giTemporal });
             }}
@@ -292,7 +302,7 @@ const SettingsSections = memo(
           <Toggle
             label="Spatial reuse"
             checked={settings.giSpatial}
-            disabled={!restir || !settings.giEnabled}
+            disabled={!restir || (!bdpt && !settings.giEnabled)}
             onChange={(giSpatial) => {
               updateSettings({ giSpatial });
             }}
