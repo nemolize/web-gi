@@ -75,6 +75,11 @@ fn bdptBalanceNumerator(confidence: f32, sourceTarget: f32, inverseJacobian: f32
   return confidence * sourceTarget * inverseJacobian;
 }
 
+fn bdptPairwiseWeight(own: f32, other: f32) -> f32 {
+  if (own <= 0.0) { return 0.0; }
+  return own / (own + other);
+}
+
 fn bdptAccumulateMis(
   sum: ptr<function, BdptMisSum>,
   logRelativeDensity: f32,
