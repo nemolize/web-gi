@@ -11,7 +11,7 @@ import transport from "@/gi/shaders/bdpt-transport.wgsl?raw";
 import common from "@/gi/shaders/common.wgsl?raw";
 import scene from "@/gi/shaders/scene.wgsl?raw";
 
-const prefix = [
+export const bdptShaderPrefix = [
   common,
   scene,
   resampling,
@@ -53,7 +53,7 @@ const compileBdptPipeline = async (
 ) => {
   const module = device.createShaderModule({
     label,
-    code: `${prefix}\n${body}`,
+    code: `${bdptShaderPrefix}\n${body}`,
   });
   const diagnostics = await module.getCompilationInfo();
   const errors = diagnostics.messages.filter(

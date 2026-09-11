@@ -108,9 +108,16 @@ to reference/comparison modes while the BDPT method is selected.
 Internal pipeline compilation failures retry with 4x4 and then 1x1 workgroups
 instead of the default 8x8. Each pass dispatches using its successful size,
 without changing sampling or depth budgets. Validation errors do not retry;
-exhausted retries report all attempted sizes. This is a compatibility candidate
-for the reported Galaxy Z Fold 7 Vulkan compiler failure, not a confirmed
-on-device fix or a performance improvement.
+exhausted retries report all attempted sizes. The reported Galaxy Z Fold 7 still fails at all three sizes; shrinking
+the workgroup did not resolve that device's Vulkan compiler failure.
+
+Open `?bdptDiagnostics=1` for compile-only diagnostics. The page starts no
+renderer and compiles primary-hit, camera-subpath, light-subpath, candidate-MIS,
+and full initial-camera stages with the production prefix and binding layouts.
+Each stage uses a 1x1 workgroup and is tested with 32- and 8-vertex arrays.
+The smaller array is an isolated diagnostic variation, never a rendering mode.
+Reports include browser and adapter details and are copied manually, not uploaded.
+A 30-second stage timeout stops the run; stopping preserves partial results.
 
 References: [ReSTIR BDPT](https://research.nvidia.com/labs/rtr/publication/hedstrom2025restir/)
 and [PBRT BDPT](https://github.com/mmp/pbrt-v3/blob/master/src/integrators/bdpt.cpp).
