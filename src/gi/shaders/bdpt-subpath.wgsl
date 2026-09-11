@@ -26,9 +26,7 @@ fn bdptExtendSubpath(path: ptr<function, BdptSubpath>, first: HitInfo, incoming:
     }
     let index = (*path).count;
     (*path).count += 1u;
-    (*path).vertices[index].surface = hit;
-    (*path).vertices[index].incoming = direction;
-    (*path).vertices[index].throughput = beta;
+    (*path).vertices[index] = BdptVertex(hit, direction, beta, 0.0, 0.0, false);
     if (maxComponent(hit.emission) > 0.0 || (*path).count >= limit) {
       break;
     }
@@ -46,24 +44,25 @@ fn bdptExtendSubpath(path: ptr<function, BdptSubpath>, first: HitInfo, incoming:
   }
 }
 
-fn bdptCameraSubpath(camera: Camera, ndc: vec2f, seed: u32, maximumSurfaces: u32) -> BdptSubpath {
+fn bdptBuildCameraSubpath(camera: Camera, ndc: vec2f, seed: u32, maximumSurfaces: u32, path: ptr<function, BdptSubpath>) {
   gRngState = seed;
-  var path: BdptSubpath;
+  (*path).count = 0u;
+  (*path).emitterPdfArea = 0.0;
   let direction = primaryRayDir(camera, ndc);
   let first = traceScenePrimary(camera.pos.xyz, direction);
-  bdptExtendSubpath(&path, first, direction, vec3f(1.0), true, maximumSurfaces);
-  return path;
+  bdptExtendSubpath(path, first, direction, vec3f(1.0), true, maximumSurfaces);
 }
 
-fn bdptLightSubpath(seed: u32, maximumVertices: u32) -> BdptSubpath {
+fn bdptBuildLightSubpath(seed: u32, maximumVertices: u32, path: ptr<function, BdptSubpath>) {
   gRngState = seed;
-  var path: BdptSubpath;
+  (*path).count = 0u;
+  (*path).emitterPdfArea = 0.0;
   if (uni.lightCount == 0u || maximumVertices == 0u) {
-    return path;
+    return;
   }
   let light = sampleLight(bdptRandom(), bdptRandom(), bdptRandom());
   if (light.pdfArea <= 0.0) {
-    return path;
+    return;
   }
   var emitter: HitInfo;
   emitter.hit = true;
@@ -72,18 +71,28 @@ fn bdptLightSubpath(seed: u32, maximumVertices: u32) -> BdptSubpath {
   emitter.emission = light.emission;
   emitter.quadIndex = light.quadIndex;
   emitter.frontFace = true;
-  path.count = 1u;
-  path.emitterPdfArea = light.pdfArea;
-  path.vertices[0].surface = emitter;
-  path.vertices[0].throughput = light.emission / light.pdfArea;
+  (*path).count = 1u;
+  (*path).emitterPdfArea = light.pdfArea;
+  (*path).vertices[0] = BdptVertex(emitter, vec3f(0.0), light.emission / light.pdfArea, 0.0, 0.0, false);
   let direction = cosineSampleHemisphere(light.normal, bdptRandom(), bdptRandom());
   let directionPdf = max(0.0, dot(light.normal, direction)) * INV_PI;
-  path.vertices[0].sampledForwardPdf = directionPdf;
+  (*path).vertices[0].sampledForwardPdf = directionPdf;
   if (directionPdf <= 0.0 || maximumVertices == 1u) {
-    return path;
+    return;
   }
   let first = traceScene(light.pos + direction * SURFACE_EPS, direction);
-  bdptExtendSubpath(&path, first, direction, light.emission * PI / light.pdfArea, false, maximumVertices);
+  bdptExtendSubpath(path, first, direction, light.emission * PI / light.pdfArea, false, maximumVertices);
+}
+
+fn bdptCameraSubpath(camera: Camera, ndc: vec2f, seed: u32, maximumSurfaces: u32) -> BdptSubpath {
+  var path: BdptSubpath;
+  bdptBuildCameraSubpath(camera, ndc, seed, maximumSurfaces, &path);
+  return path;
+}
+
+fn bdptLightSubpath(seed: u32, maximumVertices: u32) -> BdptSubpath {
+  var path: BdptSubpath;
+  bdptBuildLightSubpath(seed, maximumVertices, &path);
   return path;
 }
 
