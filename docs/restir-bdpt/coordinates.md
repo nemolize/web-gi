@@ -33,6 +33,12 @@ cannot move to a spatial neighbor. `bdptShiftReplay` currently assumes the same
 camera for both domains; it does not implement camera-motion reprojection of
 caustic reservoirs.
 
+`bdptTemporalReservoir` combines estimates from the same pixel domain using
+confidence-weighted averaging. Empty reservoirs retain their confidence and
+contribute zero radiance. Its cached estimates require unchanged scene, camera,
+resolution, and sampling budget; callers must discard history when those change.
+The history confidence cap affects the averaging weight, not the cached estimate.
+
 `bdptMisEdgeFactor` produces relative scores using the delta-zero remapping
 convention of BDPT. Those scores must never be used as absolute proposal PDFs
 or substituted for the shift's `qA` and `cA`.

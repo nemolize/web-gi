@@ -44,17 +44,19 @@ fn bdptUpdateReservoir(
   resamplingWeight: f32,
   forwardJacobian: f32,
   random: f32,
-) {
+) -> bool {
   let targetDensity = bdptTarget(sample);
   let weight = targetDensity * contributionWeight * resamplingWeight * forwardJacobian;
   if (!(weight > 0.0) || weight > 3.402823e38) {
-    return;
+    return false;
   }
   (*reservoir).weightSum += weight;
   if (random * (*reservoir).weightSum < weight) {
     (*reservoir).sample = sample;
     (*reservoir).targetDensity = targetDensity;
+    return true;
   }
+  return false;
 }
 
 fn bdptFinalizeReservoir(reservoir: ptr<function, BdptPathReservoir>) {

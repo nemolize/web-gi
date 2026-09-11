@@ -112,8 +112,26 @@ export const runBdptProbe = async (page, code, stride, includeWall = false) => {
             .map((m) => m.message),
         );
         if (errors.length) throw new Error(errors.join("\n"));
+        const sceneLayout = device.createBindGroupLayout({
+          entries: Array.from({ length: 5 }, (_, binding) => ({
+            binding,
+            visibility: GPUShaderStage.COMPUTE,
+            buffer: { type: binding === 0 ? "uniform" : "read-only-storage" },
+          })),
+        });
+        const resultLayout = device.createBindGroupLayout({
+          entries: [
+            {
+              binding: 0,
+              visibility: GPUShaderStage.COMPUTE,
+              buffer: { type: "storage" },
+            },
+          ],
+        });
         const pipeline = await device.createComputePipelineAsync({
-          layout: "auto",
+          layout: device.createPipelineLayout({
+            bindGroupLayouts: [sceneLayout, resultLayout],
+          }),
           compute: { module, entryPoint: "main" },
         });
         const size = 1024 * stride * 4;
