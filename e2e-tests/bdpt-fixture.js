@@ -24,6 +24,7 @@ export const runBdptProbe = async (page, code, stride, includeWall = false) => {
         ]);
         const u = new Uint32Array(uniforms);
         u.set([32, 32, 0, 0, includeWall ? 3 : 2, 1], 32);
+        u[40] = 3;
         u[45] = 1;
         u[46] = 1;
         u[47] = 1;

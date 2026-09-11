@@ -4,6 +4,25 @@ struct BdptCandidate {
   pixel: vec2u,
 }
 
+fn bdptVertexLimit() -> u32 {
+  return min(BDPT_MAX_VERTICES, uni.maxBounces + 3u + max(4u, uni.glassShapeCount * 4u));
+}
+
+fn bdptPathWithinBudget(path: ptr<function, BdptMisPath>) -> bool {
+  if ((*path).count < 2u || (*path).count > bdptVertexLimit()) {
+    return false;
+  }
+  var diffuse = 0u;
+  for (var index = 1u; index + 1u < (*path).count; index++) {
+    diffuse += select(1u, 0u, (*path).vertices[index].delta);
+    if (diffuse > uni.maxBounces + 1u
+      || (diffuse == uni.maxBounces + 1u && index + 2u < (*path).count)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 fn bdptEvaluateCandidate(camera: Camera, cameraVertices: u32, lightVertices: u32, pixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptCandidate {
   let cameraPath = &(*workspace).cameraPath;
   let lightPath = &(*workspace).lightPath;
@@ -11,7 +30,7 @@ fn bdptEvaluateCandidate(camera: Camera, cameraVertices: u32, lightVertices: u32
   var candidate: BdptCandidate;
   candidate.pixel = pixel;
   bdptBuildMisPath(camera, cameraVertices, lightVertices, workspace);
-  if ((*path).count == 0u) {
+  if (!bdptPathWithinBudget(path)) {
     return candidate;
   }
   if (lightVertices == 0u) {

@@ -8,6 +8,20 @@ For reservoir integration in primary-sample coordinates, use the target
 one for a camera technique and `1 / globallyLaunchedLightPaths` for a light
 technique. Compressing several initial candidates adds its own reservoir weight.
 
+`createBdptInitialPasses` generates a camera subpath and a paired light subpath
+per pixel. A separate light-tracing pass launches one additional light subpath
+per pixel; `lightPathCount` reports this latter count for normalization.
+Its dimensions must match the scene uniform. Light-tracing prefixes are compressed into
+separate normal and caustic samples, then routed through per-pixel linked lists.
+The gather pass sums the already-normalized estimates without dividing by the
+number of arrivals. Both output reservoirs have confidence one, even if empty.
+List heads are cleared before each frame; gathering runs after light generation.
+
+Candidate evaluation and replay share an ordered camera-to-emitter depth check.
+After the last permitted diffuse vertex, only a direct emitter connection is
+accepted, matching Reference PT's stopping rule. The total step allowance is
+also bounded by the BDPT vertex capacity.
+
 The technique remains part of the sample during reuse. Replaying a camera
 prefix with its original random variables and reconnecting it to the unchanged
 light prefix is the identity map in these coordinates, with Jacobian one.
