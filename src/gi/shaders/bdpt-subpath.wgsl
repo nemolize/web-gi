@@ -1,3 +1,5 @@
+override BDPT_WORKGROUP_SIZE: u32 = 8u;
+
 const BDPT_MAX_VERTICES: u32 = 32u;
 
 struct BdptVertex {

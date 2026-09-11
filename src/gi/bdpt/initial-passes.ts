@@ -1,5 +1,5 @@
 import { allocateBdptResources } from "@/gi/bdpt/allocation";
-import { createBdptPipeline } from "@/gi/bdpt/pipeline";
+import { createBdptPipeline, dispatchBdptPipeline } from "@/gi/bdpt/pipeline";
 import cameraPass from "@/gi/shaders/bdpt-initial-camera.wgsl?raw";
 import gatherPass from "@/gi/shaders/bdpt-initial-gather.wgsl?raw";
 import lightPass from "@/gi/shaders/bdpt-initial-light.wgsl?raw";
@@ -32,8 +32,7 @@ export const createBdptInitialPasses = async (
         device.limits.maxBufferSize,
         device.limits.maxStorageBufferBindingSize,
       ) ||
-    Math.ceil(Math.max(width, height) / 8) >
-      device.limits.maxComputeWorkgroupsPerDimension
+    Math.max(width, height) > device.limits.maxComputeWorkgroupsPerDimension
   ) {
     throw new RangeError(
       "BDPT render dimensions exceed the device's storage or dispatch limits.",
@@ -130,12 +129,8 @@ export const createBdptInitialPasses = async (
           });
           pass.setBindGroup(0, sceneGroup);
           pipelines.forEach((pipeline, index) => {
-            pass.setPipeline(pipeline);
             pass.setBindGroup(1, groups[index]);
-            pass.dispatchWorkgroups(
-              Math.ceil(width / 8),
-              Math.ceil(height / 8),
-            );
+            dispatchBdptPipeline(pass, pipeline, width, height);
           });
           pass.end();
         },

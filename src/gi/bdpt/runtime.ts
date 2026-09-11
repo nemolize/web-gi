@@ -1,5 +1,5 @@
 import { createBdptPasses } from "@/gi/bdpt/passes";
-import { createBdptPipeline } from "@/gi/bdpt/pipeline";
+import { createBdptPipeline, dispatchBdptPipeline } from "@/gi/bdpt/pipeline";
 import resolve from "@/gi/shaders/bdpt-resolve.wgsl?raw";
 
 export type BdptTimestamps = (
@@ -64,10 +64,9 @@ export const createBdptRuntime = async (
           label: "bdpt-resolve",
           ...(timestampWrites ? { timestampWrites } : {}),
         });
-        pass.setPipeline(pipeline);
         pass.setBindGroup(0, scene);
         pass.setBindGroup(1, group);
-        pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
+        dispatchBdptPipeline(pass, pipeline, width, height);
         pass.end();
       },
     };

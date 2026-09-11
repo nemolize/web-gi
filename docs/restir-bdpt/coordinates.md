@@ -105,5 +105,12 @@ existing targets. This retains the existing target-memory budget rather than
 allocating the extra buffers at the old pixel limit. This size limit also applies
 to reference/comparison modes while the BDPT method is selected.
 
+Internal pipeline compilation failures retry with 4x4 and then 1x1 workgroups
+instead of the default 8x8. Each pass dispatches using its successful size,
+without changing sampling or depth budgets. Validation errors do not retry;
+exhausted retries report all attempted sizes. This is a compatibility candidate
+for the reported Galaxy Z Fold 7 Vulkan compiler failure, not a confirmed
+on-device fix or a performance improvement.
+
 References: [ReSTIR BDPT](https://research.nvidia.com/labs/rtr/publication/hedstrom2025restir/)
 and [PBRT BDPT](https://github.com/mmp/pbrt-v3/blob/master/src/integrators/bdpt.cpp).

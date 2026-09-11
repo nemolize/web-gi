@@ -5,7 +5,7 @@ fn bdptRadiance(reservoir: BdptReplayReservoir) -> vec3f {
   return reservoir.path.sample.contributionMis.xyz * reservoir.path.sample.contributionMis.w * reservoir.path.contributionWeight;
 }
 
-@compute @workgroup_size(8, 8)
+@compute @workgroup_size(BDPT_WORKGROUP_SIZE, BDPT_WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3u) {
   if (any(gid.xy >= uni.resolution)) { return; }
   let pair = reservoirs[gid.y * uni.resolution.x + gid.x];
