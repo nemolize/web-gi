@@ -53,6 +53,22 @@ contribute zero radiance. Its cached estimates require unchanged scene, camera,
 resolution, and sampling budget; callers must discard history when those change.
 The history confidence cap affects the averaging weight, not the cached estimate.
 
+`createBdptPasses` records initial sampling, same-domain temporal merging, and
+pairwise spatial resampling. Its `reservoirs` getter returns the latest output
+after `record`. `resetHistory` clears both history buffers on the next recording;
+the caller must invoke it when any of the validity conditions above changes.
+
+Spatial reuse applies only to normal reservoirs. Geometry-compatible neighbors
+are selected independently of their reservoir samples. Pairwise MIS scales the
+center confidence by the requested neighbor count, includes a defensive center
+term, and normalizes by the accepted neighbor count plus one. Reverse shifts
+provide the competing density for the center sample. Empty neighbors still
+contribute confidence. The resulting confidence is capped by `maxHistory`;
+caustic reservoirs pass through spatial reuse unchanged.
+
+These passes currently run in the development browser probes. Application
+renderer integration and camera-motion caustic reprojection remain pending.
+
 `bdptMisEdgeFactor` produces relative scores using the delta-zero remapping
 convention of BDPT. Those scores must never be used as absolute proposal PDFs
 or substituted for the shift's `qA` and `cA`.

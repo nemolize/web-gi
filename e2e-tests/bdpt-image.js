@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises";
 
 export const attachBdptComparisonImage = async (page, result, testInfo) => {
   const png = await page.evaluate(
-    ({ width, height, image, referenceImage }) => {
+    ({ width, height, image, referenceImage, label }) => {
       const canvas = document.createElement("canvas");
       canvas.width = (width * 2 + 4) * 6;
       canvas.height = height * 6 + 24;
@@ -29,7 +29,7 @@ export const attachBdptComparisonImage = async (page, result, testInfo) => {
         const x = index * (width + 4) * 6;
         context.drawImage(source, x, 24, width * 6, height * 6);
         context.fillStyle = "white";
-        context.fillText(index === 0 ? "BDPT initial" : "Reference PT", x, 15);
+        context.fillText(index === 0 ? label : "Reference PT", x, 15);
       });
       return canvas.toDataURL("image/png").split(",")[1];
     },
