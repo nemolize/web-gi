@@ -1,10 +1,15 @@
 import { expect, test } from "@playwright/test";
 
 import { attachBdptComparisonImage } from "./bdpt-image";
+import { isPreviewTarget } from "./target";
 
 test("BDPT initial passes route glass caustics and clear light lists between frames", async ({
   page,
 }) => {
+  test.skip(
+    isPreviewTarget,
+    "The initial-pass harness imports development modules; application integration is pending.",
+  );
   test.setTimeout(120_000);
   await page.goto("/");
   const result = await page.evaluate(async () => {
