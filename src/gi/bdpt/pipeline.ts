@@ -2,6 +2,7 @@ import camera from "@/gi/shaders/bdpt-camera.wgsl?raw";
 import candidate from "@/gi/shaders/bdpt-candidate.wgsl?raw";
 import initial from "@/gi/shaders/bdpt-initial.wgsl?raw";
 import mis from "@/gi/shaders/bdpt-mis.wgsl?raw";
+import motion from "@/gi/shaders/bdpt-motion.wgsl?raw";
 import replay from "@/gi/shaders/bdpt-replay.wgsl?raw";
 import resampling from "@/gi/shaders/bdpt-resampling.wgsl?raw";
 import reservoir from "@/gi/shaders/bdpt-reservoir.wgsl?raw";
@@ -22,6 +23,7 @@ const prefix = [
   replay,
   reservoir,
   initial,
+  motion,
 ].join("\n");
 
 export const createBdptPipeline = async (

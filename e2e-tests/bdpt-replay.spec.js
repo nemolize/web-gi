@@ -95,3 +95,64 @@ test("BDPT shifts invertible light connections and keeps caustics out of spatial
   expect(shiftedCount).toBeGreaterThan(0);
   expect(causticCount).toBeGreaterThan(0);
 });
+
+const motionEntry = `
+struct MotionResult { normal: vec4f, caustic: vec4f, restored: vec4f }
+@group(1) @binding(0) var<storage, read_write> results: array<MotionResult>;
+@compute @workgroup_size(32)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  var workspace: BdptWorkspace;
+  let sample = BdptReplaySample(vec4u(2u, 1u, 0u, id.x + 37u), vec4f(0.0));
+  let source = bdptReplay(sample, uni.cam, vec2u(0u), 64u, &workspace);
+  var destination = uni.cam;
+  destination.pos.x += 0.2;
+  let shifted = bdptShiftBetweenCameras(sample, uni.cam, destination, source.candidate.pixel, source.candidate.pixel, 64u, &workspace);
+  let reverse = bdptShiftBetweenCameras(shifted.sample, destination, uni.cam, source.candidate.pixel, source.candidate.pixel, 64u, &workspace);
+  var sourceCamera = uni.cam;
+  sourceCamera.pos.x = 1.3;
+  sourceCamera.pos.w = 1.2;
+  destination = sourceCamera;
+  destination.pos.x += 0.7;
+  let causticSample = BdptReplaySample(vec4u(4u, 1u, 0u, id.x + 37u), vec4f(0.0));
+  let original = bdptShiftCaustic(causticSample, sourceCamera, 64u, &workspace);
+  let moved = bdptShiftCaustic(causticSample, destination, 64u, &workspace);
+  let restored = bdptShiftCaustic(moved.sample, sourceCamera, 64u, &workspace);
+  results[id.x] = MotionResult(
+    vec4f(shifted.jacobian, reverse.jacobian, length(reverse.evaluation.endpoint.pos - source.endpoint.pos),
+      length(shifted.evaluation.endpoint.pos - source.endpoint.pos)),
+    vec4f(original.jacobian, moved.jacobian,
+      select(0.0, 1.0, any(original.evaluation.candidate.pixel != moved.evaluation.candidate.pixel)),
+      length(original.evaluation.endpoint.pos - moved.evaluation.endpoint.pos)),
+    vec4f(restored.jacobian, length(original.evaluation.candidate.estimator - restored.evaluation.candidate.estimator),
+      select(0.0, 1.0, all(restored.sample.techniqueSeeds == causticSample.techniqueSeeds)),
+      select(0.0, 1.0, all(restored.evaluation.candidate.pixel == original.evaluation.candidate.pixel))));
+}
+`;
+
+test("BDPT camera-motion shifts are invertible and reproject caustics to new pixels", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const result = await runBdptProbe(page, shader + motionEntry, 12, true);
+  test.skip(result === null, "WebGPU is unavailable in this browser.");
+  expect(result.errors).toEqual([]);
+  let normalCount = 0;
+  let movedCaustics = 0;
+  for (let index = 0; index < 1024; index++) {
+    const row = result.data.slice(index * 12, (index + 1) * 12);
+    expect(row.every(Number.isFinite)).toBe(true);
+    if (row[0] > 0 && row[1] > 0) {
+      normalCount++;
+      expect(row[0] * row[1]).toBeCloseTo(1, 4);
+      expect(row[2]).toBeLessThan(0.0001);
+      expect(row[3]).toBeGreaterThan(0.01);
+    }
+    if (row[4] > 0 && row[5] > 0) {
+      movedCaustics += row[6];
+      expect(row[7]).toBeLessThan(0.0001);
+      expect(row.slice(8, 12)).toEqual([1, 0, 1, 1]);
+    }
+  }
+  expect(normalCount).toBeGreaterThan(0);
+  expect(movedCaustics).toBeGreaterThan(0);
+});

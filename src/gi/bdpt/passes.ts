@@ -1,5 +1,6 @@
 import { createBdptInitialPasses } from "@/gi/bdpt/initial-passes";
 import { createBdptPipeline } from "@/gi/bdpt/pipeline";
+import reproject from "@/gi/shaders/bdpt-caustic-reproject.wgsl?raw";
 import spatial from "@/gi/shaders/bdpt-spatial.wgsl?raw";
 import temporal from "@/gi/shaders/bdpt-temporal.wgsl?raw";
 
@@ -38,28 +39,38 @@ export const createBdptPasses = async (
       "read-only-storage",
       "read-only-storage",
       "storage",
+      "storage",
     ]);
+    const reprojectLayout = layout(["read-only-storage", "storage"]);
     const spatialLayout = layout(["read-only-storage", "storage"]);
-    const [temporalPipeline, spatialPipeline] = await Promise.all([
-      createBdptPipeline(
-        device,
-        sceneLayout,
-        "bdpt-temporal",
-        temporal,
-        temporalLayout,
-      ),
-      createBdptPipeline(
-        device,
-        sceneLayout,
-        "bdpt-spatial",
-        spatial,
-        spatialLayout,
-      ),
-    ]);
-    const buffer = (label: string) => {
+    const [temporalPipeline, spatialPipeline, reprojectPipeline] =
+      await Promise.all([
+        createBdptPipeline(
+          device,
+          sceneLayout,
+          "bdpt-temporal",
+          temporal,
+          temporalLayout,
+        ),
+        createBdptPipeline(
+          device,
+          sceneLayout,
+          "bdpt-spatial",
+          spatial,
+          spatialLayout,
+        ),
+        createBdptPipeline(
+          device,
+          sceneLayout,
+          "bdpt-caustic-reproject",
+          reproject,
+          reprojectLayout,
+        ),
+      ]);
+    const buffer = (label: string, stride = 128) => {
       const result = device.createBuffer({
         label,
-        size: width * height * 128,
+        size: width * height * stride,
         usage:
           GPUBufferUsage.STORAGE |
           GPUBufferUsage.COPY_SRC |
@@ -69,6 +80,7 @@ export const createBdptPasses = async (
       return result;
     };
     const scratch = buffer("bdpt-temporal");
+    const nodes = buffer("bdpt-temporal-nodes", 96);
     const history = [
       buffer("bdpt-history-0"),
       buffer("bdpt-history-1"),
@@ -85,8 +97,12 @@ export const createBdptPasses = async (
         })),
       });
     const temporalGroups = [
-      bind(temporalLayout, [initial.reservoirs, history[1], scratch]),
-      bind(temporalLayout, [initial.reservoirs, history[0], scratch]),
+      bind(temporalLayout, [initial.reservoirs, history[1], scratch, nodes]),
+      bind(temporalLayout, [initial.reservoirs, history[0], scratch, nodes]),
+    ];
+    const reprojectGroups = [
+      bind(reprojectLayout, [history[1], nodes]),
+      bind(reprojectLayout, [history[0], nodes]),
     ];
     const spatialGroups = history.map((destination) =>
       bind(spatialLayout, [scratch, destination]),
@@ -109,8 +125,12 @@ export const createBdptPasses = async (
           history.forEach((resource) => encoder.clearBuffer(resource));
           reset = false;
         }
+        encoder.clearBuffer(nodes);
         const pass = encoder.beginComputePass({ label: "bdpt-reuse" });
         pass.setBindGroup(0, sceneGroup);
+        pass.setPipeline(reprojectPipeline);
+        pass.setBindGroup(1, reprojectGroups[parity]);
+        pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
         pass.setPipeline(temporalPipeline);
         pass.setBindGroup(1, temporalGroups[parity]);
         pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
