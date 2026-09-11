@@ -43,20 +43,32 @@ The reverse map must recover the source endpoint and reciprocal Jacobian.
 Emitter-only paths use emitter selection per area for `qA`.
 
 Light-tracing samples whose preceding vertex is delta use replay only and
-cannot move to a spatial neighbor. `bdptShiftReplay` currently assumes the same
-camera for both domains; it does not implement camera-motion reprojection of
-caustic reservoirs.
+cannot move to an arbitrary spatial neighbor. `bdptShiftCaustic` replays the
+light path for the destination camera, letting the endpoint projection select
+its new pixel. The random-variable map has Jacobian one. Normal reservoirs
+use `bdptShiftBetweenCameras` for temporal shifts and `bdptShiftReplay` for
+same-camera spatial shifts.
 
 `bdptTemporalReservoir` combines estimates from the same pixel domain using
 confidence-weighted averaging. Empty reservoirs retain their confidence and
-contribute zero radiance. Its cached estimates require unchanged scene, camera,
-resolution, and sampling budget; callers must discard history when those change.
+contribute zero radiance. This shortcut requires an unchanged camera. All reuse
+requires an unchanged scene, resolution, and sampling budget; callers must
+discard history when those change.
 The history confidence cap affects the averaging weight, not the cached estimate.
 
-`createBdptPasses` records initial sampling, same-domain temporal merging, and
-pairwise spatial resampling. Its `reservoirs` getter returns the latest output
+`createBdptPasses` records initial sampling, caustic reprojection, temporal
+merging, and pairwise spatial resampling. Its `reservoirs` getter returns the latest output
 after `record`. `resetHistory` clears both history buffers on the next recording;
-the caller must invoke it when any of the validity conditions above changes.
+the caller must invoke it when the scene or sampling budget changes. Resolution
+changes require destroying and recreating the passes at the new dimensions.
+The scene uniform must contain the current and previous frame's cameras.
+
+During camera motion, normal temporal reuse uses pairwise MIS with forward and
+reverse shifts. Replayed caustic samples are routed through per-pixel linked
+lists. Their MIS weights use the source reservoir's confidence and the current
+initial reservoir's confidence. The accumulated caustic confidence instead uses
+a proxy from diffuse surface reprojection, independently of how many samples
+land in the pixel, as described in the paper's Section 5.1 and Appendix A.
 
 Spatial reuse applies only to normal reservoirs. Geometry-compatible neighbors
 are selected independently of their reservoir samples. Pairwise MIS scales the
@@ -66,8 +78,11 @@ provide the competing density for the center sample. Empty neighbors still
 contribute confidence. The resulting confidence is capped by `maxHistory`;
 caustic reservoirs pass through spatial reuse unchanged.
 
-These passes currently run in the development browser probes. Application
-renderer integration and camera-motion caustic reprojection remain pending.
+These passes currently run in the development browser probes. The paper's
+camera-side hybrid shift, which reconnects at consecutive rough vertices and
+preserves the remaining suffix, is not implemented: camera prefixes currently
+use full random replay. That mapping and application renderer integration remain
+pending. Animated scene geometry is not supported by the replay history.
 
 `bdptMisEdgeFactor` produces relative scores using the delta-zero remapping
 convention of BDPT. Those scores must never be used as absolute proposal PDFs

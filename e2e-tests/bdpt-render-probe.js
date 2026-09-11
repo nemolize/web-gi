@@ -1,9 +1,23 @@
 export const runBdptRenderProbe = async (
   page,
-  { reuse = false, frames = 1024, spatialSamples = 2, historyCap = 8 } = {},
+  {
+    reuse = false,
+    frames = 1024,
+    spatialSamples = 2,
+    historyCap = 8,
+    cameraMotion = false,
+    unlit = false,
+  } = {},
 ) => {
   return page.evaluate(
-    async ({ reuse, frames, spatialSamples, historyCap }) => {
+    async ({
+      reuse,
+      frames,
+      spatialSamples,
+      historyCap,
+      cameraMotion,
+      unlit,
+    }) => {
       const adapter = await navigator.gpu?.requestAdapter();
       if (!adapter) return null;
       const device = await adapter.requestDevice();
@@ -50,6 +64,7 @@ export const runBdptRenderProbe = async (
           [width, height, 0, 0, scene.quads.length, scene.lights.length],
           32,
         );
+        floats.copyWithin(16, 0, 16);
         integers[40] = 3;
         integers[39] = spatialSamples;
         integers[41] = historyCap;
@@ -74,6 +89,13 @@ export const runBdptRenderProbe = async (
         };
         const uniform = upload("uniforms", data, GPUBufferUsage.UNIFORM);
         const quadData = packQuads(scene);
+        if (unlit) {
+          const dark = new Float32Array(quadData);
+          for (let index = 0; index < scene.quads.length; index++)
+            dark.fill(0, index * 24 + 20, index * 24 + 23);
+          integers[37] = 0;
+          device.queue.writeBuffer(uniform, 0, data);
+        }
         const quads = upload("quads", quadData);
         const resources = [
           uniform,
@@ -170,7 +192,11 @@ export const runBdptRenderProbe = async (
         let emptySamples = 0;
         let finite = true;
         let confidenceValid = true;
+        let confidenceSignature = 2166136261;
         const read = async (frame) => {
+          floats.copyWithin(16, 0, 16);
+          if (cameraMotion)
+            floats[0] = camera.pos.x + 0.15 * Math.sin(frame * 0.2);
           integers[34] = frame;
           integers[35] = frame;
           device.queue.writeBuffer(uniform, 0, data);
@@ -234,14 +260,18 @@ export const runBdptRenderProbe = async (
               const mis = values[offset + 7];
               const weight = values[offset + 9];
               const target = values[offset + 11];
-              const minimumConfidence = reuse
-                ? Math.min(frame + 1, historyCap)
-                : 1;
+              const minimumConfidence =
+                reuse && !cameraMotion ? Math.min(frame + 1, historyCap) : 1;
               confidenceValid &&=
-                kind === 0 && reuse
+                (kind === 0 && reuse) || cameraMotion
                   ? values[offset + 10] >= minimumConfidence &&
                     values[offset + 10] <= historyCap
                   : values[offset + 10] === minimumConfidence;
+              confidenceSignature =
+                Math.imul(
+                  confidenceSignature ^ values[offset + 10],
+                  16777619,
+                ) >>> 0;
               if (target === 0) emptySamples++;
               if (kind === 1 && target > 0) causticSamples++;
               for (let channel = 0; channel < 3; channel++) {
@@ -288,7 +318,9 @@ export const runBdptRenderProbe = async (
               values[offset + 8] === 0 &&
               values[offset + 9] === 0 &&
               values[offset + 10] >=
-                (reuse ? Math.min(frame - frames + 1, historyCap) : 1) &&
+                (reuse && !cameraMotion
+                  ? Math.min(frame - frames + 1, historyCap)
+                  : 1) &&
               values[offset + 11] === 0;
           }
         }
@@ -302,6 +334,7 @@ export const runBdptRenderProbe = async (
           emptySamples,
           finite,
           confidenceValid,
+          confidenceSignature,
           darkCleared,
           lightPathCount: passes.lightPathCount,
           width,
@@ -317,6 +350,6 @@ export const runBdptRenderProbe = async (
         device.destroy();
       }
     },
-    { reuse, frames, spatialSamples, historyCap },
+    { reuse, frames, spatialSamples, historyCap, cameraMotion, unlit },
   );
 };

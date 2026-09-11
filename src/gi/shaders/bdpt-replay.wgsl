@@ -90,19 +90,21 @@ fn bdptReplay(sample: BdptReplaySample, camera: Camera, pixel: vec2u, lightSubpa
   return evaluation;
 }
 
-fn bdptShiftReplay(sample: BdptReplaySample, camera: Camera, sourcePixel: vec2u, destinationPixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptShift {
+fn bdptShiftBetweenCameras(sample: BdptReplaySample, sourceCamera: Camera, destinationCamera: Camera, sourcePixel: vec2u, destinationPixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptShift {
   var shifted: BdptShift;
   shifted.sample = sample;
   if (sample.techniqueSeeds.y > 1u) {
-    shifted.evaluation = bdptReplay(sample, camera, destinationPixel, lightSubpathCount, workspace);
+    shifted.evaluation = bdptReplay(sample, destinationCamera, destinationPixel, lightSubpathCount, workspace);
     shifted.jacobian = 1.0;
     return shifted;
   }
-  let source = bdptReplay(sample, camera, sourcePixel, lightSubpathCount, workspace);
+  let source = bdptReplay(sample, sourceCamera, sourcePixel, lightSubpathCount, workspace);
   if (source.cameraPdfArea <= 0.0 || any(source.candidate.pixel != sourcePixel)) {
     return shifted;
   }
-  if (all(sourcePixel == destinationPixel)) {
+  if (all(sourcePixel == destinationPixel) && all(sourceCamera.pos == destinationCamera.pos)
+    && all(sourceCamera.right == destinationCamera.right) && all(sourceCamera.up == destinationCamera.up)
+    && all(sourceCamera.forward == destinationCamera.forward)) {
     shifted.evaluation = source;
     shifted.jacobian = 1.0;
     return shifted;
@@ -111,11 +113,26 @@ fn bdptShiftReplay(sample: BdptReplaySample, camera: Camera, sourcePixel: vec2u,
     return shifted;
   }
   shifted.sample.filmOffsetOverride = vec4f(fract(source.film), 1.0, 0.0);
-  shifted.evaluation = bdptReplay(shifted.sample, camera, destinationPixel, lightSubpathCount, workspace);
+  shifted.evaluation = bdptReplay(shifted.sample, destinationCamera, destinationPixel, lightSubpathCount, workspace);
   if (shifted.evaluation.cameraPdfArea > 0.0) {
     // The estimator includes proposal PDFs; convert the endpoint shift to primary-sample measure.
     shifted.jacobian = (shifted.evaluation.lightPdfArea / source.lightPdfArea)
       * (source.cameraPdfArea / shifted.evaluation.cameraPdfArea);
+  }
+  return shifted;
+}
+
+fn bdptShiftReplay(sample: BdptReplaySample, camera: Camera, sourcePixel: vec2u, destinationPixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptShift {
+  return bdptShiftBetweenCameras(sample, camera, camera, sourcePixel, destinationPixel, lightSubpathCount, workspace);
+}
+
+fn bdptShiftCaustic(sample: BdptReplaySample, destinationCamera: Camera, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptShift {
+  var shifted: BdptShift;
+  shifted.sample = sample;
+  if (sample.techniqueSeeds.y != 1u || sample.filmOffsetOverride.z > 0.0) { return shifted; }
+  shifted.evaluation = bdptReplay(sample, destinationCamera, vec2u(0u), lightSubpathCount, workspace);
+  if (shifted.evaluation.caustic && shifted.evaluation.cameraPdfArea > 0.0) {
+    shifted.jacobian = 1.0;
   }
   return shifted;
 }
