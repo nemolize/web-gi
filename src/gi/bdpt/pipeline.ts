@@ -26,6 +26,24 @@ const prefix = [
   motion,
 ].join("\n");
 
+export interface BdptPipeline {
+  readonly pipeline: GPUComputePipeline;
+  readonly workgroupSize: number;
+}
+
+export const dispatchBdptPipeline = (
+  pass: GPUComputePassEncoder,
+  compiled: BdptPipeline,
+  width: number,
+  height: number,
+): void => {
+  pass.setPipeline(compiled.pipeline);
+  pass.dispatchWorkgroups(
+    Math.ceil(width / compiled.workgroupSize),
+    Math.ceil(height / compiled.workgroupSize),
+  );
+};
+
 const compileBdptPipeline = async (
   device: GPUDevice,
   sceneLayout: GPUBindGroupLayout,
@@ -45,18 +63,36 @@ const compileBdptPipeline = async (
     throw new Error(
       `${label}: ${errors.map((message) => message.message).join("\n")}`,
     );
-  return device.createComputePipelineAsync({
-    label,
-    layout: device.createPipelineLayout({
-      bindGroupLayouts: [sceneLayout, passLayout],
-    }),
-    compute: { module, entryPoint: "main" },
+  const layout = device.createPipelineLayout({
+    bindGroupLayouts: [sceneLayout, passLayout],
   });
+  const failures: string[] = [];
+  for (const workgroupSize of [8, 4, 1]) {
+    try {
+      const pipeline = await device.createComputePipelineAsync({
+        label,
+        layout,
+        compute: {
+          module,
+          entryPoint: "main",
+          constants: { BDPT_WORKGROUP_SIZE: workgroupSize },
+        },
+      });
+      return { pipeline, workgroupSize };
+    } catch (error) {
+      if (!(error instanceof GPUPipelineError) || error.reason !== "internal")
+        throw error;
+      failures.push(`${workgroupSize}x${workgroupSize}: ${error.message}`);
+    }
+  }
+  throw new Error(
+    `${label}: pipeline compilation failed at all workgroup sizes\n${failures.join("\n")}`,
+  );
 };
 
 const pipelines = new WeakMap<
   GPUDevice,
-  WeakMap<GPUBindGroupLayout, Map<string, Promise<GPUComputePipeline>>>
+  WeakMap<GPUBindGroupLayout, Map<string, Promise<BdptPipeline>>>
 >();
 
 export const createBdptPipeline = (

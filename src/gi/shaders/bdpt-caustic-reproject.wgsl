@@ -1,7 +1,7 @@
 @group(1) @binding(0) var<storage, read> previousReservoirs: array<BdptReservoirPair>;
 @group(1) @binding(1) var<storage, read_write> temporalNodes: array<BdptTemporalNode>;
 
-@compute @workgroup_size(8, 8)
+@compute @workgroup_size(BDPT_WORKGROUP_SIZE, BDPT_WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3u) {
   let pixel = gid.xy;
   if (any(pixel >= uni.resolution) || uni.accumFrames == 0u || (uni.flags & FLAG_GI_TEMPORAL) == 0u || bdptCameraUnchanged()) { return; }

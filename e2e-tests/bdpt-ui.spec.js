@@ -178,3 +178,69 @@ test("a failed BDPT compiler does not prevent switching to ReSTIR", async ({
   await waitForFrames(page);
   expect((await capture(page))?.mean).toBeGreaterThan(0);
 });
+
+test("BDPT renders every pixel after internal compiler failures at larger workgroups", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 1100, height: 480 });
+  await page.addInitScript(() => {
+    globalThis.__bdptAttempts = [];
+    const original = GPUDevice.prototype.createComputePipelineAsync;
+    GPUDevice.prototype.createComputePipelineAsync = function (descriptor) {
+      if (descriptor.label?.startsWith("bdpt-")) {
+        const size = descriptor.compute.constants?.BDPT_WORKGROUP_SIZE;
+        globalThis.__bdptAttempts.push([descriptor.label, size]);
+        if (size !== 1)
+          return Promise.reject(
+            new GPUPipelineError("injected driver compilation failure", {
+              reason: "internal",
+            }),
+          );
+      }
+      return original.call(this, descriptor);
+    };
+  });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  await page.goto("/");
+  test.skip(
+    !(await page.evaluate(async () =>
+      Boolean(await navigator.gpu?.requestAdapter()),
+    )),
+    "WebGPU is unavailable in this browser.",
+  );
+  await page.getByLabel("Resolution scale").fill("0.25");
+  await page.getByLabel("Scene", { exact: true }).selectOption("glassShapes");
+  await page.getByLabel("ReSTIR method").selectOption("bdpt");
+  await waitForFrames(page);
+  const result = await capture(page);
+  expect(result?.finite).toBe(true);
+  expect(result?.mean).toBeGreaterThan(0.1);
+  const corner = await page.evaluate(async () => {
+    const image = await globalThis.__gi.capture();
+    const offset = ((image.height - 4) * image.width + image.width - 4) * 4;
+    return image.data[offset] + image.data[offset + 1] + image.data[offset + 2];
+  });
+  expect(corner).toBeGreaterThan(0);
+  const attempts = await page.evaluate(() => globalThis.__bdptAttempts);
+  for (const label of [
+    "initial-camera",
+    "initial-light",
+    "initial-gather",
+    "temporal",
+    "spatial",
+    "caustic-reproject",
+    "resolve",
+  ]) {
+    expect(
+      attempts
+        .filter(([name]) => name === `bdpt-${label}`)
+        .map(([, size]) => size),
+    ).toEqual([8, 4, 1]);
+  }
+  expect(errors).toEqual([]);
+});

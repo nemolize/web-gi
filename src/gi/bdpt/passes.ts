@@ -1,6 +1,6 @@
 import { allocateBdptResources } from "@/gi/bdpt/allocation";
 import { createBdptInitialPasses } from "@/gi/bdpt/initial-passes";
-import { createBdptPipeline } from "@/gi/bdpt/pipeline";
+import { createBdptPipeline, dispatchBdptPipeline } from "@/gi/bdpt/pipeline";
 import reproject from "@/gi/shaders/bdpt-caustic-reproject.wgsl?raw";
 import spatial from "@/gi/shaders/bdpt-spatial.wgsl?raw";
 import temporal from "@/gi/shaders/bdpt-temporal.wgsl?raw";
@@ -138,15 +138,12 @@ export const createBdptPasses = async (
             ...(timestampWrites ? { timestampWrites } : {}),
           });
           pass.setBindGroup(0, sceneGroup);
-          pass.setPipeline(reprojectPipeline);
           pass.setBindGroup(1, reprojectGroups[parity]);
-          pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
-          pass.setPipeline(temporalPipeline);
+          dispatchBdptPipeline(pass, reprojectPipeline, width, height);
           pass.setBindGroup(1, temporalGroups[parity]);
-          pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
-          pass.setPipeline(spatialPipeline);
+          dispatchBdptPipeline(pass, temporalPipeline, width, height);
           pass.setBindGroup(1, spatialGroups[parity]);
-          pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
+          dispatchBdptPipeline(pass, spatialPipeline, width, height);
           pass.end();
           output = parity === 0 ? history[0] : history[1];
           parity = 1 - parity;
