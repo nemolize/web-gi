@@ -51,9 +51,9 @@ const GpuDiagnostics = () => {
       <h1 className="text-xl font-semibold">GPU diagnostics</h1>
       <p className="my-4">
         Select a diagnostic suite and run it on the affected device, then copy
-        the report. This compiles isolated shader stages without rendering.
-        Results include your browser and GPU details; nothing is uploaded
-        automatically.
+        the report. Compiler suites only compile shaders; execution suites run
+        small GPU workloads and read back their output. Results include your
+        browser and GPU details; nothing is uploaded automatically.
       </p>
       <label className="mb-4 block">
         Diagnostic suite

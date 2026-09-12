@@ -40,6 +40,10 @@ export const createBdptRuntime = async (
     return {
       width,
       height,
+      initialReservoirs: passes.initialReservoirs,
+      get reservoirs() {
+        return passes.reservoirs;
+      },
       resetHistory: passes.resetHistory,
       destroy: passes.destroy,
       record: (
