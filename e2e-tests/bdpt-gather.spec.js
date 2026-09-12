@@ -58,6 +58,10 @@ test("gather preserves camera and linked light weights at every workgroup size",
         return buffer;
       };
       const uniformBuffer = upload(uniform, GPUBufferUsage.UNIFORM);
+      const regionBuffer = upload(
+        new Uint32Array([0, 0, width, height]),
+        GPUBufferUsage.UNIFORM,
+      );
       const inputs = [camera, heads, nodes].map((data) =>
         upload(data, GPUBufferUsage.STORAGE),
       );
@@ -100,6 +104,13 @@ test("gather preserves camera and linked light weights at every workgroup size",
               binding,
               resource: { buffer },
             })),
+          }),
+        );
+        pass.setBindGroup(
+          2,
+          device.createBindGroup({
+            layout: pipeline.getBindGroupLayout(2),
+            entries: [{ binding: 0, resource: { buffer: regionBuffer } }],
           }),
         );
         pass.dispatchWorkgroups(

@@ -3,7 +3,8 @@
 
 @compute @workgroup_size(BDPT_WORKGROUP_SIZE, BDPT_WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3u) {
-  let pixel = gid.xy;
+  if (any(gid.xy >= bdptDispatchRegion.extent)) { return; }
+  let pixel = gid.xy + bdptDispatchRegion.origin;
   if (any(pixel >= uni.resolution) || uni.accumFrames == 0u || (uni.flags & FLAG_GI_TEMPORAL) == 0u || bdptCameraUnchanged()) { return; }
   let index = pixel.y * uni.resolution.x + pixel.x;
   let source = previousReservoirs[index].caustic;

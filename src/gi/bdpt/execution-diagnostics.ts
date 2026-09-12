@@ -1,4 +1,4 @@
-import type { BdptCheckpoint } from "@/gi/bdpt/pipeline";
+import type { BdptCheckpoint, BdptDispatchRegion } from "@/gi/bdpt/pipeline";
 import { createBdptRuntime } from "@/gi/bdpt/runtime";
 import { cameraBasis, DEFAULT_CAMERA } from "@/gi/camera";
 import type { DiagnosticSuite } from "@/gi/diagnostics/runner";
@@ -13,7 +13,7 @@ import {
 const run = async (
   device: GPUDevice,
   report: (line: string) => void,
-  mode: "small" | "camera-first" | "light-first" = "small",
+  mode: "small" | "camera-first" | "light-first" | "batched" = "small",
 ) => {
   const staged = mode !== "small";
   const width = staged ? 353 : 39;
@@ -116,6 +116,7 @@ const run = async (
       height,
       texture.createView(),
       report,
+      mode === "batched" ? 4096 : undefined,
     );
     report("READY production BDPT pipelines");
     const initial = buffer(
@@ -148,10 +149,18 @@ const run = async (
       u[49] = frame;
       device.queue.writeBuffer(uniform, 0, data);
       report(`START frame ${frame} submit/readback`);
-      const commands: { label: string; buffer: GPUCommandBuffer }[] = [];
+      const commands: {
+        label: string;
+        buffer: GPUCommandBuffer;
+        region?: BdptDispatchRegion;
+      }[] = [];
       const checkpoint: BdptCheckpoint | undefined = staged
-        ? (encoder, label) => {
-            commands.push({ label, buffer: encoder.finish() });
+        ? (encoder, label, region) => {
+            commands.push({
+              label,
+              buffer: encoder.finish(),
+              ...(region ? { region } : {}),
+            });
             return device.createCommandEncoder();
           }
         : undefined;
@@ -188,19 +197,39 @@ const run = async (
             throw new Error("Expected camera stage before light stage.");
           commands.splice(1, 0, camera);
         }
-        for (const command of commands) {
+        let stageStartedAt = 0;
+        let stageTile = 0;
+        for (const [index, command] of commands.entries()) {
           if (lost) throw new Error("GPU device lost before the next stage.");
-          const startedAt = performance.now();
-          report(`SUBMIT frame ${frame} ${command.label}`);
+          if (commands[index - 1]?.label !== command.label) {
+            stageStartedAt = performance.now();
+            stageTile = 0;
+            report(`SUBMIT frame ${frame} ${command.label}`);
+          }
+          stageTile++;
           try {
+            if (command.region)
+              device.queue.writeBuffer(
+                runtime.dispatchRegion,
+                0,
+                new Uint32Array(command.region),
+              );
             device.queue.submit([command.buffer]);
             await device.queue.onSubmittedWorkDone();
             if (errors.length) throw new Error(errors.join("\n"));
-            report(
-              `COMPLETE frame ${frame} ${command.label} (${Math.round(performance.now() - startedAt)} ms)`,
-            );
+            if (commands[index + 1]?.label !== command.label) {
+              report(
+                `COMPLETE frame ${frame} ${command.label} (${Math.round(performance.now() - stageStartedAt)} ms${mode === "batched" ? `, ${stageTile} tiles` : ""})`,
+              );
+            } else if (stageTile % 16 === 0) {
+              report(
+                `PROGRESS frame ${frame} ${command.label}: ${stageTile} tiles complete; ${index + 1}/${commands.length} submissions`,
+              );
+            }
           } catch (error) {
-            report(`FAIL frame ${frame} ${command.label}: ${String(error)}`);
+            report(
+              `FAIL frame ${frame} ${command.label} tile ${stageTile}: ${String(error)}`,
+            );
             throw error;
           }
         }
@@ -296,6 +325,20 @@ export const bdptLightFirstExecutionSuite: DiagnosticSuite = {
     {
       label: "classic / 353x738 / 3 frames / light-first",
       run: (device, report) => run(device, report, "light-first"),
+    },
+  ],
+};
+
+export const bdptBatchedExecutionSuite: DiagnosticSuite = {
+  id: "bdpt-batched",
+  label: "ReSTIR BDPT batched execution",
+  version: 1,
+  description:
+    "Runs three 353x738 classic frames with at most 4096 logical pixels per dispatch and a GPU completion wait between tiles. Keeps full-resolution resources and path budgets. Excludes denoising and presentation; success does not establish normal-renderer compatibility.",
+  probes: [
+    {
+      label: "classic / 353x738 / 3 frames / batched / 4096 pixels",
+      run: (device, report) => run(device, report, "batched"),
     },
   ],
 };

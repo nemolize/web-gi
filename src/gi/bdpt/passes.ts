@@ -1,7 +1,15 @@
 import { allocateBdptResources } from "@/gi/bdpt/allocation";
 import { createBdptInitialPasses } from "@/gi/bdpt/initial-passes";
-import type { BdptCheckpoint, BdptProgressReporter } from "@/gi/bdpt/pipeline";
-import { createBdptPipeline, dispatchBdptPipeline } from "@/gi/bdpt/pipeline";
+import type {
+  BdptCheckpoint,
+  BdptDispatch,
+  BdptProgressReporter,
+} from "@/gi/bdpt/pipeline";
+import {
+  createBdptPipeline,
+  dispatchBdptPipeline,
+  recordBdptDispatch,
+} from "@/gi/bdpt/pipeline";
 import reproject from "@/gi/shaders/bdpt-caustic-reproject.wgsl?raw";
 import spatial from "@/gi/shaders/bdpt-spatial.wgsl?raw";
 import temporal from "@/gi/shaders/bdpt-temporal.wgsl?raw";
@@ -10,6 +18,8 @@ export interface BdptPasses {
   readonly initialReservoirs: GPUBuffer;
   readonly reservoirs: GPUBuffer;
   readonly lightPathCount: number;
+  readonly dispatch: BdptDispatch;
+  readonly dispatchRegion: GPUBuffer;
   readonly record: (
     encoder: GPUCommandEncoder,
     scene: GPUBindGroup,
@@ -26,6 +36,7 @@ export const createBdptPasses = async (
   width: number,
   height: number,
   report?: BdptProgressReporter,
+  maxDispatchPixels?: number,
 ): Promise<BdptPasses> => {
   const initial = await createBdptInitialPasses(
     device,
@@ -33,6 +44,7 @@ export const createBdptPasses = async (
     width,
     height,
     report,
+    maxDispatchPixels,
   );
   const resources: GPUBuffer[] = [];
   try {
@@ -129,6 +141,8 @@ export const createBdptPasses = async (
           return output;
         },
         lightPathCount: initial.lightPathCount,
+        dispatch: initial.dispatch,
+        dispatchRegion: initial.dispatchRegion,
         resetHistory: () => {
           reset = true;
         },
@@ -144,31 +158,41 @@ export const createBdptPasses = async (
             reset = false;
           }
           encoder.clearBuffer(nodes);
+          if (checkpoint) {
+            for (const [pipeline, groups] of [
+              [reprojectPipeline, reprojectGroups],
+              [temporalPipeline, temporalGroups],
+              [spatialPipeline, spatialGroups],
+            ] as const) {
+              encoder = recordBdptDispatch(
+                encoder,
+                pipeline,
+                sceneGroup,
+                groups[parity],
+                initial.dispatch,
+                checkpoint,
+              );
+            }
+            output = parity === 0 ? history[0] : history[1];
+            parity = 1 - parity;
+            return encoder;
+          }
           const timestampWrites = timestamps?.("bdptReuse");
-          const sharedPass = checkpoint
-            ? null
-            : encoder.beginComputePass({
-                label: "bdpt-reuse",
-                ...(timestampWrites ? { timestampWrites } : {}),
-              });
-          sharedPass?.setBindGroup(0, sceneGroup);
+          const sharedPass = encoder.beginComputePass({
+            label: "bdpt-reuse",
+            ...(timestampWrites ? { timestampWrites } : {}),
+          });
+          sharedPass.setBindGroup(0, sceneGroup);
+          sharedPass.setBindGroup(2, initial.dispatch.group);
           for (const [pipeline, groups] of [
             [reprojectPipeline, reprojectGroups],
             [temporalPipeline, temporalGroups],
             [spatialPipeline, spatialGroups],
           ] as const) {
-            const pass =
-              sharedPass ??
-              encoder.beginComputePass({ label: pipeline.pipeline.label });
-            if (sharedPass === null) pass.setBindGroup(0, sceneGroup);
-            pass.setBindGroup(1, groups[parity]);
-            dispatchBdptPipeline(pass, pipeline, width, height);
-            if (checkpoint) {
-              pass.end();
-              encoder = checkpoint(encoder, pipeline.pipeline.label);
-            }
+            sharedPass.setBindGroup(1, groups[parity]);
+            dispatchBdptPipeline(sharedPass, pipeline, width, height);
           }
-          sharedPass?.end();
+          sharedPass.end();
           output = parity === 0 ? history[0] : history[1];
           parity = 1 - parity;
           return encoder;

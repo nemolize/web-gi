@@ -86,12 +86,13 @@ const bindings: Omit<GPUBindGroupLayoutEntry, "visibility">[][] = [
     buffer: { type: binding === 0 ? "uniform" : "read-only-storage" },
   })),
   [{ binding: 0, buffer: { type: "storage" } }],
+  [{ binding: 0, buffer: { type: "uniform" } }],
 ];
 
 export const bdptDiagnosticSuite: DiagnosticSuite = {
   id: "bdpt",
   label: "ReSTIR BDPT",
-  version: 5,
+  version: 6,
   description:
     "Smaller arrays and omitted MIS are diagnostic variations, not renderer settings or fixes.",
   probes: [
@@ -109,6 +110,7 @@ export const bdptDiagnosticSuite: DiagnosticSuite = {
                 : ("read-only-storage" as const),
           },
         })),
+        [{ binding: 0, buffer: { type: "uniform" as const } }],
       ],
       constants: { BDPT_WORKGROUP_SIZE: size },
     })),

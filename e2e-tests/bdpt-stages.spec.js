@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-for (const suite of ["bdpt-stages", "bdpt-light-first"]) {
+for (const suite of ["bdpt-stages", "bdpt-light-first", "bdpt-batched"]) {
   test(`${suite} completes three large frames in GPU stage order`, async ({
     page,
   }) => {
