@@ -1,4 +1,5 @@
 import { bdptShaderPrefix } from "@/gi/bdpt/pipeline";
+import type { DiagnosticSuite } from "@/gi/diagnostics/runner";
 import initialCamera from "@/gi/shaders/bdpt-initial-camera.wgsl?raw";
 
 const probe = (body: string) => `
@@ -28,6 +29,36 @@ const stages = [
     ),
   ],
   [
+    "paired-subpaths",
+    probe(
+      "var workspace: BdptWorkspace; bdptBuildCameraSubpath(uni.cam, vec2f(0.0), uni.frame, bdptVertexLimit() - 1u, &workspace.cameraPath); bdptBuildLightSubpath(uni.frame, bdptVertexLimit() - 2u, &workspace.lightPath); let a = workspace.cameraPath.vertices[uni.frame % max(1u, workspace.cameraPath.count)]; let b = workspace.lightPath.vertices[uni.frame % max(1u, workspace.lightPath.count)]; result[gid.x] = vec4f(a.throughput + b.throughput, f32(workspace.cameraPath.count + workspace.lightPath.count));",
+    ),
+  ],
+  [
+    "build-mis-path",
+    probe(
+      "var workspace: BdptWorkspace; bdptBuildCameraSubpath(uni.cam, vec2f(0.0), uni.frame, bdptVertexLimit() - 1u, &workspace.cameraPath); bdptBuildLightSubpath(uni.frame, bdptVertexLimit() - 2u, &workspace.lightPath); let t = 2u + uni.frame % max(1u, workspace.cameraPath.count); let s = (uni.frame / 17u) % (min(workspace.lightPath.count, bdptVertexLimit() - t) + 1u); bdptBuildMisPath(uni.cam, t, s, &workspace); result[gid.x] = vec4f(workspace.misPath.vertices[uni.frame % max(1u, workspace.misPath.count)].position, workspace.misPath.emitterPdfArea);",
+    ),
+  ],
+  [
+    "visibility",
+    probe(
+      "let visible = mutuallyVisible(uni.cam.pos.xyz, uni.cam.forward.xyz, quads[uni.frame % uni.quadCount].origin.xyz); result[gid.x] = vec4f(select(0.0, 1.0, visible));",
+    ),
+  ],
+  [
+    "surface-connection",
+    probe(
+      "var a: BdptVertex; var b: BdptVertex; let qa = quads[uni.frame % uni.quadCount]; let qb = quads[(uni.frame + 1u) % uni.quadCount]; a.surface.pos = qa.origin.xyz; a.surface.normal = qa.normal.xyz; a.surface.albedo = vec3f(0.5); a.throughput = vec3f(1.0); b.surface.pos = qb.origin.xyz; b.surface.normal = qb.normal.xyz; b.surface.albedo = vec3f(0.5); b.throughput = vec3f(1.0); result[gid.x] = vec4f(bdptConnectSurfaces(a, b, (uni.frame & 1u) != 0u), 1.0);",
+    ),
+  ],
+  [
+    "camera-connection",
+    probe(
+      "var vertex: BdptVertex; let quad = quads[uni.frame % uni.quadCount]; vertex.surface.pos = quad.origin.xyz; vertex.surface.normal = quad.normal.xyz; vertex.surface.albedo = vec3f(0.5); vertex.throughput = vec3f(1.0); result[gid.x] = vec4f(bdptConnectCamera(uni.cam, vertex, (uni.frame & 1u) != 0u), 1.0);",
+    ),
+  ],
+  [
     "mis-only",
     probe(
       "var path: BdptMisPath; path.count = min(BDPT_MAX_VERTICES, max(2u, uni.maxBounces + 2u)); path.emitterPdfArea = 1.0; for (var index = 0u; index < path.count; index++) { let quad = quads[index % uni.quadCount]; path.vertices[index] = BdptMisVertex(quad.origin.xyz, quad.normal.xyz, false); } result[gid.x] = vec4f(bdptTechniqueWeight(uni.cam, &path, 1u + uni.frame % path.count, uni.resolution.x * uni.resolution.y));",
@@ -48,131 +79,35 @@ const stages = [
   ["initial-camera", initialCamera],
 ] as const;
 
-export const runBdptDiagnostics = async (
-  report: (line: string) => void,
-  signal: AbortSignal,
-): Promise<void> => {
-  report("BDPT compiler diagnostics v2 (compilation only; no rendering)");
-  report(`Browser: ${navigator.userAgent}`);
-  const adapter = await navigator.gpu?.requestAdapter({
-    powerPreference: "high-performance",
-  });
-  if (!adapter) throw new Error("No WebGPU adapter available.");
-  if (signal.aborted) return;
-  const {
-    vendor,
-    architecture,
-    device: adapterDevice,
-    description,
-  } = adapter.info;
-  report(
-    `Adapter: ${JSON.stringify({ vendor, architecture, device: adapterDevice, description })}`,
-  );
-  const device = await adapter.requestDevice();
-  let loss: GPUDeviceLostInfo | null = null;
-  void device.lost.then((info) => {
-    loss = info;
-    return info;
-  });
-  const cancel = () => device.destroy();
-  signal.addEventListener("abort", cancel, { once: true });
-  try {
-    if (signal.aborted) return;
-    const layout = device.createPipelineLayout({
-      bindGroupLayouts: [
-        device.createBindGroupLayout({
-          entries: Array.from({ length: 5 }, (_, binding) => ({
-            binding,
-            visibility: GPUShaderStage.COMPUTE,
-            buffer: { type: binding === 0 ? "uniform" : "read-only-storage" },
-          })),
-        }),
-        device.createBindGroupLayout({
-          entries: [
-            {
-              binding: 0,
-              visibility: GPUShaderStage.COMPUTE,
-              buffer: { type: "storage" },
-            },
-          ],
-        }),
-      ],
-    });
-    for (const vertices of [32, 8]) {
-      for (const [stage, body] of stages) {
-        if (signal.aborted) return;
-        const source =
-          stage === "candidate-no-mis"
-            ? bdptShaderPrefix.replace(
-                "candidate.misWeight = bdptTechniqueWeight(camera, path, cameraVertices, lightSubpathCount);",
-                "candidate.misWeight = 1.0;",
-              )
-            : bdptShaderPrefix;
-        const label = `${stage} / vertices=${vertices} / workgroup=1`;
-        report(`START ${label}`);
-        const started = performance.now();
-        let timeout: ReturnType<typeof setTimeout> | undefined;
-        const timeoutError = new Error(
-          "Compilation timed out after 30 seconds; diagnostics stopped.",
-        );
-        let abortWait: (() => void) | undefined;
-        try {
-          const result = await Promise.race([
-            device.lost,
-            new Promise<never>((_, reject) => {
-              abortWait = () => reject(new Error("Stopped."));
-              signal.addEventListener("abort", abortWait, { once: true });
-            }),
-            (async () => {
-              const module = device.createShaderModule({
-                label,
-                code: `${source.replace("const BDPT_MAX_VERTICES: u32 = 32u;", `const BDPT_MAX_VERTICES: u32 = ${vertices}u;`)}\n${body}`,
-              });
-              const info = await module.getCompilationInfo();
-              const errors = info.messages.filter(
-                (message) => message.type === "error",
-              );
-              if (errors.length)
-                throw new Error(
-                  errors.map((message) => message.message).join("\n"),
-                );
-              await device.createComputePipelineAsync({
-                label,
-                layout,
-                compute: {
-                  module,
-                  entryPoint: "main",
-                  constants: { BDPT_WORKGROUP_SIZE: 1 },
-                },
-              });
-            })(),
-            new Promise<never>((_, reject) => {
-              timeout = setTimeout(() => reject(timeoutError), 30_000);
-            }),
-          ]);
-          const lostInfo = result ?? loss;
-          if (lostInfo)
-            throw new Error(
-              `GPU device lost (${lostInfo.reason}): ${lostInfo.message}`,
-            );
-          report(
-            `PASS ${label} (${Math.round(performance.now() - started)} ms)`,
-          );
-        } catch (error) {
-          if (signal.aborted) return;
-          report(`FAIL ${label}: ${String(error)}`);
-          if (error === timeoutError || loss !== null) return;
-        } finally {
-          clearTimeout(timeout);
-          if (abortWait) signal.removeEventListener("abort", abortWait);
-        }
-      }
-    }
-    report(
-      "DONE. The 8-vertex cases are diagnostic probes, not a renderer setting or a BDPT fix.",
-    );
-  } finally {
-    signal.removeEventListener("abort", cancel);
-    device.destroy();
-  }
+const bindings: Omit<GPUBindGroupLayoutEntry, "visibility">[][] = [
+  Array.from({ length: 5 }, (_, binding) => ({
+    binding,
+    buffer: { type: binding === 0 ? "uniform" : "read-only-storage" },
+  })),
+  [{ binding: 0, buffer: { type: "storage" } }],
+];
+
+export const bdptDiagnosticSuite: DiagnosticSuite = {
+  id: "bdpt",
+  label: "ReSTIR BDPT",
+  version: 3,
+  description:
+    "Smaller arrays and omitted MIS are diagnostic variations, not renderer settings or fixes.",
+  probes: [32, 8].flatMap((vertices) =>
+    stages.map(([stage, body]) => {
+      const source =
+        stage === "candidate-no-mis"
+          ? bdptShaderPrefix.replace(
+              "candidate.misWeight = bdptTechniqueWeight(camera, path, cameraVertices, lightSubpathCount);",
+              "candidate.misWeight = 1.0;",
+            )
+          : bdptShaderPrefix;
+      return {
+        label: `${stage} / vertices=${vertices} / workgroup=1`,
+        code: `${source.replace("const BDPT_MAX_VERTICES: u32 = 32u;", `const BDPT_MAX_VERTICES: u32 = ${vertices}u;`)}\n${body}`,
+        bindings,
+        constants: { BDPT_WORKGROUP_SIZE: 1 },
+      };
+    }),
+  ),
 };

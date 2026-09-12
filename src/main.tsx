@@ -8,9 +8,11 @@ import { App } from "@/App";
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("Failed to find the root element");
 
-const Application = new URLSearchParams(location.search).has("bdptDiagnostics")
-  ? lazy(() => import("@/components/BdptDiagnostics"))
-  : App;
+const params = new URLSearchParams(location.search);
+const Application =
+  params.has("diagnostics") || params.has("bdptDiagnostics")
+    ? lazy(() => import("@/components/GpuDiagnostics"))
+    : App;
 
 createRoot(rootElement).render(
   <StrictMode>
