@@ -28,6 +28,18 @@ const stages = [
     ),
   ],
   [
+    "mis-only",
+    probe(
+      "var path: BdptMisPath; path.count = min(BDPT_MAX_VERTICES, max(2u, uni.maxBounces + 2u)); path.emitterPdfArea = 1.0; for (var index = 0u; index < path.count; index++) { let quad = quads[index % uni.quadCount]; path.vertices[index] = BdptMisVertex(quad.origin.xyz, quad.normal.xyz, false); } result[gid.x] = vec4f(bdptTechniqueWeight(uni.cam, &path, 1u + uni.frame % path.count, uni.resolution.x * uni.resolution.y));",
+    ),
+  ],
+  [
+    "candidate-no-mis",
+    probe(
+      "var workspace: BdptWorkspace; bdptBuildCameraSubpath(uni.cam, vec2f(0.0), uni.frame, bdptVertexLimit() - 1u, &workspace.cameraPath); bdptBuildLightSubpath(uni.frame, bdptVertexLimit() - 2u, &workspace.lightPath); let t = 2u + uni.frame % max(1u, workspace.cameraPath.count); let s = (uni.frame / 17u) % (min(workspace.lightPath.count, bdptVertexLimit() - t) + 1u); let candidate = bdptEvaluateCandidate(uni.cam, t, s, gid.xy, uni.resolution.x * uni.resolution.y, &workspace); result[gid.x] = vec4f(candidate.estimator, candidate.misWeight);",
+    ),
+  ],
+  [
     "candidate-mis",
     probe(
       "var workspace: BdptWorkspace; bdptBuildCameraSubpath(uni.cam, vec2f(0.0), uni.frame, bdptVertexLimit() - 1u, &workspace.cameraPath); bdptBuildLightSubpath(uni.frame, bdptVertexLimit() - 2u, &workspace.lightPath); let t = 2u + uni.frame % max(1u, workspace.cameraPath.count); let s = (uni.frame / 17u) % (min(workspace.lightPath.count, bdptVertexLimit() - t) + 1u); let candidate = bdptEvaluateCandidate(uni.cam, t, s, gid.xy, uni.resolution.x * uni.resolution.y, &workspace); result[gid.x] = vec4f(candidate.estimator, candidate.misWeight);",
@@ -40,7 +52,7 @@ export const runBdptDiagnostics = async (
   report: (line: string) => void,
   signal: AbortSignal,
 ): Promise<void> => {
-  report("BDPT compiler diagnostics v1 (compilation only; no rendering)");
+  report("BDPT compiler diagnostics v2 (compilation only; no rendering)");
   report(`Browser: ${navigator.userAgent}`);
   const adapter = await navigator.gpu?.requestAdapter({
     powerPreference: "high-performance",
@@ -89,6 +101,13 @@ export const runBdptDiagnostics = async (
     for (const vertices of [32, 8]) {
       for (const [stage, body] of stages) {
         if (signal.aborted) return;
+        const source =
+          stage === "candidate-no-mis"
+            ? bdptShaderPrefix.replace(
+                "candidate.misWeight = bdptTechniqueWeight(camera, path, cameraVertices, lightSubpathCount);",
+                "candidate.misWeight = 1.0;",
+              )
+            : bdptShaderPrefix;
         const label = `${stage} / vertices=${vertices} / workgroup=1`;
         report(`START ${label}`);
         const started = performance.now();
@@ -107,7 +126,7 @@ export const runBdptDiagnostics = async (
             (async () => {
               const module = device.createShaderModule({
                 label,
-                code: `${bdptShaderPrefix.replace("const BDPT_MAX_VERTICES: u32 = 32u;", `const BDPT_MAX_VERTICES: u32 = ${vertices}u;`)}\n${body}`,
+                code: `${source.replace("const BDPT_MAX_VERTICES: u32 = 32u;", `const BDPT_MAX_VERTICES: u32 = ${vertices}u;`)}\n${body}`,
               });
               const info = await module.getCompilationInfo();
               const errors = info.messages.filter(

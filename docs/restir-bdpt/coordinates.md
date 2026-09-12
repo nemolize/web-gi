@@ -24,7 +24,11 @@ Both initial reservoirs have confidence one, including empty reservoirs.
 Candidate evaluation and replay share Reference PT's ordered depth budget.
 After the last permitted diffuse vertex, only a direct emitter connection is
 accepted. Full-path technique MIS is recomputed after shifts rather than cached
-with the paper's recursive acceleration. `bdptMisEdgeFactor` uses BDPT's
+with the paper's recursive acceleration. Technique weights scan forward/reverse
+log densities and zero counts without four per-vertex scratch arrays. This
+removes 512 declared array bytes at 32 vertices but raises edge-factor evaluations
+from `2n - 3` to `3n - 5` for an `n`-vertex path; it is a compiler-compatibility
+experiment, not a performance claim. `bdptMisEdgeFactor` uses BDPT's
 relative delta-zero remapping; it is not an absolute proposal density.
 
 ## Hybrid shifts
@@ -109,11 +113,15 @@ Internal pipeline compilation failures retry with 4x4 and then 1x1 workgroups
 instead of the default 8x8. Each pass dispatches using its successful size,
 without changing sampling or depth budgets. Validation errors do not retry;
 exhausted retries report all attempted sizes. The reported Galaxy Z Fold 7 still fails at all three sizes; shrinking
-the workgroup did not resolve that device's Vulkan compiler failure.
+the workgroup did not resolve that device's Vulkan compiler failure. The v1
+report identifies Chrome 140 and Adreno 8xx: subpath generation compiles, while
+candidate-MIS and initial-camera fail at both 32 and 8 vertices. Diagnostics v2
+separates MIS from connection evaluation; the scalar scan remains unconfirmed
+on the affected device.
 
 Open `?bdptDiagnostics=1` for compile-only diagnostics. The page starts no
-renderer and compiles primary-hit, camera-subpath, light-subpath, candidate-MIS,
-and full initial-camera stages with the production prefix and binding layouts.
+renderer and compiles primary-hit, camera-subpath, light-subpath, MIS-only,
+candidate-without-MIS, candidate-MIS, and full initial-camera stages with the production prefix and binding layouts.
 Each stage uses a 1x1 workgroup and is tested with 32- and 8-vertex arrays.
 The smaller array is an isolated diagnostic variation, never a rendering mode.
 Reports include browser and adapter details and are copied manually, not uploaded.
