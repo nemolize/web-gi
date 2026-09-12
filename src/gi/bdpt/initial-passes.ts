@@ -1,5 +1,5 @@
 import { allocateBdptResources } from "@/gi/bdpt/allocation";
-import type { BdptProgressReporter } from "@/gi/bdpt/pipeline";
+import type { BdptCheckpoint, BdptProgressReporter } from "@/gi/bdpt/pipeline";
 import { createBdptPipeline, dispatchBdptPipeline } from "@/gi/bdpt/pipeline";
 import cameraPass from "@/gi/shaders/bdpt-initial-camera.wgsl?raw";
 import gatherPass from "@/gi/shaders/bdpt-initial-gather.wgsl?raw";
@@ -12,7 +12,8 @@ export interface BdptInitialPasses {
     encoder: GPUCommandEncoder,
     scene: GPUBindGroup,
     timestampWrites?: GPUComputePassTimestampWrites,
-  ) => void;
+    checkpoint?: BdptCheckpoint,
+  ) => GPUCommandEncoder;
   readonly destroy: () => void;
 }
 
@@ -126,18 +127,29 @@ export const createBdptInitialPasses = async (
       return {
         reservoirs,
         lightPathCount: pixels,
-        record: (encoder, sceneGroup, timestampWrites) => {
+        record: (encoder, sceneGroup, timestampWrites, checkpoint) => {
           encoder.clearBuffer(heads);
-          const pass = encoder.beginComputePass({
-            label: "bdpt-initial",
-            ...(timestampWrites ? { timestampWrites } : {}),
-          });
-          pass.setBindGroup(0, sceneGroup);
+          const sharedPass = checkpoint
+            ? null
+            : encoder.beginComputePass({
+                label: "bdpt-initial",
+                ...(timestampWrites ? { timestampWrites } : {}),
+              });
+          sharedPass?.setBindGroup(0, sceneGroup);
           pipelines.forEach((pipeline, index) => {
+            const pass =
+              sharedPass ??
+              encoder.beginComputePass({ label: pipeline.pipeline.label });
+            if (sharedPass === null) pass.setBindGroup(0, sceneGroup);
             pass.setBindGroup(1, groups[index]);
             dispatchBdptPipeline(pass, pipeline, width, height);
+            if (checkpoint) {
+              pass.end();
+              encoder = checkpoint(encoder, pipeline.pipeline.label);
+            }
           });
-          pass.end();
+          sharedPass?.end();
+          return encoder;
         },
         destroy: () => resources.forEach((resource) => resource.destroy()),
       };

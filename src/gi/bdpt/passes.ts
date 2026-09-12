@@ -1,6 +1,6 @@
 import { allocateBdptResources } from "@/gi/bdpt/allocation";
 import { createBdptInitialPasses } from "@/gi/bdpt/initial-passes";
-import type { BdptProgressReporter } from "@/gi/bdpt/pipeline";
+import type { BdptCheckpoint, BdptProgressReporter } from "@/gi/bdpt/pipeline";
 import { createBdptPipeline, dispatchBdptPipeline } from "@/gi/bdpt/pipeline";
 import reproject from "@/gi/shaders/bdpt-caustic-reproject.wgsl?raw";
 import spatial from "@/gi/shaders/bdpt-spatial.wgsl?raw";
@@ -14,7 +14,8 @@ export interface BdptPasses {
     encoder: GPUCommandEncoder,
     scene: GPUBindGroup,
     timestamps?: (label: string) => GPUComputePassTimestampWrites | undefined,
-  ) => void;
+    checkpoint?: BdptCheckpoint,
+  ) => GPUCommandEncoder;
   readonly resetHistory: () => void;
   readonly destroy: () => void;
 }
@@ -131,28 +132,46 @@ export const createBdptPasses = async (
         resetHistory: () => {
           reset = true;
         },
-        record: (encoder, sceneGroup, timestamps) => {
-          initial.record(encoder, sceneGroup, timestamps?.("bdptInitial"));
+        record: (encoder, sceneGroup, timestamps, checkpoint) => {
+          encoder = initial.record(
+            encoder,
+            sceneGroup,
+            timestamps?.("bdptInitial"),
+            checkpoint,
+          );
           if (reset) {
             history.forEach((resource) => encoder.clearBuffer(resource));
             reset = false;
           }
           encoder.clearBuffer(nodes);
           const timestampWrites = timestamps?.("bdptReuse");
-          const pass = encoder.beginComputePass({
-            label: "bdpt-reuse",
-            ...(timestampWrites ? { timestampWrites } : {}),
-          });
-          pass.setBindGroup(0, sceneGroup);
-          pass.setBindGroup(1, reprojectGroups[parity]);
-          dispatchBdptPipeline(pass, reprojectPipeline, width, height);
-          pass.setBindGroup(1, temporalGroups[parity]);
-          dispatchBdptPipeline(pass, temporalPipeline, width, height);
-          pass.setBindGroup(1, spatialGroups[parity]);
-          dispatchBdptPipeline(pass, spatialPipeline, width, height);
-          pass.end();
+          const sharedPass = checkpoint
+            ? null
+            : encoder.beginComputePass({
+                label: "bdpt-reuse",
+                ...(timestampWrites ? { timestampWrites } : {}),
+              });
+          sharedPass?.setBindGroup(0, sceneGroup);
+          for (const [pipeline, groups] of [
+            [reprojectPipeline, reprojectGroups],
+            [temporalPipeline, temporalGroups],
+            [spatialPipeline, spatialGroups],
+          ] as const) {
+            const pass =
+              sharedPass ??
+              encoder.beginComputePass({ label: pipeline.pipeline.label });
+            if (sharedPass === null) pass.setBindGroup(0, sceneGroup);
+            pass.setBindGroup(1, groups[parity]);
+            dispatchBdptPipeline(pass, pipeline, width, height);
+            if (checkpoint) {
+              pass.end();
+              encoder = checkpoint(encoder, pipeline.pipeline.label);
+            }
+          }
+          sharedPass?.end();
           output = parity === 0 ? history[0] : history[1];
           parity = 1 - parity;
+          return encoder;
         },
         destroy: () => {
           initial.destroy();

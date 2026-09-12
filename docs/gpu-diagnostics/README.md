@@ -74,3 +74,13 @@ Use `on` to enable a setting explicitly, or omit it for the default. Reuse
 shaders still compile and dispatch; the existing disabled branches bypass
 resampling. These URLs do not isolate individual GPU submissions or establish
 which pass caused a device loss.
+
+The `?diagnostics=bdpt-stages` suite runs three 353x738 classic frames, using
+four spatial samples and a 512-frame history limit. Each production BDPT stage
+is submitted separately and awaited with `onSubmittedWorkDone`, followed by
+initial/reused/resolved radiance readback. `SUBMIT` and `COMPLETE` identify each
+stage; a failed completion stops further submissions. This changes GPU
+scheduling and excludes normal-renderer allocations, presentation and denoising.
+It can narrow a failure, but a pass here does not establish normal-renderer
+compatibility. The suite uses the same 120-second execution timeout and Stop
+control as the smaller execution suite.

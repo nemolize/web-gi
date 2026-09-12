@@ -1,3 +1,4 @@
+import type { BdptCheckpoint } from "@/gi/bdpt/pipeline";
 import { createBdptRuntime } from "@/gi/bdpt/runtime";
 import { cameraBasis, DEFAULT_CAMERA } from "@/gi/camera";
 import type { DiagnosticSuite } from "@/gi/diagnostics/runner";
@@ -9,12 +10,20 @@ import {
   packQuads,
 } from "@/gi/scene";
 
-const run = async (device: GPUDevice, report: (line: string) => void) => {
-  const width = 39;
-  const height = 31;
+const run = async (
+  device: GPUDevice,
+  report: (line: string) => void,
+  staged = false,
+) => {
+  const width = staged ? 353 : 39;
+  const height = staged ? 738 : 31;
   const pixels = width * height;
   const buffers: GPUBuffer[] = [];
   const errors: string[] = [];
+  let lost = false;
+  void device.lost.then(() => {
+    lost = true;
+  });
   const onError = (event: GPUUncapturedErrorEvent) => {
     errors.push(event.error.message);
     report(`GPU ERROR: ${event.error.message}`);
@@ -32,7 +41,7 @@ const run = async (device: GPUDevice, report: (line: string) => void) => {
     return result;
   };
   try {
-    const scene = buildScene("glassShapes");
+    const scene = buildScene(staged ? "classic" : "glassShapes");
     const camera = cameraBasis(DEFAULT_CAMERA, width / height);
     const data = new ArrayBuffer(224);
     const f = new Float32Array(data);
@@ -50,11 +59,11 @@ const run = async (device: GPUDevice, report: (line: string) => void) => {
     ]);
     f.copyWithin(16, 0, 16);
     u.set([width, height, 0, 0, scene.quads.length, scene.lights.length], 32);
-    u[39] = 2;
+    u[39] = staged ? 4 : 2;
     u[40] = 3;
-    u[41] = 8;
+    u[41] = staged ? 512 : 8;
     u[42] = 256 | 9 | 48;
-    f[43] = 0.15;
+    f[43] = staged ? 0.04 : 0.15;
     u.set(
       [
         scene.clusters.length,
@@ -116,7 +125,7 @@ const run = async (device: GPUDevice, report: (line: string) => void) => {
       pixels * 160,
       GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
     );
-    const bytesPerRow = 512;
+    const bytesPerRow = Math.ceil((width * 8) / 256) * 256;
     const output = buffer(
       bytesPerRow * height,
       GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
@@ -138,8 +147,19 @@ const run = async (device: GPUDevice, report: (line: string) => void) => {
       u[49] = frame;
       device.queue.writeBuffer(uniform, 0, data);
       report(`START frame ${frame} submit/readback`);
-      const encoder = device.createCommandEncoder();
-      runtime.record(encoder, group, () => undefined);
+      const commands: { label: string; buffer: GPUCommandBuffer }[] = [];
+      const checkpoint: BdptCheckpoint | undefined = staged
+        ? (encoder, label) => {
+            commands.push({ label, buffer: encoder.finish() });
+            return device.createCommandEncoder();
+          }
+        : undefined;
+      const encoder = runtime.record(
+        device.createCommandEncoder(),
+        group,
+        () => undefined,
+        checkpoint,
+      );
       encoder.copyBufferToBuffer(
         runtime.initialReservoirs,
         0,
@@ -159,7 +179,27 @@ const run = async (device: GPUDevice, report: (line: string) => void) => {
         { buffer: output, bytesPerRow },
         [width, height],
       );
-      device.queue.submit([encoder.finish()]);
+      if (staged) {
+        commands.push({ label: "readback", buffer: encoder.finish() });
+        for (const command of commands) {
+          if (lost) throw new Error("GPU device lost before the next stage.");
+          const startedAt = performance.now();
+          report(`SUBMIT frame ${frame} ${command.label}`);
+          try {
+            device.queue.submit([command.buffer]);
+            await device.queue.onSubmittedWorkDone();
+            if (errors.length) throw new Error(errors.join("\n"));
+            report(
+              `COMPLETE frame ${frame} ${command.label} (${Math.round(performance.now() - startedAt)} ms)`,
+            );
+          } catch (error) {
+            report(`FAIL frame ${frame} ${command.label}: ${String(error)}`);
+            throw error;
+          }
+        }
+      } else {
+        device.queue.submit([encoder.finish()]);
+      }
       await Promise.all(
         [initial, reused, output].map((resource) =>
           resource.mapAsync(GPUMapMode.READ),
@@ -223,4 +263,18 @@ export const bdptExecutionSuite: DiagnosticSuite = {
   description:
     "Runs three frames of a 39x31 glass scene through production BDPT passes and reads initial, reused, and resolved radiance. Does not test full-resolution presentation or denoising.",
   probes: [{ label: "glass / 39x31 / 3 frames", run }],
+};
+
+export const bdptStagedExecutionSuite: DiagnosticSuite = {
+  id: "bdpt-stages",
+  label: "ReSTIR BDPT staged execution",
+  version: 1,
+  description:
+    "Runs three 353x738 classic frames with a GPU completion wait after each BDPT stage. Splits submissions for diagnosis; excludes presentation, denoising, and normal-renderer allocations. Success does not establish normal-renderer compatibility.",
+  probes: [
+    {
+      label: "classic / 353x738 / 3 frames / staged",
+      run: (device, report) => run(device, report, true),
+    },
+  ],
 };
