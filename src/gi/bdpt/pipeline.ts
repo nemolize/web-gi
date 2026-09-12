@@ -26,6 +26,11 @@ export const bdptShaderPrefix = [
   motion,
 ].join("\n");
 
+export type BdptCheckpoint = (
+  encoder: GPUCommandEncoder,
+  label: string,
+) => GPUCommandEncoder;
+
 export type BdptProgressReporter = (
   line: string,
   compiling?: { readonly pipeline: string },

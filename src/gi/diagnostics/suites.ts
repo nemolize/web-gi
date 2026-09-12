@@ -1,5 +1,8 @@
 import { bdptDiagnosticSuite } from "@/gi/bdpt/diagnostics";
-import { bdptExecutionSuite } from "@/gi/bdpt/execution-diagnostics";
+import {
+  bdptExecutionSuite,
+  bdptStagedExecutionSuite,
+} from "@/gi/bdpt/execution-diagnostics";
 import type { DiagnosticSuite } from "@/gi/diagnostics/runner";
 
 const core: DiagnosticSuite = {
@@ -34,4 +37,5 @@ export const diagnosticSuites = [
   core,
   bdptDiagnosticSuite,
   bdptExecutionSuite,
+  bdptStagedExecutionSuite,
 ] as const;

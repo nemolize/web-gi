@@ -1,5 +1,5 @@
 import { createBdptPasses } from "@/gi/bdpt/passes";
-import type { BdptProgressReporter } from "@/gi/bdpt/pipeline";
+import type { BdptCheckpoint, BdptProgressReporter } from "@/gi/bdpt/pipeline";
 import { createBdptPipeline, dispatchBdptPipeline } from "@/gi/bdpt/pipeline";
 import resolve from "@/gi/shaders/bdpt-resolve.wgsl?raw";
 
@@ -59,8 +59,9 @@ export const createBdptRuntime = async (
         encoder: GPUCommandEncoder,
         scene: GPUBindGroup,
         timestamps: BdptTimestamps,
+        checkpoint?: BdptCheckpoint,
       ) => {
-        passes.record(encoder, scene, timestamps);
+        encoder = passes.record(encoder, scene, timestamps, checkpoint);
         let group = groups.get(passes.reservoirs);
         if (!group) {
           group = device.createBindGroup({
@@ -81,6 +82,7 @@ export const createBdptRuntime = async (
         pass.setBindGroup(1, group);
         dispatchBdptPipeline(pass, pipeline, width, height);
         pass.end();
+        return checkpoint?.(encoder, "bdpt-resolve") ?? encoder;
       },
     };
   } catch (error) {
