@@ -128,7 +128,7 @@ export const createBdptInitialPasses = async (
         reservoirs,
         lightPathCount: pixels,
         record: (encoder, sceneGroup, timestampWrites, checkpoint) => {
-          encoder.clearBuffer(heads);
+          if (!checkpoint) encoder.clearBuffer(heads);
           const sharedPass = checkpoint
             ? null
             : encoder.beginComputePass({
@@ -137,6 +137,7 @@ export const createBdptInitialPasses = async (
               });
           sharedPass?.setBindGroup(0, sceneGroup);
           pipelines.forEach((pipeline, index) => {
+            if (checkpoint && index === 1) encoder.clearBuffer(heads);
             const pass =
               sharedPass ??
               encoder.beginComputePass({ label: pipeline.pipeline.label });

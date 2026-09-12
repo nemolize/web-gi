@@ -13,8 +13,9 @@ import {
 const run = async (
   device: GPUDevice,
   report: (line: string) => void,
-  staged = false,
+  mode: "small" | "camera-first" | "light-first" = "small",
 ) => {
+  const staged = mode !== "small";
   const width = staged ? 353 : 39;
   const height = staged ? 738 : 31;
   const pixels = width * height;
@@ -181,6 +182,12 @@ const run = async (
       );
       if (staged) {
         commands.push({ label: "readback", buffer: encoder.finish() });
+        if (mode === "light-first") {
+          const camera = commands.shift();
+          if (!camera || camera.label !== "bdpt-initial-camera")
+            throw new Error("Expected camera stage before light stage.");
+          commands.splice(1, 0, camera);
+        }
         for (const command of commands) {
           if (lost) throw new Error("GPU device lost before the next stage.");
           const startedAt = performance.now();
@@ -268,13 +275,27 @@ export const bdptExecutionSuite: DiagnosticSuite = {
 export const bdptStagedExecutionSuite: DiagnosticSuite = {
   id: "bdpt-stages",
   label: "ReSTIR BDPT staged execution",
-  version: 1,
+  version: 2,
   description:
     "Runs three 353x738 classic frames with a GPU completion wait after each BDPT stage. Splits submissions for diagnosis; excludes presentation, denoising, and normal-renderer allocations. Success does not establish normal-renderer compatibility.",
   probes: [
     {
       label: "classic / 353x738 / 3 frames / staged",
-      run: (device, report) => run(device, report, true),
+      run: (device, report) => run(device, report, "camera-first"),
+    },
+  ],
+};
+
+export const bdptLightFirstExecutionSuite: DiagnosticSuite = {
+  id: "bdpt-light-first",
+  label: "ReSTIR BDPT light-first execution",
+  version: 1,
+  description:
+    "Runs the same three 353x738 staged classic frames with light generation before camera generation. Tests submission order; excludes presentation, denoising, and normal-renderer allocations. Success does not establish normal-renderer compatibility.",
+  probes: [
+    {
+      label: "classic / 353x738 / 3 frames / light-first",
+      run: (device, report) => run(device, report, "light-first"),
     },
   ],
 };

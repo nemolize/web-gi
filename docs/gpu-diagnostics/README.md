@@ -84,3 +84,11 @@ scheduling and excludes normal-renderer allocations, presentation and denoising.
 It can narrow a failure, but a pass here does not establish normal-renderer
 compatibility. The suite uses the same 120-second execution timeout and Stop
 control as the smaller execution suite.
+
+The `?diagnostics=bdpt-light-first` suite uses the same workload and completion
+waits as `bdpt-stages`, but submits initial light generation before initial
+camera generation. Staged execution v2 moves light-list clearing from the camera
+command to the light command in both orders; gather
+still follows both producers. Compare reports to distinguish failures that
+follow a stage from failures that depend on preceding work. Neither outcome
+alone establishes the driver's cause of device loss.
