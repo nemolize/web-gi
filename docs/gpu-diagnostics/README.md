@@ -53,3 +53,13 @@ renderer destruction and do not prove GPU completion. Reports retain the first
 eight and the most recent 72 event lines with an omitted-line count between
 them; the page URL excludes query and hash.
 Retry starts a new event history. Clipboard rejection leaves the text available.
+
+For initialization or execution failures specific to the normal renderer, use
+`?restir=bdpt&bdptPixels=1209` to cap BDPT render targets at 1,209 pixels while
+retaining the production device setup, denoising, and presentation. The cap is
+explicit and diagnostic: it only reduces resolution, does not change path
+budgets, and does not apply to other ReSTIR methods. The error report records
+the requested cap and actual dimensions. Omit it for the normal resolution.
+BDPT pipeline compilation is serialized per device, including size retries;
+`COMPILE QUEUED` identifies work waiting for earlier compilation. Execution
+suite v3 uses this same compiler queue.

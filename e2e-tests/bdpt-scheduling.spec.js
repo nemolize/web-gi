@@ -87,3 +87,20 @@ test("resizes do not overlap pending BDPT resource initialization", async ({
   expect(await page.evaluate(() => window.__initialAllocations)).toBe(2);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
+
+test("explicit BDPT pixel cap exercises normal rendering without capping ReSTIR GI", async ({
+  page,
+}) => {
+  await page.goto("/?restir=bdpt&bdptPixels=1209");
+  await requireGpu(page);
+  await expect(page.getByTestId("stat-accumulated")).not.toHaveText("0", {
+    timeout: 30_000,
+  });
+  const pixels = () =>
+    page.locator("canvas").evaluate((canvas) => canvas.width * canvas.height);
+  expect(await pixels()).toBeLessThanOrEqual(1209);
+  await page.getByRole("button", { name: "Controls", exact: true }).click();
+  await page.getByLabel("ReSTIR method").selectOption("gi");
+  await expect.poll(pixels).toBeGreaterThan(1209);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});

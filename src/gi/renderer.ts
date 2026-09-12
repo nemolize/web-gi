@@ -22,6 +22,7 @@ import { installDevHooks } from "@/gi/dev-hooks";
 import type { GpuFrameSample } from "@/gi/performance";
 import type { RenderSize } from "@/gi/render-size";
 import {
+  bdptPixelLimitFromSearch,
   MAX_RENDER_PIXELS,
   resolveInteractionSize,
   resolveRenderSize,
@@ -465,6 +466,9 @@ export class GiRenderer {
   private readonly atrousBuffers: readonly GPUBuffer[];
   private readonly uniformData = new ArrayBuffer(UNIFORM_BYTES);
 
+  private readonly bdptPixelLimit = bdptPixelLimitFromSearch(
+    window.location.search,
+  );
   private bdpt: BdptRuntime | null = null;
   private bdptInitialization: Promise<void> | null = null;
   private bdptPresentation: Promise<void> | null = null;
@@ -993,6 +997,7 @@ export class GiRenderer {
     if (this.bdptInitialization !== null) return false;
     this.releaseBdpt();
     this.report?.(`BDPT INITIALIZING ${targets.width}x${targets.height}`);
+    this.report?.(`BDPT pixel cap: ${this.bdptPixelLimit}`);
     const generation = this.bdptGeneration;
     const promise = createBdptRuntime(
       this.device,
@@ -1053,6 +1058,7 @@ export class GiRenderer {
         this.settings.restirMethod === "bdpt"
           ? Math.min(
               this.pixelBudget,
+              this.bdptPixelLimit,
               Math.floor((MAX_RENDER_PIXELS * 364) / (364 + 1032)),
               Math.floor(this.device.limits.maxStorageBufferBindingSize / 192),
               Math.floor(this.device.limits.maxBufferSize / 192),

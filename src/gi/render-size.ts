@@ -102,3 +102,12 @@ export const resolveRenderSize = ({
     ? { width: Math.max(1, Math.floor(pixelLimit / height)), height }
     : { width, height: Math.max(1, Math.floor(pixelLimit / width)) };
 };
+
+export const bdptPixelLimitFromSearch = (search: string): number => {
+  const raw = new URLSearchParams(search).get("bdptPixels");
+  if (raw === null || !/^[1-9][0-9]*$/.test(raw)) return MAX_RENDER_PIXELS;
+  const pixels = Number(raw);
+  return Number.isSafeInteger(pixels)
+    ? Math.min(pixels, MAX_RENDER_PIXELS)
+    : MAX_RENDER_PIXELS;
+};
