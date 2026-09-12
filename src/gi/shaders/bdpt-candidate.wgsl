@@ -40,18 +40,18 @@ fn bdptEvaluateCandidate(camera: Camera, cameraVertices: u32, lightVertices: u32
     }
   }
   if (lightVertices == 0u) {
-    let vertex = (*cameraPath).vertices[cameraVertices - 2u];
-    candidate.estimator = vertex.throughput * vertex.surface.emission;
+    let vertex = &(*cameraPath).vertices[cameraVertices - 2u];
+    candidate.estimator = (*vertex).throughput * (*vertex).surface.emission;
   } else if (cameraVertices == 1u) {
-    let vertex = (*lightPath).vertices[lightVertices - 1u];
-    let projected = bdptProjectToCamera(camera, vertex.surface.pos, vertex.surface.normal);
+    let vertex = &(*lightPath).vertices[lightVertices - 1u];
+    let projected = bdptProjectToCamera(camera, (*vertex).surface.pos, (*vertex).surface.normal);
     if (!projected.valid) {
       return candidate;
     }
     candidate.pixel = projected.pixel;
     candidate.estimator = bdptConnectCamera(camera, vertex, lightVertices == 1u);
   } else {
-    candidate.estimator = bdptConnectSurfaces((*cameraPath).vertices[cameraVertices - 2u], (*lightPath).vertices[lightVertices - 1u], lightVertices == 1u);
+    candidate.estimator = bdptConnectSurfaces(&(*cameraPath).vertices[cameraVertices - 2u], &(*lightPath).vertices[lightVertices - 1u], lightVertices == 1u);
   }
   if (maxComponent(candidate.estimator) > 0.0) {
     candidate.misWeight = bdptTechniqueWeight(camera, path, cameraVertices, lightSubpathCount);

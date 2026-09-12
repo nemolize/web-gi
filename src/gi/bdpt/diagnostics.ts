@@ -49,13 +49,13 @@ const stages = [
   [
     "surface-connection",
     probe(
-      "var a: BdptVertex; var b: BdptVertex; let qa = quads[uni.frame % uni.quadCount]; let qb = quads[(uni.frame + 1u) % uni.quadCount]; a.surface.pos = qa.origin.xyz; a.surface.normal = qa.normal.xyz; a.surface.albedo = vec3f(0.5); a.throughput = vec3f(1.0); b.surface.pos = qb.origin.xyz; b.surface.normal = qb.normal.xyz; b.surface.albedo = vec3f(0.5); b.throughput = vec3f(1.0); result[gid.x] = vec4f(bdptConnectSurfaces(a, b, (uni.frame & 1u) != 0u), 1.0);",
+      "var a: BdptVertex; var b: BdptVertex; let qa = quads[uni.frame % uni.quadCount]; let qb = quads[(uni.frame + 1u) % uni.quadCount]; a.surface.pos = qa.origin.xyz; a.surface.normal = qa.normal.xyz; a.surface.albedo = vec3f(0.5); a.throughput = vec3f(1.0); b.surface.pos = qb.origin.xyz; b.surface.normal = qb.normal.xyz; b.surface.albedo = vec3f(0.5); b.throughput = vec3f(1.0); result[gid.x] = vec4f(bdptConnectSurfaces(&a, &b, (uni.frame & 1u) != 0u), 1.0);",
     ),
   ],
   [
     "camera-connection",
     probe(
-      "var vertex: BdptVertex; let quad = quads[uni.frame % uni.quadCount]; vertex.surface.pos = quad.origin.xyz; vertex.surface.normal = quad.normal.xyz; vertex.surface.albedo = vec3f(0.5); vertex.throughput = vec3f(1.0); result[gid.x] = vec4f(bdptConnectCamera(uni.cam, vertex, (uni.frame & 1u) != 0u), 1.0);",
+      "var vertex: BdptVertex; let quad = quads[uni.frame % uni.quadCount]; vertex.surface.pos = quad.origin.xyz; vertex.surface.normal = quad.normal.xyz; vertex.surface.albedo = vec3f(0.5); vertex.throughput = vec3f(1.0); result[gid.x] = vec4f(bdptConnectCamera(uni.cam, &vertex, (uni.frame & 1u) != 0u), 1.0);",
     ),
   ],
   [
@@ -90,7 +90,7 @@ const bindings: Omit<GPUBindGroupLayoutEntry, "visibility">[][] = [
 export const bdptDiagnosticSuite: DiagnosticSuite = {
   id: "bdpt",
   label: "ReSTIR BDPT",
-  version: 3,
+  version: 4,
   description:
     "Smaller arrays and omitted MIS are diagnostic variations, not renderer settings or fixes.",
   probes: [32, 8].flatMap((vertices) =>
