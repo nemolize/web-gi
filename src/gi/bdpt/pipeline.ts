@@ -50,7 +50,9 @@ const compileBdptPipeline = async (
   label: string,
   body: string,
   passLayout: GPUBindGroupLayout,
+  report?: (line: string) => void,
 ) => {
+  report?.(`SHADER START ${label}`);
   const module = device.createShaderModule({
     label,
     code: `${bdptShaderPrefix}\n${body}`,
@@ -63,11 +65,13 @@ const compileBdptPipeline = async (
     throw new Error(
       `${label}: ${errors.map((message) => message.message).join("\n")}`,
     );
+  report?.(`SHADER READY ${label}`);
   const layout = device.createPipelineLayout({
     bindGroupLayouts: [sceneLayout, passLayout],
   });
   const failures: string[] = [];
   for (const workgroupSize of [8, 4, 1]) {
+    report?.(`COMPILE START ${label} / ${workgroupSize}x${workgroupSize}`);
     try {
       const pipeline = await device.createComputePipelineAsync({
         label,
@@ -78,8 +82,12 @@ const compileBdptPipeline = async (
           constants: { BDPT_WORKGROUP_SIZE: workgroupSize },
         },
       });
+      report?.(`COMPILE PASS ${label} / ${workgroupSize}x${workgroupSize}`);
       return { pipeline, workgroupSize };
     } catch (error) {
+      report?.(
+        `COMPILE FAIL ${label} / ${workgroupSize}x${workgroupSize}: ${String(error)}`,
+      );
       if (!(error instanceof GPUPipelineError) || error.reason !== "internal")
         throw error;
       failures.push(`${workgroupSize}x${workgroupSize}: ${error.message}`);

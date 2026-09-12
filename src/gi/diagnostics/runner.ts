@@ -27,7 +27,7 @@ export const runGpuDiagnostics = async (
   signal: AbortSignal,
 ): Promise<void> => {
   report(
-    `GPU diagnostics v1 / ${suite.label} v${suite.version} (${suite.probes.some((probe) => "run" in probe) ? "GPU execution and readback" : "compilation only; no rendering"})`,
+    `GPU diagnostics v2 / ${suite.label} v${suite.version} (${suite.probes.some((probe) => "run" in probe) ? "GPU execution and readback" : "compilation only; no rendering"})`,
   );
   report(`Browser: ${navigator.userAgent}`);
   const adapter = await navigator.gpu?.requestAdapter({
@@ -66,6 +66,13 @@ export const runGpuDiagnostics = async (
       );
       let abortWait: (() => void) | undefined;
       let active = true;
+      report(`Timeout: ${timeoutMs / 1000}s for ${label}`);
+      const heartbeat = setInterval(() => {
+        if (active && !signal.aborted)
+          report(
+            `WAIT ${label}: ${Math.round((performance.now() - started) / 1000)}s elapsed`,
+          );
+      }, 5_000);
       try {
         const result = await Promise.race([
           device.lost,
@@ -128,6 +135,7 @@ export const runGpuDiagnostics = async (
       } finally {
         active = false;
         clearTimeout(timeout);
+        clearInterval(heartbeat);
         if (abortWait) signal.removeEventListener("abort", abortWait);
       }
     }
