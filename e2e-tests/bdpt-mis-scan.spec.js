@@ -52,7 +52,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   results[id.x].parameters = vec4f(f32(path.count), path.emitterPdfArea, f32(samples), 0.0);
 }`;
 
-test("streaming MIS agrees with direct CPU products across long paths and zero densities", async ({
+test("MIS agrees with direct CPU products across long paths and zero densities", async ({
   page,
 }) => {
   test.setTimeout(120_000);
