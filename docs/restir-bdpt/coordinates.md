@@ -108,7 +108,7 @@ to reference/comparison modes while the BDPT method is selected.
 Internal pipeline compilation failures retry with 4x4 and then 1x1 workgroups
 instead of the default 8x8. Each pass dispatches using its successful size,
 without changing sampling or depth budgets. Validation errors do not retry;
-exhausted retries report all attempted sizes. The reported Galaxy Z Fold 7 still fails at all three sizes; shrinking
+exhausted retries report all attempted sizes. The original Galaxy Z Fold 7 report failed at all three sizes; shrinking
 the workgroup did not resolve that device's Vulkan compiler failure. The v3 report identifies Chrome 140 and Adreno 8xx: traversal,
 paired subpaths, MIS-path assembly, standalone MIS, visibility, and isolated
 connections compile; candidate evaluation fails even without MIS, at both 32
@@ -119,9 +119,13 @@ The permanent [GPU diagnostics](../gpu-diagnostics/README.md) page offers the
 BDPT v4 suite through `?diagnostics=bdpt` (legacy `?bdptDiagnostics=1` also works).
 Candidate evaluation now passes references to dynamically indexed vertices into
 connection helpers instead of copying whole vertex and hit structures. The
-transport equations and path budgets are unchanged; whether this resolves the
-Fold compiler failure remains unverified. All stages
-run as compilation-only probes at 32 and 8 vertices with 1x1 workgroups.
+transport equations and path budgets are unchanged. The Fold v4 report passes
+all 24 compilation probes, including candidate evaluation and initial-camera,
+at 32 and 8 vertices with 1x1 workgroups. Normal rendering still shows a black
+canvas with updating FPS; compilation success does not establish GPU execution.
+The `?diagnostics=bdpt-execution` suite runs a small glass scene through
+production initialization, reuse, and resolve passes and reports readback
+statistics to separate missing radiance from later presentation problems.
 
 References: [ReSTIR BDPT](https://research.nvidia.com/labs/rtr/publication/hedstrom2025restir/)
 and [PBRT BDPT](https://github.com/mmp/pbrt-v3/blob/master/src/integrators/bdpt.cpp).

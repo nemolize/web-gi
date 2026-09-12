@@ -1,4 +1,5 @@
 import { bdptDiagnosticSuite } from "@/gi/bdpt/diagnostics";
+import { bdptExecutionSuite } from "@/gi/bdpt/execution-diagnostics";
 import type { DiagnosticSuite } from "@/gi/diagnostics/runner";
 
 const core: DiagnosticSuite = {
@@ -29,4 +30,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) { ${body} }`,
   })),
 };
 
-export const diagnosticSuites = [core, bdptDiagnosticSuite] as const;
+export const diagnosticSuites = [
+  core,
+  bdptDiagnosticSuite,
+  bdptExecutionSuite,
+] as const;

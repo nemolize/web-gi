@@ -5,12 +5,20 @@ export interface ComputeProbe {
   readonly constants?: Record<string, number>;
 }
 
+export interface ExecutionProbe {
+  readonly label: string;
+  readonly run: (
+    device: GPUDevice,
+    report: (line: string) => void,
+  ) => Promise<void>;
+}
+
 export interface DiagnosticSuite {
   readonly id: string;
   readonly label: string;
   readonly version: number;
   readonly description: string;
-  readonly probes: readonly ComputeProbe[];
+  readonly probes: readonly (ComputeProbe | ExecutionProbe)[];
 }
 
 export const runGpuDiagnostics = async (
@@ -19,7 +27,7 @@ export const runGpuDiagnostics = async (
   signal: AbortSignal,
 ): Promise<void> => {
   report(
-    `GPU diagnostics v1 / ${suite.label} v${suite.version} (compilation only; no rendering)`,
+    `GPU diagnostics v1 / ${suite.label} v${suite.version} (${suite.probes.some((probe) => "run" in probe) ? "GPU execution and readback" : "compilation only; no rendering"})`,
   );
   report(`Browser: ${navigator.userAgent}`);
   const adapter = await navigator.gpu?.requestAdapter({
@@ -52,10 +60,12 @@ export const runGpuDiagnostics = async (
       report(`START ${label}`);
       const started = performance.now();
       let timeout: ReturnType<typeof setTimeout> | undefined;
+      const timeoutMs = "run" in probe ? 120_000 : 30_000;
       const timeoutError = new Error(
-        "Compilation timed out after 30 seconds; diagnostics stopped.",
+        `Probe timed out after ${timeoutMs / 1000} seconds; diagnostics stopped.`,
       );
       let abortWait: (() => void) | undefined;
+      let active = true;
       try {
         const result = await Promise.race([
           device.lost,
@@ -64,6 +74,12 @@ export const runGpuDiagnostics = async (
             signal.addEventListener("abort", abortWait, { once: true });
           }),
           (async () => {
+            if ("run" in probe) {
+              await probe.run(device, (line) => {
+                if (active && !signal.aborted) report(line);
+              });
+              return;
+            }
             const module = device.createShaderModule({
               label,
               code: probe.code,
@@ -96,7 +112,7 @@ export const runGpuDiagnostics = async (
             });
           })(),
           new Promise<never>((_, reject) => {
-            timeout = setTimeout(() => reject(timeoutError), 30_000);
+            timeout = setTimeout(() => reject(timeoutError), timeoutMs);
           }),
         ]);
         const lostInfo = result ?? loss;
@@ -110,6 +126,7 @@ export const runGpuDiagnostics = async (
         report(`FAIL ${label}: ${String(error)}`);
         if (error === timeoutError || loss !== null) return;
       } finally {
+        active = false;
         clearTimeout(timeout);
         if (abortWait) signal.removeEventListener("abort", abortWait);
       }
