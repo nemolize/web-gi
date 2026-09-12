@@ -8,7 +8,7 @@ test("BDPT diagnostics compile isolated stages without starting the renderer", a
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/?bdptDiagnostics=1");
   await expect(
-    page.getByRole("heading", { name: "BDPT compiler diagnostics" }),
+    page.getByRole("heading", { name: "GPU diagnostics" }),
   ).toBeVisible();
   await expect(page.locator("canvas")).toHaveCount(0);
   test.skip(
@@ -25,7 +25,7 @@ test("BDPT diagnostics compile isolated stages without starting the renderer", a
   });
   const report = await page.getByLabel("Diagnostic report").inputValue();
   expect(report).not.toContain("FAIL");
-  expect(report.match(/^PASS /gm)).toHaveLength(14);
+  expect(report.match(/^PASS /gm)).toHaveLength(24);
   expect(report).toContain('"vendor"');
   expect(errors).toEqual([]);
 });
@@ -99,4 +99,60 @@ test("BDPT diagnostics stop on device loss instead of reporting successful compi
   expect(report).not.toContain("PASS");
   expect(report).not.toContain("START camera-subpath");
   expect(report).not.toContain("DONE");
+});
+
+test("generic diagnostics offer core probes and remain accessible from the renderer", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await page.getByRole("link", { name: "GPU diagnostics" }).click();
+  await expect(page.getByLabel("Diagnostic suite")).toHaveValue("core");
+  await expect(page.locator("canvas")).toHaveCount(0);
+  test.skip(
+    !(await page.evaluate(async () =>
+      Boolean(await navigator.gpu?.requestAdapter()),
+    )),
+    "WebGPU is unavailable.",
+  );
+  await page
+    .getByRole("button", { name: "Run diagnostics", exact: true })
+    .click();
+  await expect(page.getByLabel("Diagnostic report")).toHaveValue(/DONE\./, {
+    timeout: 30_000,
+  });
+  const report = await page.getByLabel("Diagnostic report").inputValue();
+  expect(report).toContain("Core WebGPU v1");
+  expect(report).not.toContain("FAIL");
+  expect(report.match(/^PASS /gm)).toHaveLength(3);
+  await page.getByLabel("Diagnostic suite").selectOption("bdpt");
+  await expect(page.getByLabel("Diagnostic report")).toHaveValue("");
+  await page.goto("/?diagnostics=bdpt");
+  await expect(page.getByLabel("Diagnostic suite")).toHaveValue("bdpt");
+});
+
+test("GPU diagnostics remain usable when WebGPU is absent", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "gpu", { value: undefined });
+    delete globalThis.GPUShaderStage;
+  });
+  await page.goto("/?diagnostics=core");
+  await expect(
+    page.getByRole("heading", { name: "GPU diagnostics" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Run diagnostics", exact: true })
+    .click();
+  await expect(page.getByLabel("Diagnostic report")).toHaveValue(
+    /No WebGPU adapter available/,
+  );
+  await page.getByLabel("Diagnostic suite").selectOption("bdpt");
+  await page
+    .getByRole("button", { name: "Run diagnostics", exact: true })
+    .click();
+  await expect(page.getByLabel("Diagnostic report")).toHaveValue(
+    /No WebGPU adapter available/,
+  );
 });

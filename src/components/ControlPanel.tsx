@@ -23,7 +23,7 @@ type ToggleProps = {
 };
 
 const FOCUSABLE_CONTROL_SELECTOR =
-  'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  'a[href]:not([tabindex="-1"]), button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
 
 const Toggle = ({ label, checked, disabled, onChange }: ToggleProps) => (
@@ -593,6 +593,12 @@ export const ControlPanel = ({
           updateSettings={updateSettings}
           resetView={resetView}
         />
+        <a
+          href="/?diagnostics=core"
+          className="text-sm text-neutral-400 underline"
+        >
+          GPU diagnostics
+        </a>
       </aside>
     </>
   );

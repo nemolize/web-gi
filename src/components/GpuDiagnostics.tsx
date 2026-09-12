@@ -1,8 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 
-import { runBdptDiagnostics } from "@/gi/bdpt/diagnostics";
+import { runGpuDiagnostics } from "@/gi/diagnostics/runner";
+import { diagnosticSuites } from "@/gi/diagnostics/suites";
 
-const BdptDiagnostics = () => {
+const GpuDiagnostics = () => {
+  const [suiteId, setSuiteId] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    return (
+      params.get("diagnostics") ??
+      (params.has("bdptDiagnostics") ? "bdpt" : "core")
+    );
+  });
+  const suite =
+    diagnosticSuites.find((candidate) => candidate.id === suiteId) ??
+    diagnosticSuites[0];
   const [lines, setLines] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
@@ -16,7 +27,7 @@ const BdptDiagnostics = () => {
     setRunning(true);
     const report = (line: string) => setLines((current) => [...current, line]);
     try {
-      await runBdptDiagnostics(report, controller.signal);
+      await runGpuDiagnostics(suite, report, controller.signal);
     } catch (error) {
       report(String(error));
     } finally {
@@ -37,12 +48,33 @@ const BdptDiagnostics = () => {
   };
   return (
     <main className="min-h-dvh bg-neutral-950 p-6 text-neutral-100">
-      <h1 className="text-xl font-semibold">BDPT compiler diagnostics</h1>
+      <h1 className="text-xl font-semibold">GPU diagnostics</h1>
       <p className="my-4">
-        Run this on the device where BDPT fails, then copy the report. This
-        compiles isolated shader stages without rendering. Results include your
-        browser and GPU details; nothing is uploaded automatically.
+        Select a diagnostic suite and run it on the affected device, then copy
+        the report. This compiles isolated shader stages without rendering.
+        Results include your browser and GPU details; nothing is uploaded
+        automatically.
       </p>
+      <label className="mb-4 block">
+        Diagnostic suite
+        <select
+          className="ml-3 rounded border bg-neutral-900 p-2"
+          value={suite.id}
+          disabled={running}
+          onChange={(event) => {
+            setSuiteId(event.target.value);
+            setLines([]);
+            setCopyStatus("");
+          }}
+        >
+          {diagnosticSuites.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="mb-4 text-sm text-neutral-400">{suite.description}</p>
       <div className="mb-4 flex flex-wrap gap-4">
         <button
           className="rounded border px-4 py-2 disabled:opacity-50"
@@ -82,4 +114,4 @@ const BdptDiagnostics = () => {
   );
 };
 
-export default BdptDiagnostics;
+export default GpuDiagnostics;
