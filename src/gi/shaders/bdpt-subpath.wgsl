@@ -116,26 +116,26 @@ fn bdptLightSubpath(seed: u32, maximumVertices: u32) -> BdptSubpath {
   return path;
 }
 
-fn bdptConnectSurfaces(cameraVertex: BdptVertex, lightVertex: BdptVertex, lightIsEmitter: bool) -> vec3f {
-  let cameraHit = cameraVertex.surface;
-  let lightHit = lightVertex.surface;
-  if (cameraHit.materialIndex > 0u || lightHit.materialIndex > 0u) {
+fn bdptConnectSurfaces(cameraVertex: ptr<function, BdptVertex>, lightVertex: ptr<function, BdptVertex>, lightIsEmitter: bool) -> vec3f {
+  let cameraHit = &(*cameraVertex).surface;
+  let lightHit = &(*lightVertex).surface;
+  if ((*cameraHit).materialIndex > 0u || (*lightHit).materialIndex > 0u) {
     return vec3f(0.0);
   }
-  let difference = lightHit.pos - cameraHit.pos;
+  let difference = (*lightHit).pos - (*cameraHit).pos;
   let distanceSquared = dot(difference, difference);
   if (distanceSquared <= 0.0) {
     return vec3f(0.0);
   }
   let direction = difference * inverseSqrt(distanceSquared);
-  let geometry = max(0.0, dot(cameraHit.normal, direction))
-    * max(0.0, dot(lightHit.normal, -direction)) / distanceSquared;
-  if (geometry <= 0.0 || !mutuallyVisible(cameraHit.pos, cameraHit.normal, lightHit.pos)) {
+  let geometry = max(0.0, dot((*cameraHit).normal, direction))
+    * max(0.0, dot((*lightHit).normal, -direction)) / distanceSquared;
+  if (geometry <= 0.0 || !mutuallyVisible((*cameraHit).pos, (*cameraHit).normal, (*lightHit).pos)) {
     return vec3f(0.0);
   }
-  let lightBsdf = select(lightHit.albedo * INV_PI, vec3f(1.0), lightIsEmitter);
-  return cameraVertex.throughput * cameraHit.albedo * INV_PI
-    * lightVertex.throughput * lightBsdf * geometry;
+  let lightBsdf = select((*lightHit).albedo * INV_PI, vec3f(1.0), lightIsEmitter);
+  return (*cameraVertex).throughput * (*cameraHit).albedo * INV_PI
+    * (*lightVertex).throughput * lightBsdf * geometry;
 }
 
 fn bdptBuildCameraReplay(camera: Camera, ndc: vec2f, seed: u32, maximumSurfaces: u32, reconnection: vec4f, surfaceCode: u32, path: ptr<function, BdptSubpath>) {

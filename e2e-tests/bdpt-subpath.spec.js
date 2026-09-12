@@ -84,13 +84,13 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   l.surface.normal = vec3f(0.0, -1.0, 0.0);
   l.surface.albedo = vec3f(0.25);
   l.throughput = vec3f(4.0);
-  let direct = bdptConnectSurfaces(c, l, true).x;
-  let joined = bdptConnectSurfaces(c, l, false).x;
+  let direct = bdptConnectSurfaces(&c, &l, true).x;
+  let joined = bdptConnectSurfaces(&c, &l, false).x;
   c.surface.pos.x = 0.0;
   l.surface.pos.x = 0.0;
-  let occluded = bdptConnectSurfaces(c, l, true).x;
+  let occluded = bdptConnectSurfaces(&c, &l, true).x;
   c.surface.materialIndex = 1u;
-  let deltaConnection = bdptConnectSurfaces(c, l, true).x;
+  let deltaConnection = bdptConnectSurfaces(&c, &l, true).x;
   probes[id.x] = Probe(
     vec4f(f32(camera.count), f32(light.count), deltaCount(camera), deltaCount(light)),
     vec4f(select(0.0, 1.0, samePath(camera, replayCamera) && samePath(light, replayLight)),

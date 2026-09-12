@@ -49,14 +49,14 @@ fn bdptCameraVisible(camera: Camera, position: vec3f) -> bool {
   return hit.hit && abs(hit.t - distance) <= 2.0 * SURFACE_EPS;
 }
 
-fn bdptConnectCamera(camera: Camera, vertex: BdptVertex, lightIsEmitter: bool) -> vec3f {
-  if (vertex.surface.materialIndex > 0u) {
+fn bdptConnectCamera(camera: Camera, vertex: ptr<function, BdptVertex>, lightIsEmitter: bool) -> vec3f {
+  if ((*vertex).surface.materialIndex > 0u) {
     return vec3f(0.0);
   }
-  let connection = bdptProjectToCamera(camera, vertex.surface.pos, vertex.surface.normal);
-  if (!connection.valid || !bdptCameraVisible(camera, vertex.surface.pos)) {
+  let connection = bdptProjectToCamera(camera, (*vertex).surface.pos, (*vertex).surface.normal);
+  if (!connection.valid || !bdptCameraVisible(camera, (*vertex).surface.pos)) {
     return vec3f(0.0);
   }
-  let bsdf = select(vertex.surface.albedo * INV_PI, vec3f(1.0), lightIsEmitter);
-  return vertex.throughput * bsdf * connection.pdfArea;
+  let bsdf = select((*vertex).surface.albedo * INV_PI, vec3f(1.0), lightIsEmitter);
+  return (*vertex).throughput * bsdf * connection.pdfArea;
 }
