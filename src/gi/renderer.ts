@@ -70,6 +70,8 @@ export interface RendererActivity {
   readonly kind: "preparing" | "rendering";
   readonly detail: string;
   readonly startedAt: number;
+  readonly step?:
+    { readonly current: number; readonly total: number } | undefined;
 }
 
 export type RendererStats = {
@@ -82,17 +84,23 @@ export type RendererStats = {
 
 export type DeviceLossInfo = Pick<GPUDeviceLostInfo, "message" | "reason">;
 
-const bdptPreparationLabel = (label: string): string => {
-  const labels: Record<string, string> = {
-    "bdpt-initial-camera": "Preparing camera paths",
-    "bdpt-initial-light": "Preparing light paths",
-    "bdpt-initial-gather": "Preparing light collection",
-    "bdpt-temporal": "Preparing temporal reuse",
-    "bdpt-spatial": "Preparing spatial reuse",
-    "bdpt-caustic-reproject": "Preparing caustic reuse",
-    "bdpt-resolve": "Preparing output",
+const bdptPreparationStage = (
+  label: string,
+): Pick<RendererActivity, "detail" | "step"> => {
+  const stages = [
+    ["bdpt-initial-camera", "Preparing camera paths"],
+    ["bdpt-initial-light", "Preparing light paths"],
+    ["bdpt-initial-gather", "Preparing light collection"],
+    ["bdpt-temporal", "Preparing temporal reuse"],
+    ["bdpt-spatial", "Preparing spatial reuse"],
+    ["bdpt-caustic-reproject", "Preparing caustic reuse"],
+    ["bdpt-resolve", "Preparing output"],
+  ] as const;
+  const index = stages.findIndex(([pipeline]) => pipeline === label);
+  return {
+    detail: stages[index]?.[1] ?? "Preparing rendering resources",
+    step: index < 0 ? undefined : { current: index + 1, total: stages.length },
   };
-  return labels[label] ?? "Preparing rendering resources";
 };
 
 const WORKGROUP_SIZE = DEFAULT_WORKGROUP_SIZE;
@@ -1049,7 +1057,7 @@ export class GiRenderer {
         ) {
           this.bdptPreparationActivity = {
             ...this.bdptPreparationActivity,
-            detail: bdptPreparationLabel(compiling.pipeline),
+            ...bdptPreparationStage(compiling.pipeline),
           };
         }
       },

@@ -81,6 +81,7 @@ test("resizes do not overlap pending BDPT resource initialization", async ({
   await expect(page.getByRole("status")).toContainText(
     "Preparing spatial reuse",
   );
+  await expect(page.getByTestId("renderer-step")).toHaveText("Step 5/7");
   await expect(page.getByTestId("renderer-elapsed")).not.toHaveText(
     "0s elapsed",
   );
