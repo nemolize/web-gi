@@ -232,7 +232,7 @@ export const useGiRenderer = (
           animationFrame = requestAnimationFrame(loop);
           const active = rendererRef.current;
           if (active === null) return;
-          active.renderFrame(cameraRef.current);
+          const submitted = active.renderFrame(cameraRef.current);
           // A renderer that cannot allocate its targets keeps running and keeps
           // drawing black, so the failure has to be pulled out of it explicitly.
           const failure = active.allocationError;
@@ -252,7 +252,7 @@ export const useGiRenderer = (
           const shouldUpdateStats = now - lastStatsAt > STATS_INTERVAL_MS;
           const currentStats =
             measurement !== null || shouldUpdateStats ? active.stats : null;
-          if (measurement !== null && currentStats !== null) {
+          if (measurement !== null && currentStats !== null && submitted) {
             const usable =
               currentStats.atrousVariant !== null &&
               currentStats.accumFrames > 0 &&

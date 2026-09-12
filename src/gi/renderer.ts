@@ -466,12 +466,11 @@ export class GiRenderer {
   private readonly uniformData = new ArrayBuffer(UNIFORM_BYTES);
 
   private bdpt: BdptRuntime | null = null;
+  private bdptInitialization: Promise<void> | null = null;
+  private bdptPresentation: Promise<void> | null = null;
+  private bdptSubmittedFrames = 0;
   private bdptGeneration = 0;
-  private bdptPending: {
-    width: number;
-    height: number;
-    promise: Promise<void>;
-  } | null = null;
+  private bdptPending = false;
   private capture: CaptureResources | null = null;
   private capturePipelines: CapturePipelines | null = null;
   private captureInProgress = false;
@@ -978,7 +977,7 @@ export class GiRenderer {
     this.bdptGeneration++;
     this.bdpt?.destroy();
     this.bdpt = null;
-    this.bdptPending = null;
+    this.bdptPending = false;
   }
 
   private prepareBdpt(targets: Targets): boolean {
@@ -991,11 +990,7 @@ export class GiRenderer {
       this.bdpt.height === targets.height
     )
       return true;
-    if (
-      this.bdptPending?.width === targets.width &&
-      this.bdptPending.height === targets.height
-    )
-      return false;
+    if (this.bdptInitialization !== null) return false;
     this.releaseBdpt();
     this.report?.(`BDPT INITIALIZING ${targets.width}x${targets.height}`);
     const generation = this.bdptGeneration;
@@ -1014,29 +1009,33 @@ export class GiRenderer {
         }
         this.report?.(`BDPT READY ${targets.width}x${targets.height}`);
         this.bdpt = runtime;
-        this.bdptPending = null;
+        this.bdptPending = false;
         this.accumFrames = 0;
         this.historyFrames = 0;
       })
       .catch((error: unknown) => {
         if (!this.destroyed && generation === this.bdptGeneration) {
-          this.bdptPending = null;
+          this.bdptPending = false;
           this.allocationFailure = `ReSTIR BDPT could not initialize: ${String(error)}`;
         }
+      })
+      .finally(() => {
+        this.bdptInitialization = null;
       });
-    this.bdptPending = {
-      width: targets.width,
-      height: targets.height,
-      promise,
-    };
+    this.bdptInitialization = promise;
+    this.bdptPending = true;
     return false;
   }
 
-  private async prepareComparisonRenderer(): Promise<void> {
-    this.prepareBdpt(this.ensureTargets());
-    await this.bdptPending?.promise;
-    if (this.allocationFailure !== null)
-      throw new Error(this.allocationFailure);
+  private async prepareComparisonRenderer(signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    const targets = this.ensureTargets();
+    while (!this.destroyed && this.allocationFailure === null) {
+      signal.throwIfAborted();
+      if (this.prepareBdpt(targets)) return;
+      await this.bdptInitialization;
+    }
+    throw new Error(this.allocationFailure ?? "Renderer was destroyed.");
   }
 
   private resolveSize(): { width: number; height: number } {
@@ -1420,13 +1419,16 @@ export class GiRenderer {
     this.device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData);
   }
 
-  renderFrame(camera: OrbitCamera): void {
+  renderFrame(camera: OrbitCamera): boolean {
     if (this.lastCamera !== null && !camerasEqual(this.lastCamera, camera)) {
       this.notifyCameraChanged();
     }
     this.lastCamera = camera;
-    if (this.comparisonInProgress) return;
+    if (this.comparisonInProgress || this.bdptPresentation !== null)
+      return false;
+    const previousFrame = this.frame;
     this.renderFrameNow(camera);
+    return this.frame !== previousFrame;
   }
 
   private renderFrameNow(
@@ -1610,6 +1612,32 @@ export class GiRenderer {
     }
 
     this.device.queue.submit([encoder.finish()]);
+    if (output === "present" && this.usesBdpt()) {
+      const sequence = ++this.bdptSubmittedFrames;
+      const submittedAt = performance.now();
+      this.report?.(
+        `BDPT SUBMIT ${sequence} ${targets.width}x${targets.height}`,
+      );
+      this.bdptPresentation = this.device.queue
+        .onSubmittedWorkDone()
+        .then(
+          () => {
+            if (!this.destroyed)
+              this.report?.(
+                `BDPT COMPLETE ${sequence} (${Math.round(performance.now() - submittedAt)} ms)`,
+              );
+          },
+          (error: unknown) => {
+            if (!this.destroyed)
+              this.report?.(
+                `BDPT COMPLETION FAILED ${sequence}: ${String(error)}`,
+              );
+          },
+        )
+        .finally(() => {
+          this.bdptPresentation = null;
+        });
+    }
 
     if (sampling && slot !== undefined && probe !== null) {
       void slot.staging
@@ -1757,7 +1785,7 @@ export class GiRenderer {
     const deadline =
       performance.now() + durationMs + COMPLETION_WINDOW_TIMEOUT_PADDING_MS;
     try {
-      const preparation = this.prepareComparisonRenderer();
+      const preparation = this.prepareComparisonRenderer(controller.signal);
       const generation = this.comparisonGeneration;
       await this.waitForComparisonOperation(
         preparation,
@@ -1813,7 +1841,7 @@ export class GiRenderer {
     const controller = this.beginComparison();
     const deadline = performance.now() + REFERENCE_CAPTURE_TIMEOUT_MS;
     try {
-      const preparation = this.prepareComparisonRenderer();
+      const preparation = this.prepareComparisonRenderer(controller.signal);
       const generation = this.comparisonGeneration;
       await this.waitForComparisonOperation(
         preparation,

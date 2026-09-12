@@ -68,7 +68,7 @@ const createFakeRenderer = (): FakeRenderer => {
     deviceLost,
     destroy,
     allocationError: null,
-    renderFrame: vi.fn(),
+    renderFrame: vi.fn(() => true),
     setSettings: vi.fn(),
     notifyCameraChanged: vi.fn(),
     supportsGpuTiming: false,
@@ -372,6 +372,38 @@ describe("useGiRenderer", () => {
     );
   });
 
+  it("does not count animation callbacks while GPU submission is blocked", async () => {
+    const fake = createFakeRenderer();
+    vi.mocked(fake.renderer.renderFrame).mockReturnValue(false);
+    const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+    let nextFrame: FrameRequestCallback | null = null;
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        nextFrame = callback;
+        return 1;
+      }),
+    );
+    render(<RendererHarness rendererFactory={create} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Measure" }));
+    act(() => {
+      for (let now = 0; now <= 11_000; now += 40) {
+        const frame = nextFrame;
+        nextFrame = null;
+        frame?.(now);
+      }
+    });
+    expect(screen.getByTestId("captured-callbacks")).toBeEmptyDOMElement();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PERFORMANCE_CAPTURE_TIMEOUT_MS + 1);
+    });
+    expect(screen.getByTestId("capture-error")).toHaveTextContent("timed out");
+  });
+
   it("keeps stats snapshots on the throttled cadence while idle", async () => {
     const fake = createFakeRenderer();
     const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
@@ -591,6 +623,7 @@ describe("useGiRenderer", () => {
     });
     vi.mocked(fake.renderer.renderFrame).mockImplementation((camera) => {
       currentCamera = camera;
+      return true;
     });
     fake.compareReferenceAfter.mockImplementation((label) => {
       if (label !== "restir" && label !== "path-traced") {
