@@ -25,7 +25,9 @@ at import time, so unsupported browsers can still open the page.
 
 Core WebGPU covers storage writes, dynamic array access, and arrays within
 structures. The BDPT suite lives in `src/gi/bdpt/diagnostics.ts` and uses the
-production shader prefix with isolated stages. Its smaller arrays and omitted
+production shader prefix with isolated stages. Version 5 first compiles the
+production initial-gather shader at 8x8, 4x4, and 1x1, then runs the existing
+24 isolated probes. These compilation-only checks exclude renderer target allocations. Its smaller arrays and omitted
 MIS are diagnostic variants, never rendering modes. Increment a suite's version
 when changing probe meaning, and retain meaningful labels in reports.
 
