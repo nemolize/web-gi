@@ -85,3 +85,71 @@ test("BDPT comparison uses a shared size and cancels during lazy compilation", a
   expect(result.cancellationMs).toBeLessThan(250);
   expect(result.compared).toBe(true);
 });
+
+test("cancelled comparison cannot initialize obsolete targets after resize", async ({
+  page,
+}) => {
+  test.skip(isPreviewTarget, "Imports development renderer modules");
+  await page.goto("/?diagnostics=core");
+  const result = await page.evaluate(async () => {
+    if (!(await navigator.gpu?.requestAdapter())) return null;
+    const { GiRenderer } = await import("/src/gi/renderer.ts");
+    const { DEFAULT_SETTINGS } = await import("/src/gi/settings.ts");
+    const { DEFAULT_CAMERA } = await import("/src/gi/camera.ts");
+    const canvas = document.createElement("canvas");
+    canvas.style.cssText = "width:200px;height:160px";
+    document.body.append(canvas);
+    const logs = [];
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      mode: "reference",
+      restirMethod: "bdpt",
+      smoothMotion: false,
+    };
+    const renderer = await GiRenderer.create(canvas, settings, (line) =>
+      logs.push(line),
+    );
+    const compile = GPUDevice.prototype.createComputePipelineAsync;
+    GPUDevice.prototype.createComputePipelineAsync = async function (
+      descriptor,
+    ) {
+      const pipeline = await compile.call(this, descriptor);
+      if (descriptor.label?.startsWith("bdpt"))
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      return pipeline;
+    };
+    try {
+      renderer.renderFrame(DEFAULT_CAMERA);
+      await renderer.saveComparisonReference();
+      const oldSize = `${renderer.stats.width}x${renderer.stats.height}`;
+      renderer.setSettings({ ...settings, mode: "restir" });
+      renderer.renderFrame(DEFAULT_CAMERA);
+      const comparing = renderer
+        .compareReferenceAfter("restir", 100)
+        .catch((error) => String(error));
+      renderer.cancelComparison("cancel and resize");
+      await comparing;
+      canvas.style.width = "240px";
+      const deadline = performance.now() + 15_000;
+      while (renderer.stats.accumFrames < 2 && performance.now() < deadline) {
+        renderer.renderFrame(DEFAULT_CAMERA);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return { oldSize, logs, frames: renderer.stats.accumFrames };
+    } finally {
+      GPUDevice.prototype.createComputePipelineAsync = compile;
+      renderer.destroy();
+      canvas.remove();
+    }
+  });
+  test.skip(result === null, "WebGPU unavailable");
+  expect(result.frames).toBeGreaterThanOrEqual(2);
+  expect(
+    result.logs.filter(
+      (line) => line === `BDPT INITIALIZING ${result.oldSize}`,
+    ),
+  ).toHaveLength(1);
+  expect(
+    result.logs.filter((line) => line.startsWith("BDPT INITIALIZING")),
+  ).toHaveLength(2);
+});

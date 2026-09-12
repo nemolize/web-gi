@@ -121,8 +121,12 @@ Candidate evaluation now passes references to dynamically indexed vertices into
 connection helpers instead of copying whole vertex and hit structures. The
 transport equations and path budgets are unchanged. The Fold v4 report passes
 all 24 compilation probes, including candidate evaluation and initial-camera,
-at 32 and 8 vertices with 1x1 workgroups. Normal rendering still shows a black
-canvas with updating FPS; compilation success does not establish GPU execution.
+at 32 and 8 vertices with 1x1 workgroups. The execution v2 report also passes
+three 39x31 frames, but normal 353x738 rendering loses the device after repeated
+half/full-resolution transitions. The renderer now serializes BDPT initialization
+and permits only one presented BDPT frame awaiting GPU completion. It logs
+SUBMIT/COMPLETE events separately from submitted-frame counters. These changes
+prevent overlapping work; Fold device-loss resolution remains unverified.
 The `?diagnostics=bdpt-execution` suite runs a small glass scene through
 production initialization, reuse, and resolve passes and reports readback
 statistics to separate missing radiance from later presentation problems.
