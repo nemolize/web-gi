@@ -26,6 +26,14 @@ export const RendererProgress = ({ activity }: RendererProgressProps) => {
       <div className="w-full max-w-sm rounded-xl border border-neutral-600 bg-neutral-950/95 p-4 text-center shadow-xl">
         <div role="status" aria-live="polite">
           <p className="font-medium text-neutral-100">{title}</p>
+          {activity?.step !== undefined && (
+            <p
+              className="mt-1 text-sm text-neutral-300"
+              data-testid="renderer-step"
+            >
+              Step {activity.step.current}/{activity.step.total}
+            </p>
+          )}
           <p className="mt-1 text-sm text-neutral-300">
             {activity?.detail ?? "Preparing the GPU device and renderer"}
           </p>
