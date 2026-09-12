@@ -44,3 +44,12 @@ compilation attempt, including the selected workgroup size or retry failure.
 A ten-second wait alone does not establish a compiler hang. Inspect the last
 COMPILE START without a matching PASS/FAIL; the 120-second limit applies to the
 entire execution probe, including compilation and all three frames.
+
+The renderer error overlay also offers **Copy diagnostic report** and an
+expandable text field for manual copying. Its frozen snapshot includes browser,
+GPU adapter, settings, render dimensions, submitted-frame statistics, timestamped
+BDPT initialization events, and the failure. Statistics are captured before
+renderer destruction and do not prove GPU completion. Reports retain the first
+eight and the most recent 72 event lines with an omitted-line count between
+them; the page URL excludes query and hash.
+Retry starts a new event history. Clipboard rejection leaves the text available.
