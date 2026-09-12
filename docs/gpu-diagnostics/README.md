@@ -65,3 +65,12 @@ the requested cap and actual dimensions. Omit it for the normal resolution.
 BDPT pipeline compilation is serialized per device, including size retries;
 `COMPILE QUEUED` identifies work waiting for earlier compilation. Execution
 suite v3 uses this same compiler queue.
+
+To isolate normal-renderer failures before the controls become usable, set
+`temporal=off`, `spatial=off`, or `denoise=off` in the URL. Temporal and spatial
+overrides set both DI and GI reuse controls; BDPT uses the GI controls. These
+initial settings remain editable in the panel and appear in failure reports.
+Use `on` to enable a setting explicitly, or omit it for the default. Reuse
+shaders still compile and dispatch; the existing disabled branches bypass
+resampling. These URLs do not isolate individual GPU submissions or establish
+which pass caused a device loss.

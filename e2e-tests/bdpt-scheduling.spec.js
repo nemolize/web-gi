@@ -119,3 +119,32 @@ test("explicit BDPT pixel cap exercises normal rendering without capping ReSTIR 
   await expect.poll(pixels).toBeGreaterThan(1209);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
+
+test("reuse query controls apply before BDPT starts and remain editable", async ({
+  page,
+}) => {
+  await page.goto(
+    "/?restir=bdpt&temporal=off&spatial=off&denoise=off&bdptPixels=1209",
+  );
+  await requireGpu(page);
+  await expect(page.getByTestId("stat-accumulated")).not.toHaveText("0", {
+    timeout: 30_000,
+  });
+  await page.getByRole("button", { name: "Controls", exact: true }).click();
+  await expect(
+    page.getByRole("checkbox", { name: "Temporal reuse", exact: true }),
+  ).not.toBeChecked();
+  await expect(
+    page.getByRole("checkbox", { name: "Spatial reuse", exact: true }),
+  ).not.toBeChecked();
+  await expect(
+    page.getByRole("checkbox", { name: "À-trous filter", exact: true }),
+  ).not.toBeChecked();
+  await page
+    .getByRole("checkbox", { name: "Temporal reuse", exact: true })
+    .click();
+  await expect(
+    page.getByRole("checkbox", { name: "Temporal reuse", exact: true }),
+  ).toBeChecked();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});

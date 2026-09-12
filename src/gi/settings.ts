@@ -175,6 +175,10 @@ export const sanitizedRenderQueryParams = (search: string): URLSearchParams => {
   const sanitized = new URLSearchParams();
   const restirMethod = enumValue(source, "restir", RESTIR_METHODS);
   if (restirMethod !== undefined) sanitized.set("restir", restirMethod);
+  for (const key of ["temporal", "spatial", "denoise"]) {
+    const value = enumValue(source, key, ["on", "off"]);
+    if (value !== undefined) sanitized.set(key, value);
+  }
   const matrix = enumValue(source, "preset", MATRIX_PRESETS);
   if (matrix !== undefined) {
     sanitized.set("preset", matrix);
@@ -226,9 +230,16 @@ export const settingsFromSearch = (search: string): RenderSettings => {
       return value === null ? [] : [[key, Number(value)]];
     }),
   );
+  const toggle = (key: string, fallback: boolean): boolean =>
+    params.has(key) ? params.get(key) === "on" : fallback;
   return {
     ...base,
     ...overrides,
+    diTemporal: toggle("temporal", base.diTemporal),
+    giTemporal: toggle("temporal", base.giTemporal),
+    diSpatial: toggle("spatial", base.diSpatial),
+    giSpatial: toggle("spatial", base.giSpatial),
+    denoise: toggle("denoise", base.denoise),
     restirMethod:
       enumValue(params, "restir", RESTIR_METHODS) ?? base.restirMethod,
     mode:
