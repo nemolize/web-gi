@@ -20,6 +20,7 @@ export const createBdptInitialPasses = async (
   sceneLayout: GPUBindGroupLayout,
   width: number,
   height: number,
+  report?: (line: string) => void,
 ): Promise<BdptInitialPasses> => {
   const pixels = width * height;
   if (
@@ -61,6 +62,7 @@ export const createBdptInitialPasses = async (
       "bdpt-initial-camera",
       cameraPass,
       cameraLayout,
+      report,
     ),
     createBdptPipeline(
       device,
@@ -68,6 +70,7 @@ export const createBdptInitialPasses = async (
       "bdpt-initial-light",
       lightPass,
       lightLayout,
+      report,
     ),
     createBdptPipeline(
       device,
@@ -75,6 +78,7 @@ export const createBdptInitialPasses = async (
       "bdpt-initial-gather",
       gatherPass,
       gatherLayout,
+      report,
     ),
   ]);
   const resources: GPUBuffer[] = [];

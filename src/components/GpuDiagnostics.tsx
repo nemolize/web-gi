@@ -25,7 +25,14 @@ const GpuDiagnostics = () => {
     setLines([]);
     setCopyStatus("");
     setRunning(true);
-    const report = (line: string) => setLines((current) => [...current, line]);
+    const started = performance.now();
+    const report = (line: string) => {
+      const elapsed = ((performance.now() - started) / 1000).toFixed(3);
+      setLines((current) => [
+        ...current,
+        ...line.split("\n").map((part) => `[+${elapsed}s] ${part}`),
+      ]);
+    };
     try {
       await runGpuDiagnostics(suite, report, controller.signal);
     } catch (error) {

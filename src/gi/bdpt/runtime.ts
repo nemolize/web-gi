@@ -12,8 +12,15 @@ export const createBdptRuntime = async (
   width: number,
   height: number,
   output: GPUTextureView,
+  report?: (line: string) => void,
 ) => {
-  const passes = await createBdptPasses(device, sceneLayout, width, height);
+  const passes = await createBdptPasses(
+    device,
+    sceneLayout,
+    width,
+    height,
+    report,
+  );
   try {
     const layout = device.createBindGroupLayout({
       entries: [
@@ -35,6 +42,7 @@ export const createBdptRuntime = async (
       "bdpt-resolve",
       resolve,
       layout,
+      report,
     );
     const groups = new Map<GPUBuffer, GPUBindGroup>();
     return {

@@ -25,7 +25,7 @@ test("BDPT diagnostics compile isolated stages without starting the renderer", a
   });
   const report = await page.getByLabel("Diagnostic report").inputValue();
   expect(report).not.toContain("FAIL");
-  expect(report.match(/^PASS /gm)).toHaveLength(24);
+  expect(report.match(/^\[\+\d+\.\d{3}s\] PASS /gm)).toHaveLength(24);
   expect(report).toContain('"vendor"');
   expect(errors).toEqual([]);
 });
@@ -124,7 +124,7 @@ test("generic diagnostics offer core probes and remain accessible from the rende
   const report = await page.getByLabel("Diagnostic report").inputValue();
   expect(report).toContain("Core WebGPU v1");
   expect(report).not.toContain("FAIL");
-  expect(report.match(/^PASS /gm)).toHaveLength(3);
+  expect(report.match(/^\[\+\d+\.\d{3}s\] PASS /gm)).toHaveLength(3);
   await page.getByLabel("Diagnostic suite").selectOption("bdpt");
   await expect(page.getByLabel("Diagnostic report")).toHaveValue("");
   await page.goto("/?diagnostics=bdpt");
@@ -174,6 +174,10 @@ test("BDPT execution diagnostics read nonzero radiance from production passes", 
   const text = await report.inputValue();
   expect(text).toContain("GPU execution and readback");
   expect(text).toContain("READY production BDPT pipelines");
+  expect(text.match(/COMPILE PASS bdpt-/g)).toHaveLength(7);
+  expect(
+    text.split("\n").every((line) => /^\[\+\d+\.\d{3}s\] /.test(line)),
+  ).toBe(true);
   expect(text).not.toMatch(/FAIL|GPU ERROR|finite=false/);
   expect(text.match(/finite=true positive=/g)).toHaveLength(9);
   expect(text).toContain("PASS glass / 39x31 / 3 frames");
@@ -206,6 +210,9 @@ test("stopped execution diagnostics discard reports from delayed GPU work", asyn
     .getByRole("button", { name: "Run diagnostics", exact: true })
     .click();
   await page.waitForFunction(() => window.__diagnosticPaused);
+  await expect(page.getByLabel("Diagnostic report")).toHaveValue(/WAIT glass/, {
+    timeout: 10_000,
+  });
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   const report = page.getByLabel("Diagnostic report");
   await expect(report).toHaveValue(/Stopped\./);

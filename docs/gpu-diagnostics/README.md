@@ -6,10 +6,12 @@ still selects BDPT. No application renderer mounts on the diagnostics route.
 
 Select a suite, run it, and copy the report. Reports include the browser user
 agent, adapter details, suite/version, and each probe's result and compilation
-time. Nothing is uploaded automatically. A failed probe normally allows the
+time. Each displayed line includes elapsed seconds since Run, including errors
+and Stop. Pending probes emit a WAIT line every five seconds; this confirms the
+page timer is active, not that GPU work is progressing. Nothing is uploaded automatically. A failed probe normally allows the
 next one to run; device loss, cancellation, or a probe timeout stops
 the suite and retains partial results. Compiler probes time out after 30 seconds;
-execution probes after 120 seconds. Compilation success does not establish
+execution probes after 120 seconds. The limit is printed when each probe starts. Compilation success does not establish
 rendering correctness or performance.
 
 `src/gi/diagnostics/runner.ts` owns adapter/device lifetime, cancellation,
@@ -36,3 +38,9 @@ production BDPT passes, then reads initial/reused reservoirs and rgba16float
 resolve output. Each stage reports finite/positive channel counts and mean
 radiance. This is a smoke test, not a convergence or full-resolution performance
 check, and excludes denoising and canvas presentation.
+
+BDPT execution v2 reports shader validation and each production pipeline
+compilation attempt, including the selected workgroup size or retry failure.
+A ten-second wait alone does not establish a compiler hang. Inspect the last
+COMPILE START without a matching PASS/FAIL; the 120-second limit applies to the
+entire execution probe, including compilation and all three frames.

@@ -23,12 +23,14 @@ export const createBdptPasses = async (
   sceneLayout: GPUBindGroupLayout,
   width: number,
   height: number,
+  report?: (line: string) => void,
 ): Promise<BdptPasses> => {
   const initial = await createBdptInitialPasses(
     device,
     sceneLayout,
     width,
     height,
+    report,
   );
   const resources: GPUBuffer[] = [];
   try {
@@ -56,6 +58,7 @@ export const createBdptPasses = async (
           "bdpt-temporal",
           temporal,
           temporalLayout,
+          report,
         ),
         createBdptPipeline(
           device,
@@ -63,6 +66,7 @@ export const createBdptPasses = async (
           "bdpt-spatial",
           spatial,
           spatialLayout,
+          report,
         ),
         createBdptPipeline(
           device,
@@ -70,6 +74,7 @@ export const createBdptPasses = async (
           "bdpt-caustic-reproject",
           reproject,
           reprojectLayout,
+          report,
         ),
       ]);
     const buffer = (label: string, stride = 160) => {
