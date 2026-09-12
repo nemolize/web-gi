@@ -1,5 +1,6 @@
 import { allocateBdptResources } from "@/gi/bdpt/allocation";
 import { createBdptInitialPasses } from "@/gi/bdpt/initial-passes";
+import type { BdptProgressReporter } from "@/gi/bdpt/pipeline";
 import { createBdptPipeline, dispatchBdptPipeline } from "@/gi/bdpt/pipeline";
 import reproject from "@/gi/shaders/bdpt-caustic-reproject.wgsl?raw";
 import spatial from "@/gi/shaders/bdpt-spatial.wgsl?raw";
@@ -23,7 +24,7 @@ export const createBdptPasses = async (
   sceneLayout: GPUBindGroupLayout,
   width: number,
   height: number,
-  report?: (line: string) => void,
+  report?: BdptProgressReporter,
 ): Promise<BdptPasses> => {
   const initial = await createBdptInitialPasses(
     device,

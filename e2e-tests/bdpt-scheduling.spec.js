@@ -35,6 +35,10 @@ test("BDPT waits for GPU completion before another frame or resize allocation", 
   await page.goto("/?restir=bdpt");
   await requireGpu(page);
   await page.waitForFunction(() => window.__releaseFrame);
+  await expect(page.getByRole("status")).toContainText("Waiting for GPU");
+  await expect(page.getByRole("status")).toContainText(
+    "Rendering the first frame",
+  );
   expect(await page.evaluate(() => window.__submits)).toBe(1);
   await page.setViewportSize({ width: 460, height: 520 });
   await page.locator("canvas").dispatchEvent("wheel", { deltaY: 40 });
@@ -74,6 +78,13 @@ test("resizes do not overlap pending BDPT resource initialization", async ({
   await page.goto("/?restir=bdpt");
   await requireGpu(page);
   await page.waitForFunction(() => window.__releaseInitialization);
+  await expect(page.getByRole("status")).toContainText(
+    "Preparing spatial reuse",
+  );
+  await expect(page.getByTestId("renderer-elapsed")).not.toHaveText(
+    "0s elapsed",
+  );
+  await page.screenshot({ path: test.info().outputPath("bdpt-preparing.png") });
   expect(await page.evaluate(() => window.__initialAllocations)).toBe(1);
   for (const width of [440, 450, 460]) {
     await page.setViewportSize({ width, height: 500 });
@@ -84,6 +95,9 @@ test("resizes do not overlap pending BDPT resource initialization", async ({
   await expect(page.getByTestId("stat-accumulated")).not.toHaveText("0", {
     timeout: 30_000,
   });
+  await expect(
+    page.getByText("Preparing ReSTIR BDPT…", { exact: true }),
+  ).toHaveCount(0);
   expect(await page.evaluate(() => window.__initialAllocations)).toBe(2);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });

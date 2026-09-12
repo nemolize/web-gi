@@ -26,6 +26,11 @@ export const bdptShaderPrefix = [
   motion,
 ].join("\n");
 
+export type BdptProgressReporter = (
+  line: string,
+  compiling?: { readonly pipeline: string },
+) => void;
+
 export interface BdptPipeline {
   readonly pipeline: GPUComputePipeline;
   readonly workgroupSize: number;
@@ -50,9 +55,9 @@ const compileBdptPipeline = async (
   label: string,
   body: string,
   passLayout: GPUBindGroupLayout,
-  report?: (line: string) => void,
+  report?: BdptProgressReporter,
 ) => {
-  report?.(`SHADER START ${label}`);
+  report?.(`SHADER START ${label}`, { pipeline: label });
   const module = device.createShaderModule({
     label,
     code: `${bdptShaderPrefix}\n${body}`,

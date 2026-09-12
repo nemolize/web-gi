@@ -1,4 +1,5 @@
 import { createBdptPasses } from "@/gi/bdpt/passes";
+import type { BdptProgressReporter } from "@/gi/bdpt/pipeline";
 import { createBdptPipeline, dispatchBdptPipeline } from "@/gi/bdpt/pipeline";
 import resolve from "@/gi/shaders/bdpt-resolve.wgsl?raw";
 
@@ -12,7 +13,7 @@ export const createBdptRuntime = async (
   width: number,
   height: number,
   output: GPUTextureView,
-  report?: (line: string) => void,
+  report?: BdptProgressReporter,
 ) => {
   const passes = await createBdptPasses(
     device,
