@@ -66,6 +66,12 @@ export class WebGpuUnsupportedError extends Error {
   }
 }
 
+export interface RendererActivity {
+  readonly kind: "preparing" | "rendering";
+  readonly detail: string;
+  readonly startedAt: number;
+}
+
 export type RendererStats = {
   readonly width: number;
   readonly height: number;
@@ -75,6 +81,19 @@ export type RendererStats = {
 };
 
 export type DeviceLossInfo = Pick<GPUDeviceLostInfo, "message" | "reason">;
+
+const bdptPreparationLabel = (label: string): string => {
+  const labels: Record<string, string> = {
+    "bdpt-initial-camera": "Preparing camera paths",
+    "bdpt-initial-light": "Preparing light paths",
+    "bdpt-initial-gather": "Preparing light collection",
+    "bdpt-temporal": "Preparing temporal reuse",
+    "bdpt-spatial": "Preparing spatial reuse",
+    "bdpt-caustic-reproject": "Preparing caustic reuse",
+    "bdpt-resolve": "Preparing output",
+  };
+  return labels[label] ?? "Preparing rendering resources";
+};
 
 const WORKGROUP_SIZE = DEFAULT_WORKGROUP_SIZE;
 const UNIFORM_BYTES = 224;
@@ -472,6 +491,8 @@ export class GiRenderer {
   private bdpt: BdptRuntime | null = null;
   private bdptInitialization: Promise<void> | null = null;
   private bdptPresentation: Promise<void> | null = null;
+  private bdptPreparationActivity: RendererActivity | null = null;
+  private bdptRenderActivity: RendererActivity | null = null;
   private bdptSubmittedFrames = 0;
   private bdptGeneration = 0;
   private bdptPending = false;
@@ -936,6 +957,15 @@ export class GiRenderer {
     return this.allocationFailure;
   }
 
+  get activity(): RendererActivity | null {
+    if (this.destroyed || this.allocationFailure !== null) return null;
+    if (this.bdptPresentation !== null) return this.bdptRenderActivity;
+    if (!this.usesBdpt()) return null;
+    return this.bdptInitialization !== null
+      ? this.bdptPreparationActivity
+      : null;
+  }
+
   get stats(): RendererStats {
     return {
       width: this.targets?.width ?? 0,
@@ -999,13 +1029,30 @@ export class GiRenderer {
     this.report?.(`BDPT INITIALIZING ${targets.width}x${targets.height}`);
     this.report?.(`BDPT pixel cap: ${this.bdptPixelLimit}`);
     const generation = this.bdptGeneration;
+    this.bdptPreparationActivity = {
+      kind: "preparing",
+      detail: "Preparing rendering resources",
+      startedAt: performance.now(),
+    };
     const promise = createBdptRuntime(
       this.device,
       this.layouts.scene,
       targets.width,
       targets.height,
       targets.illuminationView,
-      this.report,
+      (line, compiling) => {
+        this.report?.(line);
+        if (
+          compiling !== undefined &&
+          !this.destroyed &&
+          this.bdptPreparationActivity
+        ) {
+          this.bdptPreparationActivity = {
+            ...this.bdptPreparationActivity,
+            detail: bdptPreparationLabel(compiling.pipeline),
+          };
+        }
+      },
     )
       .then((runtime) => {
         if (this.destroyed || generation !== this.bdptGeneration) {
@@ -1621,6 +1668,14 @@ export class GiRenderer {
     if (output === "present" && this.usesBdpt()) {
       const sequence = ++this.bdptSubmittedFrames;
       const submittedAt = performance.now();
+      this.bdptRenderActivity = {
+        kind: "rendering",
+        detail:
+          sequence === 1
+            ? "Rendering the first frame"
+            : "Rendering the next frame",
+        startedAt: submittedAt,
+      };
       this.report?.(
         `BDPT SUBMIT ${sequence} ${targets.width}x${targets.height}`,
       );

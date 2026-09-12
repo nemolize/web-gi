@@ -17,7 +17,7 @@ import {
   type PerformanceMeasurement,
   type PerformanceProgress,
 } from "@/gi/performance";
-import type { RendererStats } from "@/gi/renderer";
+import type { RendererActivity, RendererStats } from "@/gi/renderer";
 import { GiRenderer, WebGpuUnsupportedError } from "@/gi/renderer";
 import type { ComparisonMode, RenderSettings } from "@/gi/settings";
 import { settingsFromSearch } from "@/gi/settings";
@@ -32,6 +32,7 @@ export type UseGiRenderer = {
   readonly settings: RenderSettings;
   readonly updateSettings: (patch: Partial<RenderSettings>) => void;
   readonly stats: RendererStats;
+  readonly activity: RendererActivity | null;
   readonly status: RendererStatus;
   readonly errorMessage: string | null;
   readonly errorReport: string | null;
@@ -63,6 +64,7 @@ export type RendererHandle = Pick<
   | "destroy"
   | "deviceLost"
   | "allocationError"
+  | "activity"
   | "notifyCameraChanged"
   | "renderFrame"
   | "setSettings"
@@ -132,6 +134,7 @@ export const useGiRenderer = (
     settingsFromSearch(window.location.search),
   );
   const settingsRef = useRef<RenderSettings>(settings);
+  const [activity, setActivity] = useState<RendererActivity | null>(null);
   const [stats, setStats] = useState<RendererStats>(EMPTY_STATS);
   const [status, setStatus] = useState<RendererStatus>("initializing");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -174,6 +177,7 @@ export const useGiRenderer = (
     const canvas = canvasRef.current;
     if (canvas === null) return;
 
+    setActivity(null);
     const diagnostics = createFailureReporter();
     const captureFailure = (message: string, active: RendererHandle | null) => {
       setErrorReport(
@@ -369,6 +373,7 @@ export const useGiRenderer = (
           if (shouldUpdateStats && currentStats !== null) {
             lastStatsAt = now;
             setStats(currentStats);
+            setActivity(active.activity);
           }
         };
         animationFrame = requestAnimationFrame(loop);
@@ -733,6 +738,7 @@ export const useGiRenderer = (
     settings,
     updateSettings,
     stats,
+    activity,
     status,
     errorMessage,
     errorReport,

@@ -1,5 +1,6 @@
 import { ControlPanel } from "@/components/ControlPanel";
 import { FailureReport } from "@/components/FailureReport";
+import { RendererProgress } from "@/components/RendererProgress";
 import { StatsOverlay } from "@/components/StatsOverlay";
 import { autoComparisonMode, shouldAutoMeasure } from "@/gi/settings";
 import { useGiRenderer } from "@/hooks/useGiRenderer";
@@ -46,6 +47,7 @@ export const App = () => {
     settings,
     updateSettings,
     stats,
+    activity,
     status,
     errorMessage,
     errorReport,
@@ -79,8 +81,9 @@ export const App = () => {
             autoCompareMode={autoComparisonMode(window.location.search)}
           />
         )}
-        {status === "initializing" && (
-          <Overlay title="Starting WebGPU…" detail="Requesting a GPU device." />
+        {status === "initializing" && <RendererProgress />}
+        {status === "running" && activity !== null && (
+          <RendererProgress activity={activity} />
         )}
         {status === "unsupported" && (
           <Overlay

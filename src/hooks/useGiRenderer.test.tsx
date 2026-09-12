@@ -68,6 +68,7 @@ const createFakeRenderer = (): FakeRenderer => {
     deviceLost,
     destroy,
     allocationError: null,
+    activity: null,
     renderFrame: vi.fn(() => true),
     setSettings: vi.fn(),
     notifyCameraChanged: vi.fn(),

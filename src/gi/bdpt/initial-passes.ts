@@ -1,4 +1,5 @@
 import { allocateBdptResources } from "@/gi/bdpt/allocation";
+import type { BdptProgressReporter } from "@/gi/bdpt/pipeline";
 import { createBdptPipeline, dispatchBdptPipeline } from "@/gi/bdpt/pipeline";
 import cameraPass from "@/gi/shaders/bdpt-initial-camera.wgsl?raw";
 import gatherPass from "@/gi/shaders/bdpt-initial-gather.wgsl?raw";
@@ -20,7 +21,7 @@ export const createBdptInitialPasses = async (
   sceneLayout: GPUBindGroupLayout,
   width: number,
   height: number,
-  report?: (line: string) => void,
+  report?: BdptProgressReporter,
 ): Promise<BdptInitialPasses> => {
   const pixels = width * height;
   if (
