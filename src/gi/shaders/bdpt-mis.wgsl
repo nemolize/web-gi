@@ -84,33 +84,26 @@ fn bdptTechniqueWeight(camera: Camera, path: ptr<function, BdptMisPath>, selecte
   if (count < 2u || selectedCameraVertices < 1u || selectedCameraVertices > count) {
     return 0.0;
   }
-  var forward: array<f32, BDPT_MAX_VERTICES>;
-  var reverse: array<f32, BDPT_MAX_VERTICES>;
-  var forwardZeros: array<u32, BDPT_MAX_VERTICES>;
-  var reverseZeros: array<u32, BDPT_MAX_VERTICES>;
-  for (var index = 1u; index < count; index++) {
-    let factor = bdptMisEdgeFactor(camera, path, index - 1u, index);
-    forward[index] = forward[index - 1u] + log(max(factor, 1e-38));
-    forwardZeros[index] = forwardZeros[index - 1u] + select(1u, 0u, factor > 0.0);
-  }
-  reverse[count - 1u] = log(max((*path).emitterPdfArea, 1e-38));
-  reverseZeros[count - 1u] = select(1u, 0u, (*path).emitterPdfArea > 0.0);
+  var forward = 0.0;
+  var forwardZeros = 0u;
+  let emitter = (*path).emitterPdfArea;
+  var reverse = select(0.0, log(max(emitter, 1e-38)), emitter > 0.0);
+  var reverseZeros = select(1u, 0u, emitter > 0.0);
   for (var end = count - 1u; end > 1u; end--) {
-    let index = end - 1u;
-    let factor = bdptMisEdgeFactor(camera, path, index + 1u, index);
-    reverse[index] = reverse[index + 1u] + log(max(factor, 1e-38));
-    reverseZeros[index] = reverseZeros[index + 1u] + select(1u, 0u, factor > 0.0);
+    let factor = bdptMisEdgeFactor(camera, path, end, end - 1u);
+    reverse += select(0.0, log(max(factor, 1e-38)), factor > 0.0);
+    reverseZeros += select(1u, 0u, factor > 0.0);
   }
   var sum: BdptMisSum;
   var selectedScore = 0.0;
   var selectedCount = 0u;
   var selectedSupported = false;
   for (var t = 1u; t <= count; t++) {
-    var score = forward[t - 1u];
-    var supported = forwardZeros[t - 1u] == 0u;
+    var score = forward;
+    var supported = forwardZeros == 0u;
     if (t < count) {
-      score += reverse[t];
-      supported = supported && reverseZeros[t] == 0u
+      score += reverse;
+      supported = supported && reverseZeros == 0u
         && !(*path).vertices[t - 1u].delta && !(*path).vertices[t].delta;
     }
     let samples = select(1u, lightSubpathCount, t == 1u);
@@ -119,6 +112,16 @@ fn bdptTechniqueWeight(camera: Camera, path: ptr<function, BdptMisPath>, selecte
       selectedScore = score;
       selectedCount = samples;
       selectedSupported = supported;
+    }
+    if (t < count) {
+      let factor = bdptMisEdgeFactor(camera, path, t - 1u, t);
+      forward += select(0.0, log(max(factor, 1e-38)), factor > 0.0);
+      forwardZeros += select(1u, 0u, factor > 0.0);
+    }
+    if (t + 1u < count) {
+      let factor = bdptMisEdgeFactor(camera, path, t + 1u, t);
+      reverse -= select(0.0, log(max(factor, 1e-38)), factor > 0.0);
+      reverseZeros -= select(1u, 0u, factor > 0.0);
     }
   }
   return bdptMisWeight(sum, selectedScore, selectedCount, selectedSupported);

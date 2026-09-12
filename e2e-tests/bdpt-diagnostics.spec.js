@@ -25,7 +25,7 @@ test("BDPT diagnostics compile isolated stages without starting the renderer", a
   });
   const report = await page.getByLabel("Diagnostic report").inputValue();
   expect(report).not.toContain("FAIL");
-  expect(report.match(/^PASS /gm)).toHaveLength(10);
+  expect(report.match(/^PASS /gm)).toHaveLength(14);
   expect(report).toContain('"vendor"');
   expect(errors).toEqual([]);
 });
