@@ -1,6 +1,7 @@
 import { bdptShaderPrefix } from "@/gi/bdpt/pipeline";
 import type { DiagnosticSuite } from "@/gi/diagnostics/runner";
 import initialCamera from "@/gi/shaders/bdpt-initial-camera.wgsl?raw";
+import initialGather from "@/gi/shaders/bdpt-initial-gather.wgsl?raw";
 
 const probe = (body: string) => `
 @group(1) @binding(0) var<storage, read_write> result: array<vec4f>;
@@ -90,24 +91,43 @@ const bindings: Omit<GPUBindGroupLayoutEntry, "visibility">[][] = [
 export const bdptDiagnosticSuite: DiagnosticSuite = {
   id: "bdpt",
   label: "ReSTIR BDPT",
-  version: 4,
+  version: 5,
   description:
     "Smaller arrays and omitted MIS are diagnostic variations, not renderer settings or fixes.",
-  probes: [32, 8].flatMap((vertices) =>
-    stages.map(([stage, body]) => {
-      const source =
-        stage === "candidate-no-mis"
-          ? bdptShaderPrefix.replace(
-              "candidate.misWeight = bdptTechniqueWeight(camera, path, cameraVertices, lightSubpathCount);",
-              "candidate.misWeight = 1.0;",
-            )
-          : bdptShaderPrefix;
-      return {
-        label: `${stage} / vertices=${vertices} / workgroup=1`,
-        code: `${source.replace("const BDPT_MAX_VERTICES: u32 = 32u;", `const BDPT_MAX_VERTICES: u32 = ${vertices}u;`)}\n${body}`,
-        bindings,
-        constants: { BDPT_WORKGROUP_SIZE: 1 },
-      };
-    }),
-  ),
+  probes: [
+    ...[8, 4, 1].map((size) => ({
+      label: `initial-gather / workgroup=${size}x${size}`,
+      code: `${bdptShaderPrefix}\n${initialGather}`,
+      bindings: [
+        ...bindings.slice(0, 1),
+        [0, 1, 2, 3].map((binding) => ({
+          binding,
+          buffer: {
+            type:
+              binding === 3
+                ? ("storage" as const)
+                : ("read-only-storage" as const),
+          },
+        })),
+      ],
+      constants: { BDPT_WORKGROUP_SIZE: size },
+    })),
+    ...[32, 8].flatMap((vertices) =>
+      stages.map(([stage, body]) => {
+        const source =
+          stage === "candidate-no-mis"
+            ? bdptShaderPrefix.replace(
+                "candidate.misWeight = bdptTechniqueWeight(camera, path, cameraVertices, lightSubpathCount);",
+                "candidate.misWeight = 1.0;",
+              )
+            : bdptShaderPrefix;
+        return {
+          label: `${stage} / vertices=${vertices} / workgroup=1`,
+          code: `${source.replace("const BDPT_MAX_VERTICES: u32 = 32u;", `const BDPT_MAX_VERTICES: u32 = ${vertices}u;`)}\n${body}`,
+          bindings,
+          constants: { BDPT_WORKGROUP_SIZE: 1 },
+        };
+      }),
+    ),
+  ],
 };
