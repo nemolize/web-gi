@@ -6,6 +6,13 @@ import {
   TILED_ATROUS_STORAGE_BYTES,
   TILED_ATROUS_WORKGROUP_SIZE,
 } from "@/gi/atrous";
+import type { BdptFrameSubmission } from "@/gi/bdpt/frame-submissions";
+import {
+  bdptDispatchPixelLimit,
+  submitBdptFrame,
+} from "@/gi/bdpt/frame-submissions";
+import type { BdptRuntime } from "@/gi/bdpt/runtime";
+import { createBdptRuntime } from "@/gi/bdpt/runtime";
 import type { CameraBasis, OrbitCamera } from "@/gi/camera";
 import { cameraBasis } from "@/gi/camera";
 import type { LinearImage } from "@/gi/compare";
@@ -20,6 +27,7 @@ import { installDevHooks } from "@/gi/dev-hooks";
 import type { GpuFrameSample } from "@/gi/performance";
 import type { RenderSize } from "@/gi/render-size";
 import {
+  bdptPixelLimitFromSearch,
   MAX_RENDER_PIXELS,
   resolveInteractionSize,
   resolveRenderSize,
@@ -63,6 +71,14 @@ export class WebGpuUnsupportedError extends Error {
   }
 }
 
+export interface RendererActivity {
+  readonly kind: "preparing" | "rendering";
+  readonly detail: string;
+  readonly startedAt: number;
+  readonly step?:
+    { readonly current: number; readonly total: number } | undefined;
+}
+
 export type RendererStats = {
   readonly width: number;
   readonly height: number;
@@ -72,6 +88,25 @@ export type RendererStats = {
 };
 
 export type DeviceLossInfo = Pick<GPUDeviceLostInfo, "message" | "reason">;
+
+const bdptPreparationStage = (
+  label: string,
+): Pick<RendererActivity, "detail" | "step"> => {
+  const stages = [
+    ["bdpt-initial-camera", "Preparing camera paths"],
+    ["bdpt-initial-light", "Preparing light paths"],
+    ["bdpt-initial-gather", "Preparing light collection"],
+    ["bdpt-temporal", "Preparing temporal reuse"],
+    ["bdpt-spatial", "Preparing spatial reuse"],
+    ["bdpt-caustic-reproject", "Preparing caustic reuse"],
+    ["bdpt-resolve", "Preparing output"],
+  ] as const;
+  const index = stages.findIndex(([pipeline]) => pipeline === label);
+  return {
+    detail: stages[index]?.[1] ?? "Preparing rendering resources",
+    step: index < 0 ? undefined : { current: index + 1, total: stages.length },
+  };
+};
 
 const WORKGROUP_SIZE = DEFAULT_WORKGROUP_SIZE;
 const UNIFORM_BYTES = 224;
@@ -273,7 +308,7 @@ type Targets = {
   readonly atrous: readonly (readonly GPUBindGroup[])[];
   readonly presentRestir: GPUBindGroup;
   readonly presentReference: readonly GPUBindGroup[];
-  /** Kept for `captureLinearImage`, which binds them outside the frame graph. */
+  readonly illuminationView: GPUTextureView;
   readonly atrousView: GPUTextureView;
   readonly albedoView: GPUTextureView;
   readonly emissionView: GPUTextureView;
@@ -463,6 +498,25 @@ export class GiRenderer {
   private readonly atrousBuffers: readonly GPUBuffer[];
   private readonly uniformData = new ArrayBuffer(UNIFORM_BYTES);
 
+  private readonly bdptPixelLimit = bdptPixelLimitFromSearch(
+    window.location.search,
+  );
+  private bdpt: BdptRuntime | null = null;
+  private bdptInitialization: Promise<void> | null = null;
+  private bdptPresentation: Promise<void> | null = null;
+  private bdptFrameActive = false;
+  private bdptFrameInvalidated = false;
+  private bdptCompletedFrame = false;
+  private bdptDeferredSettings: RenderSettings | null = null;
+  private bdptDeferredReset = false;
+  private bdptDeferredCameraReset = false;
+  private bdptDeferredTargetRelease = false;
+  private readonly bdptDispatchPixels: number;
+  private bdptPreparationActivity: RendererActivity | null = null;
+  private bdptRenderActivity: RendererActivity | null = null;
+  private bdptSubmittedFrames = 0;
+  private bdptGeneration = 0;
+  private bdptPending = false;
   private capture: CaptureResources | null = null;
   private capturePipelines: CapturePipelines | null = null;
   private captureInProgress = false;
@@ -496,11 +550,13 @@ export class GiRenderer {
   private lastCamera: OrbitCamera | null = null;
   private comparisonInProgress = false;
   private comparisonAbortController: AbortController | null = null;
+  private comparisonReadinessController: AbortController | null = null;
   private comparisonGeneration = 0;
   private readonly comparisonSession: ComparisonSession;
   private lastFrameAt = 0;
   private lastFrameMs = 0;
   private destroyed = false;
+  private readonly report: ((line: string) => void) | undefined;
   private passProbe: PassProbe | null = null;
 
   private constructor(
@@ -510,11 +566,15 @@ export class GiRenderer {
     format: GPUTextureFormat,
     settings: RenderSettings,
     tiledAtrous: boolean,
+    report?: (line: string) => void,
+    bdptDispatchPixels = 0,
   ) {
+    this.report = report;
     this.device = device;
     this.context = context;
     this.canvas = canvas;
     this.settings = settings;
+    this.bdptDispatchPixels = bdptDispatchPixels;
     this.atrousVariant = tiledAtrous ? "tiled-16" : "fallback";
     this.pixelBudget = Math.min(
       GiRenderer.learnedPixelBudget,
@@ -602,6 +662,7 @@ export class GiRenderer {
   static async create(
     canvas: HTMLCanvasElement,
     settings: RenderSettings,
+    report?: (line: string) => void,
   ): Promise<GiRenderer> {
     const gpu: GPU | undefined = navigator.gpu;
     if (gpu === undefined) {
@@ -615,6 +676,15 @@ export class GiRenderer {
     if (adapter === null) {
       throw new WebGpuUnsupportedError("No suitable GPU adapter was found.");
     }
+    const {
+      vendor,
+      architecture,
+      device: adapterDevice,
+      description,
+    } = adapter.info;
+    report?.(
+      `Adapter: ${JSON.stringify({ vendor, architecture, device: adapterDevice, description })}`,
+    );
     const tiledAtrous = selectTiledAtrous(
       adapter.limits,
       window.location.search,
@@ -637,6 +707,7 @@ export class GiRenderer {
     // Errors outside an error scope are invisible on browsers that don't log
     // them, and a silent GPU error renders as a black canvas.
     device.addEventListener("uncapturederror", (event) => {
+      report?.(`GPU ERROR: ${event.error.message}`);
       console.error(`[web-gi] uncaptured WebGPU error: ${event.error.message}`);
     });
     const context = canvas.getContext("webgpu");
@@ -657,6 +728,8 @@ export class GiRenderer {
       format,
       settings,
       tiledAtrous,
+      report,
+      bdptDispatchPixelLimit(window.location.search, adapter.info),
     );
   }
 
@@ -853,6 +926,18 @@ export class GiRenderer {
   }
 
   setSettings(next: RenderSettings): void {
+    if (this.bdptFrameActive) {
+      if (
+        JSON.stringify(this.bdptDeferredSettings ?? this.settings) !==
+        JSON.stringify(next)
+      ) {
+        this.bdptDeferredSettings = next;
+        this.bdptFrameInvalidated = true;
+        this.comparisonGeneration++;
+        this.abortComparison("Render settings changed during the comparison.");
+      }
+      return;
+    }
     const previous = this.settings;
     if (JSON.stringify(previous) !== JSON.stringify(next)) {
       this.presentationTransition = null;
@@ -878,13 +963,17 @@ export class GiRenderer {
     }
   }
 
-  /** Diffuse irradiance is view-independent; glass and reference radiance are not. */
   notifyCameraChanged(): void {
+    if (this.bdptFrameActive) {
+      this.bdptDeferredCameraReset = true;
+    }
     this.presentationTransition = null;
     this.motionUntil = performance.now() + 200;
     this.comparisonGeneration += 1;
     this.abortComparison("The camera moved during the comparison.");
-    if (
+    if (this.usesBdpt()) {
+      this.historyFrames = 0;
+    } else if (
       this.settings.mode === "reference" ||
       this.scene.glassShapes.length > 0
     ) {
@@ -893,6 +982,12 @@ export class GiRenderer {
   }
 
   resetAccumulation(): void {
+    if (this.bdptFrameActive) {
+      this.bdptFrameInvalidated = true;
+      this.bdptDeferredReset = true;
+      return;
+    }
+    this.bdpt?.resetHistory();
     this.presentationTransition = null;
     this.accumFrames = 0;
     this.historyFrames = 0;
@@ -907,6 +1002,15 @@ export class GiRenderer {
     return this.allocationFailure;
   }
 
+  get activity(): RendererActivity | null {
+    if (this.destroyed || this.allocationFailure !== null) return null;
+    if (this.bdptPresentation !== null) return this.bdptRenderActivity;
+    if (!this.usesBdpt()) return null;
+    return this.bdptInitialization !== null
+      ? this.bdptPreparationActivity
+      : null;
+  }
+
   get stats(): RendererStats {
     return {
       width: this.targets?.width ?? 0,
@@ -917,19 +1021,41 @@ export class GiRenderer {
     };
   }
 
-  saveComparisonReference(): Promise<boolean> {
+  async saveComparisonReference(): Promise<boolean> {
+    await this.settleComparisonFrame();
     return this.comparisonSession.saveReference();
   }
 
-  saveComparisonReferenceAfterFrames(frames: number): Promise<boolean> {
+  async saveComparisonReferenceAfterFrames(frames: number): Promise<boolean> {
+    await this.settleComparisonFrame();
     return this.comparisonSession.saveReferenceAfterFrames(frames);
   }
 
-  compareReferenceAfter(
+  async compareReferenceAfter(
     label: string,
     durationMs: number,
   ): Promise<LinearComparisonReport | null> {
+    await this.settleComparisonFrame();
     return this.comparisonSession.compareReferenceAfter(label, durationMs);
+  }
+
+  private async settleComparisonFrame(): Promise<void> {
+    if (this.bdptPresentation === null) return;
+    if (this.comparisonReadinessController !== null)
+      throw new Error("A comparison operation is already running.");
+    const controller = new AbortController();
+    this.comparisonReadinessController = controller;
+    try {
+      await this.waitForComparisonOperation(
+        this.bdptPresentation,
+        controller.signal,
+        performance.now() + REFERENCE_CAPTURE_TIMEOUT_MS,
+        "The GPU could not finish the pending frame.",
+      );
+    } finally {
+      this.comparisonReadinessController = null;
+    }
+    if (!this.destroyed && this.targets !== null) this.ensureTargets();
   }
 
   releaseComparisonResources(): void {
@@ -939,7 +1065,105 @@ export class GiRenderer {
 
   cancelComparison(message = "The comparison was cancelled."): void {
     this.comparisonGeneration += 1;
+    this.comparisonReadinessController?.abort(new Error(message));
     this.abortComparison(message);
+  }
+
+  private usesBdpt(): boolean {
+    return (
+      this.settings.mode === "restir" && this.settings.restirMethod === "bdpt"
+    );
+  }
+
+  private usesTiledBdpt(): boolean {
+    return this.usesBdpt() && this.bdptDispatchPixels > 0;
+  }
+
+  private releaseBdpt(): void {
+    this.bdptGeneration++;
+    this.bdpt?.destroy();
+    this.bdpt = null;
+    this.bdptPending = false;
+  }
+
+  private prepareBdpt(targets: Targets): boolean {
+    if (!this.usesBdpt()) {
+      if (this.bdpt || this.bdptPending) this.releaseBdpt();
+      return true;
+    }
+    if (
+      this.bdpt?.width === targets.width &&
+      this.bdpt.height === targets.height
+    )
+      return true;
+    if (this.bdptInitialization !== null) return false;
+    this.releaseBdpt();
+    this.report?.(`BDPT INITIALIZING ${targets.width}x${targets.height}`);
+    this.report?.(`BDPT pixel cap: ${this.bdptPixelLimit}`);
+    this.report?.(`BDPT dispatch pixel cap: ${this.bdptDispatchPixels}`);
+    const generation = this.bdptGeneration;
+    this.bdptPreparationActivity = {
+      kind: "preparing",
+      detail: "Preparing rendering resources",
+      startedAt: performance.now(),
+    };
+    const promise = createBdptRuntime(
+      this.device,
+      this.layouts.scene,
+      targets.width,
+      targets.height,
+      targets.illuminationView,
+      (line, compiling) => {
+        this.report?.(line);
+        if (
+          compiling !== undefined &&
+          !this.destroyed &&
+          this.bdptPreparationActivity
+        ) {
+          this.bdptPreparationActivity = {
+            ...this.bdptPreparationActivity,
+            ...bdptPreparationStage(compiling.pipeline),
+          };
+        }
+      },
+      this.bdptDispatchPixels || undefined,
+    )
+      .then((runtime) => {
+        if (this.destroyed || generation !== this.bdptGeneration) {
+          runtime.destroy();
+          return;
+        }
+        this.report?.(`BDPT READY ${targets.width}x${targets.height}`);
+        this.bdpt = runtime;
+        this.bdptPending = false;
+        this.accumFrames = 0;
+        this.historyFrames = 0;
+      })
+      .catch((error: unknown) => {
+        if (!this.destroyed && generation === this.bdptGeneration) {
+          this.bdptPending = false;
+          this.allocationFailure = `ReSTIR BDPT could not initialize: ${String(error)}`;
+        }
+      })
+      .finally(() => {
+        this.bdptInitialization = null;
+      });
+    this.bdptInitialization = promise;
+    this.bdptPending = true;
+    return false;
+  }
+
+  private async prepareComparisonRenderer(signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    await this.bdptPresentation;
+    signal.throwIfAborted();
+    const targets = this.ensureTargets();
+    while (!this.destroyed && this.allocationFailure === null) {
+      signal.throwIfAborted();
+      if (this.prepareBdpt(targets)) return;
+      await this.bdptInitialization;
+    }
+    throw new Error(this.allocationFailure ?? "Renderer was destroyed.");
   }
 
   private resolveSize(): { width: number; height: number } {
@@ -953,7 +1177,16 @@ export class GiRenderer {
         this.device.limits.maxTextureDimension2D,
         this.device.limits.maxComputeWorkgroupsPerDimension * WORKGROUP_SIZE,
       ),
-      maxPixels: this.pixelBudget,
+      maxPixels:
+        this.settings.restirMethod === "bdpt"
+          ? Math.min(
+              this.pixelBudget,
+              this.bdptPixelLimit,
+              Math.floor((MAX_RENDER_PIXELS * 364) / (364 + 1032)),
+              Math.floor(this.device.limits.maxStorageBufferBindingSize / 192),
+              Math.floor(this.device.limits.maxBufferSize / 192),
+            )
+          : this.pixelBudget,
     });
   }
 
@@ -1143,6 +1376,7 @@ export class GiRenderer {
           view(at(reference, p)),
         ]),
       ),
+      illuminationView: view(at(illumination, 0)),
       atrousView: view(at(atrous, 0)),
       albedoView: view(at(albedo, 0)),
       emissionView: view(at(emission, 0)),
@@ -1151,6 +1385,12 @@ export class GiRenderer {
   }
 
   private releaseTargets(): void {
+    if (this.bdptFrameActive && !this.destroyed) {
+      this.bdptFrameInvalidated = true;
+      this.bdptDeferredTargetRelease = true;
+      return;
+    }
+    this.releaseBdpt();
     const current = this.targets;
     if (current === null) return;
     this.releaseCapture();
@@ -1313,20 +1553,43 @@ export class GiRenderer {
     this.device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData);
   }
 
-  renderFrame(camera: OrbitCamera): void {
+  renderFrame(camera: OrbitCamera): boolean {
     if (this.lastCamera !== null && !camerasEqual(this.lastCamera, camera)) {
       this.notifyCameraChanged();
     }
     this.lastCamera = camera;
-    if (this.comparisonInProgress) return;
+    const completed = this.bdptCompletedFrame;
+    this.bdptCompletedFrame = false;
+    if (this.bdptFrameActive) {
+      const size = this.resolveSize();
+      if (
+        size.width !== this.targetCapacity?.width ||
+        size.height !== this.targetCapacity.height
+      ) {
+        this.bdptFrameInvalidated = true;
+        this.comparisonGeneration++;
+        this.abortComparison(
+          "Render resolution changed during the comparison.",
+        );
+      }
+    }
+    if (this.comparisonInProgress || this.bdptPresentation !== null)
+      return completed;
+    const previousFrame = this.frame;
     this.renderFrameNow(camera);
+    return completed || this.frame !== previousFrame;
   }
 
   private renderFrameNow(
     camera: OrbitCamera,
     output: "present" | "headless" = "present",
   ): void {
-    if (this.destroyed || this.allocationFailure !== null) return;
+    if (
+      this.destroyed ||
+      this.allocationFailure !== null ||
+      this.bdptFrameActive
+    )
+      return;
     // Wall-clock interval between submissions. requestAnimationFrame paces the
     // loop, so this reports the real (vsync- or GPU-bound) frame time rather
     // than the negligible command-encoding cost.
@@ -1336,14 +1599,17 @@ export class GiRenderer {
     }
     this.lastFrameAt = started;
     const targets = this.ensureTargets();
+    if (!this.prepareBdpt(targets)) return;
     const basis = cameraBasis(camera, targets.width / targets.height);
     this.advancePresentationTransition(performance.now());
     this.writeUniforms(basis, targets);
 
     const parity = this.parity;
-    const encoder = this.device.createCommandEncoder();
+    let encoder = this.device.createCommandEncoder();
+    const tiled = this.usesTiledBdpt();
+    const commands: BdptFrameSubmission[] = [];
     const probe = this.passProbe;
-    const timing = probe !== null && probe.capturing;
+    const timing = probe !== null && probe.capturing && !tiled;
     if (timing && probe !== null) probe.labels.length = 0;
 
     /** Timestamp bracket for the next pass, or nothing when not capturing. */
@@ -1368,10 +1634,8 @@ export class GiRenderer {
       };
     };
 
-    // A compute pass's usage scope is the single dispatch, so merging the chain
-    // into one pass is legal. Timestamps bracket a pass, so a capture restores
-    // the boundaries and therefore never measures the shipped structure.
-    const sharedPass = timing ? null : encoder.beginComputePass();
+    const sharedPass =
+      timing || this.usesBdpt() ? null : encoder.beginComputePass();
     const dispatch = (
       pipeline: GPUComputePipeline,
       passBindGroup: GPUBindGroup,
@@ -1417,6 +1681,25 @@ export class GiRenderer {
           at(targets.pathTrace, parity),
           "pathTrace",
         );
+      } else if (this.usesBdpt()) {
+        const runtime = this.bdpt;
+        if (runtime === null) return;
+        encoder = runtime.record(
+          encoder,
+          this.sceneBindGroup,
+          (label) => timestampWrites(label)?.timestampWrites,
+          tiled
+            ? (stageEncoder, label, region) => {
+                const buffer = stageEncoder.finish();
+                commands.push({
+                  label,
+                  ...(region ? { region } : {}),
+                  finish: () => buffer,
+                });
+                return this.device.createCommandEncoder();
+              }
+            : undefined,
+        );
       } else {
         dispatch(this.pipelines.di, at(targets.di, parity), "di");
         dispatch(
@@ -1449,36 +1732,68 @@ export class GiRenderer {
     }
     sharedPass?.end();
 
-    if (output === "present") {
-      // Timed too: without it the per-pass total is not the frame's GPU time.
-      const presentTimestamps = timestampWrites("present");
-      const renderPass = encoder.beginRenderPass({
-        colorAttachments: [
-          {
-            view: this.context.getCurrentTexture().createView(),
-            loadOp: "clear",
-            storeOp: "store",
-            clearValue: { r: 0, g: 0, b: 0, a: 1 },
-          },
-        ],
-        ...(presentTimestamps === undefined
-          ? {}
-          : { timestampWrites: presentTimestamps.timestampWrites }),
+    const recordPresentation = () => {
+      if (output === "present") {
+        // Timed too: without it the per-pass total is not the frame's GPU time.
+        const presentTimestamps = timestampWrites("present");
+        const renderPass = encoder.beginRenderPass({
+          colorAttachments: [
+            {
+              view: this.context.getCurrentTexture().createView(),
+              loadOp: "clear",
+              storeOp: "store",
+              clearValue: { r: 0, g: 0, b: 0, a: 1 },
+            },
+          ],
+          ...(presentTimestamps === undefined
+            ? {}
+            : { timestampWrites: presentTimestamps.timestampWrites }),
+        });
+        renderPass.setPipeline(
+          reference
+            ? this.pipelines.presentReference
+            : this.pipelines.presentRestir,
+        );
+        renderPass.setBindGroup(0, this.presentUniformBindGroup);
+        renderPass.setBindGroup(
+          1,
+          reference
+            ? at(targets.presentReference, parity)
+            : targets.presentRestir,
+        );
+        renderPass.draw(3);
+        renderPass.end();
+      }
+    };
+    if (!tiled) recordPresentation();
+
+    const commitFrame = () => {
+      this.previousBasis = basis;
+      this.previousResolution = {
+        width: targets.width,
+        height: targets.height,
+      };
+      this.parity = 1 - parity;
+      this.frame += 1;
+      this.accumFrames += 1;
+      this.historyFrames += 1;
+    };
+    if (tiled && this.bdpt !== null) {
+      commands.push({
+        label: output === "present" ? "denoise-present" : "denoise",
+        finish: () => {
+          recordPresentation();
+          return encoder.finish();
+        },
       });
-      renderPass.setPipeline(
-        reference
-          ? this.pipelines.presentReference
-          : this.pipelines.presentRestir,
+      this.submitTiledFrame(
+        this.bdpt,
+        commands,
+        commitFrame,
+        output === "present",
+        started,
       );
-      renderPass.setBindGroup(0, this.presentUniformBindGroup);
-      renderPass.setBindGroup(
-        1,
-        reference
-          ? at(targets.presentReference, parity)
-          : targets.presentRestir,
-      );
-      renderPass.draw(3);
-      renderPass.end();
+      return;
     }
 
     const slot =
@@ -1498,6 +1813,40 @@ export class GiRenderer {
     }
 
     this.device.queue.submit([encoder.finish()]);
+    if (output === "present" && this.usesBdpt()) {
+      const sequence = ++this.bdptSubmittedFrames;
+      const submittedAt = performance.now();
+      this.bdptRenderActivity = {
+        kind: "rendering",
+        detail:
+          sequence === 1
+            ? "Rendering the first frame"
+            : "Rendering the next frame",
+        startedAt: submittedAt,
+      };
+      this.report?.(
+        `BDPT SUBMIT ${sequence} ${targets.width}x${targets.height}`,
+      );
+      this.bdptPresentation = this.device.queue
+        .onSubmittedWorkDone()
+        .then(
+          () => {
+            if (!this.destroyed)
+              this.report?.(
+                `BDPT COMPLETE ${sequence} (${Math.round(performance.now() - submittedAt)} ms)`,
+              );
+          },
+          (error: unknown) => {
+            if (!this.destroyed)
+              this.report?.(
+                `BDPT COMPLETION FAILED ${sequence}: ${String(error)}`,
+              );
+          },
+        )
+        .finally(() => {
+          this.bdptPresentation = null;
+        });
+    }
 
     if (sampling && slot !== undefined && probe !== null) {
       void slot.staging
@@ -1535,16 +1884,103 @@ export class GiRenderer {
         });
     }
 
-    this.previousBasis = basis;
-    this.previousResolution = { width: targets.width, height: targets.height };
-    this.parity = 1 - parity;
-    this.frame += 1;
-    this.accumFrames += 1;
-    this.historyFrames += 1;
+    commitFrame();
   }
 
   private abortComparison(message: string): void {
+    if (this.comparisonInProgress && this.bdptFrameActive) {
+      this.bdptFrameInvalidated = true;
+      this.bdptDeferredReset = true;
+    }
     this.comparisonAbortController?.abort(new Error(message));
+  }
+
+  private submitTiledFrame(
+    runtime: BdptRuntime,
+    commands: readonly BdptFrameSubmission[],
+    commit: () => void,
+    present: boolean,
+    startedAt: number,
+  ): void {
+    this.bdptFrameActive = true;
+    this.bdptFrameInvalidated = false;
+    const sequence = ++this.bdptSubmittedFrames;
+    let completed = false;
+    let stageStartedAt = startedAt;
+    this.bdptRenderActivity = {
+      kind: "rendering",
+      detail: "Rendering camera paths",
+      startedAt,
+      step: { current: 1, total: commands.length },
+    };
+    this.bdptPresentation = submitBdptFrame(
+      this.device.queue,
+      runtime.dispatchRegion,
+      commands,
+      () =>
+        !this.destroyed &&
+        !this.deviceIsLost &&
+        !this.bdptFrameInvalidated &&
+        this.allocationFailure === null,
+      (index, done) => {
+        const command = at(commands, index);
+        this.bdptRenderActivity = {
+          kind: "rendering",
+          detail: command.label.startsWith("denoise")
+            ? "Finishing the frame"
+            : bdptPreparationStage(command.label).detail.replace(
+                "Preparing",
+                "Rendering",
+              ),
+          startedAt,
+          step: { current: index + 1, total: commands.length },
+        };
+        if (!done) {
+          if (commands[index - 1]?.label !== command.label)
+            stageStartedAt = performance.now();
+          this.report?.(
+            `BDPT SUBMIT ${sequence} ${command.label} / chunk ${index + 1}/${commands.length}${command.region ? ` / region=${command.region.join(",")}` : ""}`,
+          );
+        }
+        if (done && commands[index + 1]?.label !== command.label)
+          this.report?.(
+            `BDPT COMPLETE ${sequence} ${command.label} (${Math.round(performance.now() - stageStartedAt)} ms)`,
+          );
+      },
+    )
+      .then((finished) => {
+        completed = finished;
+        if (finished) {
+          commit();
+          if (present) {
+            this.lastFrameMs = performance.now() - startedAt;
+            this.bdptCompletedFrame = true;
+          }
+        }
+      })
+      .catch((error: unknown) => {
+        if (!this.destroyed && !this.deviceIsLost) {
+          this.allocationFailure = `ReSTIR BDPT frame failed: ${String(error)}`;
+          this.report?.(this.allocationFailure);
+        }
+      })
+      .finally(() => {
+        this.bdptFrameActive = false;
+        if (!this.destroyed) {
+          if (!completed || this.bdptDeferredReset) this.resetAccumulation();
+          if (this.bdptDeferredCameraReset) this.historyFrames = 0;
+          if (this.bdptDeferredSettings !== null) {
+            const settings = this.bdptDeferredSettings;
+            this.bdptDeferredSettings = null;
+            this.setSettings(settings);
+          }
+          if (this.bdptDeferredTargetRelease) this.releaseTargets();
+        }
+        this.bdptDeferredReset = false;
+        this.bdptDeferredCameraReset = false;
+        this.bdptDeferredTargetRelease = false;
+        this.bdptPresentation = null;
+      });
   }
 
   private beginComparison(): AbortController {
@@ -1559,6 +1995,10 @@ export class GiRenderer {
 
   private endComparison(controller: AbortController): void {
     if (this.comparisonAbortController === controller) {
+      if (this.bdptFrameActive) {
+        this.bdptFrameInvalidated = true;
+        this.bdptDeferredReset = true;
+      }
       this.comparisonAbortController = null;
       this.comparisonInProgress = false;
     }
@@ -1616,10 +2056,19 @@ export class GiRenderer {
     });
   }
 
-  private waitForSubmittedWork(
+  private async waitForSubmittedWork(
     signal: AbortSignal,
     deadline: number,
   ): Promise<void> {
+    if (this.bdptPresentation !== null)
+      await this.waitForComparisonOperation(
+        this.bdptPresentation,
+        signal,
+        deadline,
+        "BDPT completion failed during the comparison.",
+      );
+    if (this.allocationFailure !== null)
+      throw new Error(this.allocationFailure);
     return this.waitForComparisonOperation(
       this.device.queue.onSubmittedWorkDone(),
       signal,
@@ -1642,10 +2091,19 @@ export class GiRenderer {
       return null;
     }
     const controller = this.beginComparison();
-    const generation = this.comparisonGeneration;
     const deadline =
       performance.now() + durationMs + COMPLETION_WINDOW_TIMEOUT_PADDING_MS;
     try {
+      const preparation = this.prepareComparisonRenderer(controller.signal);
+      const generation = this.comparisonGeneration;
+      await this.waitForComparisonOperation(
+        preparation,
+        controller.signal,
+        deadline,
+        "Renderer preparation failed during the comparison.",
+      );
+      if (generation !== this.comparisonGeneration)
+        throw new Error("Render configuration changed during the comparison.");
       await this.waitForSubmittedWork(controller.signal, deadline);
       this.resetAccumulation();
       const started = performance.now();
@@ -1690,29 +2148,58 @@ export class GiRenderer {
       return null;
     }
     const controller = this.beginComparison();
-    const generation = this.comparisonGeneration;
     const deadline = performance.now() + REFERENCE_CAPTURE_TIMEOUT_MS;
     try {
+      const preparation = this.prepareComparisonRenderer(controller.signal);
+      const generation = this.comparisonGeneration;
+      await this.waitForComparisonOperation(
+        preparation,
+        controller.signal,
+        deadline,
+        "Renderer preparation failed during the comparison.",
+      );
+      if (generation !== this.comparisonGeneration)
+        throw new Error("Render configuration changed during the comparison.");
       await this.waitForSubmittedWork(controller.signal, deadline);
       this.resetAccumulation();
       const started = performance.now();
-      const completed = await runCompletionBatches(
-        requestedFrames,
-        REFERENCE_COMPLETION_BATCH_SIZE,
-        {
-          getFrameCount: () => this.accumFrames,
-          renderFrame: () => this.renderFrameNow(camera, "headless"),
-          waitForSubmittedWork: () =>
-            this.waitForSubmittedWork(controller.signal, deadline),
-          validateAfterWait: () => {
-            if (this.comparisonGeneration !== generation) {
-              throw new Error(
-                "Render configuration changed during the comparison.",
-              );
-            }
+      const validate = () => {
+        if (this.comparisonGeneration !== generation)
+          throw new Error(
+            "Render configuration changed during the comparison.",
+          );
+      };
+      let completed: boolean;
+      if (this.usesTiledBdpt()) {
+        completed = true;
+        while (this.accumFrames < requestedFrames) {
+          const before = this.accumFrames;
+          this.renderFrameNow(camera, "headless");
+          await this.waitForSubmittedWork(controller.signal, deadline);
+          validate();
+          if (this.accumFrames === before) {
+            completed = false;
+            break;
+          }
+        }
+      } else
+        completed = await runCompletionBatches(
+          requestedFrames,
+          REFERENCE_COMPLETION_BATCH_SIZE,
+          {
+            getFrameCount: () => this.accumFrames,
+            renderFrame: () => this.renderFrameNow(camera, "headless"),
+            waitForSubmittedWork: () =>
+              this.waitForSubmittedWork(controller.signal, deadline),
+            validateAfterWait: () => {
+              if (this.comparisonGeneration !== generation) {
+                throw new Error(
+                  "Render configuration changed during the comparison.",
+                );
+              }
+            },
           },
-        },
-      );
+        );
       if (!completed) return null;
       const actualDurationMs = performance.now() - started;
       const image = await this.waitForComparisonOperation(
@@ -1759,9 +2246,8 @@ export class GiRenderer {
     };
   }
 
-  /** True when this device can time passes at all. */
   get supportsGpuTiming(): boolean {
-    return this.passProbe !== null;
+    return this.passProbe !== null && !this.usesTiledBdpt();
   }
 
   setGpuTimingEnabled(enabled: boolean): void {
@@ -1802,6 +2288,7 @@ export class GiRenderer {
   }
 
   private async captureLinearImageNow(): Promise<LinearImage | null> {
+    await this.bdptPresentation;
     const targets = this.targets;
     if (
       this.destroyed ||
@@ -1835,7 +2322,18 @@ export class GiRenderer {
     );
     this.device.queue.submit([encoder.finish()]);
 
-    await capture.staging.mapAsync(GPUMapMode.READ);
+    try {
+      await capture.staging.mapAsync(GPUMapMode.READ);
+    } catch (error) {
+      if (
+        this.capture !== capture &&
+        error instanceof DOMException &&
+        error.name === "AbortError"
+      )
+        return null;
+      throw error;
+    }
+    if (this.capture !== capture) return null;
     // The copy pads each row to the 256-byte pitch, so the rows are gathered
     // rather than taken as one run.
     const padded = new Float32Array(capture.staging.getMappedRange());

@@ -469,10 +469,15 @@ fn nextEventEstimation(pos: vec3f, n: vec3f, albedo: vec3f) -> vec3f {
   return albedo * INV_PI * ls.emission * (cosX * cosL / dist2) / ls.pdfArea;
 }
 
-fn fresnelReflectance(cosine: f32, ior: f32) -> f32 {
-  let r = (1.0 - ior) / (1.0 + ior);
-  let r0 = r * r;
-  return r0 + (1.0 - r0) * pow(1.0 - cosine, 5.0);
+fn fresnelReflectance(cosIncident: f32, eta: f32) -> f32 {
+  let transmittedSinSquared = eta * eta * max(0.0, 1.0 - cosIncident * cosIncident);
+  if (transmittedSinSquared >= 1.0) {
+    return 1.0;
+  }
+  let cosTransmitted = sqrt(1.0 - transmittedSinSquared);
+  let parallel = (cosIncident - eta * cosTransmitted) / (cosIncident + eta * cosTransmitted);
+  let perpendicular = (eta * cosIncident - cosTransmitted) / (eta * cosIncident + cosTransmitted);
+  return 0.5 * (parallel * parallel + perpendicular * perpendicular);
 }
 
 fn glassScatterDirection(
@@ -514,10 +519,13 @@ fn pathRadiance(
       let cosTheta = min(dot(-incoming, normal), 1.0);
       let sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
       let totalInternalReflection = eta * sinTheta > 1.0;
-      let reflected = totalInternalReflection || rand() < fresnelReflectance(cosTheta, ior);
+      let reflected = totalInternalReflection || rand() < fresnelReflectance(cosTheta, eta);
       dir = glassScatterDirection(incoming, normal, eta, reflected);
-      if (!reflected && !frontFace) {
-        throughput *= albedo;
+      if (!reflected) {
+        throughput *= eta * eta;
+        if (!frontFace) {
+          throughput *= albedo;
+        }
       }
     } else {
       radiance += throughput * nextEventEstimation(pos, normal, albedo);

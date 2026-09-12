@@ -10,13 +10,14 @@ import {
   type LinearComparisonMatrixReport,
 } from "@/gi/comparison-matrix";
 import type { LinearComparisonReport } from "@/gi/comparison-session";
+import { createFailureReporter } from "@/gi/diagnostics/failure-report";
 import {
   createPerformanceRecorder,
   PERFORMANCE_CAPTURE_DURATION_MS,
   PERFORMANCE_WARMUP_FRAMES,
   type PerformanceMeasurement,
 } from "@/gi/performance";
-import type { RendererStats } from "@/gi/renderer";
+import type { RendererActivity, RendererStats } from "@/gi/renderer";
 import { GiRenderer, WebGpuUnsupportedError } from "@/gi/renderer";
 import type { ComparisonMode, RenderSettings } from "@/gi/settings";
 import { settingsFromSearch } from "@/gi/settings";
@@ -31,8 +32,10 @@ export type UseGiRenderer = {
   readonly settings: RenderSettings;
   readonly updateSettings: (patch: Partial<RenderSettings>) => void;
   readonly stats: RendererStats;
+  readonly activity: RendererActivity | null;
   readonly status: RendererStatus;
   readonly errorMessage: string | null;
+  readonly errorReport: string | null;
   readonly measurePerformance: () => Promise<PerformanceMeasurement>;
   readonly saveComparisonReference: () => Promise<boolean>;
   readonly compareReferenceAfter: (
@@ -59,6 +62,7 @@ export type RendererHandle = Pick<
   | "destroy"
   | "deviceLost"
   | "allocationError"
+  | "activity"
   | "notifyCameraChanged"
   | "renderFrame"
   | "setSettings"
@@ -76,10 +80,11 @@ export type RendererHandle = Pick<
 export type RendererFactory = (
   canvas: HTMLCanvasElement,
   settings: RenderSettings,
+  report?: (line: string) => void,
 ) => Promise<RendererHandle>;
 
-const createRenderer: RendererFactory = (canvas, settings) =>
-  GiRenderer.create(canvas, settings);
+const createRenderer: RendererFactory = (canvas, settings, report) =>
+  GiRenderer.create(canvas, settings, report);
 
 const EMPTY_STATS: RendererStats = {
   width: 0,
@@ -121,9 +126,11 @@ export const useGiRenderer = (
     settingsFromSearch(window.location.search),
   );
   const settingsRef = useRef<RenderSettings>(settings);
+  const [activity, setActivity] = useState<RendererActivity | null>(null);
   const [stats, setStats] = useState<RendererStats>(EMPTY_STATS);
   const [status, setStatus] = useState<RendererStatus>("initializing");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorReport, setErrorReport] = useState<string | null>(null);
   const [rendererVersion, setRendererVersion] = useState(0);
   const measurementRef = useRef<ActiveMeasurement | null>(null);
   const wakeLockRef = useRef<WakeLockSession | null>(null);
@@ -162,6 +169,17 @@ export const useGiRenderer = (
     const canvas = canvasRef.current;
     if (canvas === null) return;
 
+    setActivity(null);
+    const diagnostics = createFailureReporter();
+    const captureFailure = (message: string, active: RendererHandle | null) => {
+      setErrorReport(
+        diagnostics.snapshot(
+          message,
+          settingsRef.current,
+          active?.stats ?? null,
+        ),
+      );
+    };
     let disposed = false;
     let animationFrame = 0;
     let renderer: RendererHandle | null = null;
@@ -171,6 +189,7 @@ export const useGiRenderer = (
         renderer = await rendererFactoryRef.current(
           canvas,
           settingsRef.current,
+          diagnostics.record,
         );
         if (disposed) {
           renderer.destroy();
@@ -180,6 +199,7 @@ export const useGiRenderer = (
         rendererRef.current = renderer;
         setStats(EMPTY_STATS);
         setErrorMessage(null);
+        setErrorReport(null);
         setStatus("running");
 
         const activeRenderer = renderer;
@@ -197,6 +217,10 @@ export const useGiRenderer = (
             "Performance capture stopped because the GPU device was lost.",
           );
           rendererRef.current = null;
+          captureFailure(
+            `GPU device lost (${info.reason}): ${info.message}`,
+            activeRenderer,
+          );
           activeRenderer.destroy();
           const detail = info.message.trim();
           setErrorMessage(
@@ -212,7 +236,7 @@ export const useGiRenderer = (
           animationFrame = requestAnimationFrame(loop);
           const active = rendererRef.current;
           if (active === null) return;
-          active.renderFrame(cameraRef.current);
+          const submitted = active.renderFrame(cameraRef.current);
           // A renderer that cannot allocate its targets keeps running and keeps
           // drawing black, so the failure has to be pulled out of it explicitly.
           const failure = active.allocationError;
@@ -222,6 +246,7 @@ export const useGiRenderer = (
               "Performance capture stopped because render targets could not be allocated.",
             );
             rendererRef.current = null;
+            captureFailure(failure, active);
             active.destroy();
             setErrorMessage(failure);
             setStatus("error");
@@ -231,12 +256,10 @@ export const useGiRenderer = (
           const shouldUpdateStats = now - lastStatsAt > STATS_INTERVAL_MS;
           const currentStats =
             measurement !== null || shouldUpdateStats ? active.stats : null;
-          if (measurement !== null && currentStats !== null) {
-            // A frame the capture will not count still reaches the recorder,
-            // marked rejected — the window and the sample set then advance on
-            // the same frames instead of drifting apart.
+          if (measurement !== null && currentStats !== null && submitted) {
             const usable =
               currentStats.atrousVariant !== null &&
+              currentStats.accumFrames > 0 &&
               currentStats.width > 0 &&
               currentStats.height > 0;
             const currentContext = usable
@@ -305,6 +328,7 @@ export const useGiRenderer = (
           if (shouldUpdateStats && currentStats !== null) {
             lastStatsAt = now;
             setStats(currentStats);
+            setActivity(active.activity);
           }
         };
         animationFrame = requestAnimationFrame(loop);
@@ -313,7 +337,9 @@ export const useGiRenderer = (
         setStatus(
           error instanceof WebGpuUnsupportedError ? "unsupported" : "error",
         );
-        setErrorMessage(error instanceof Error ? error.message : String(error));
+        const message = error instanceof Error ? error.message : String(error);
+        captureFailure(message, renderer);
+        setErrorMessage(message);
       }
     };
     void start();
@@ -421,9 +447,24 @@ export const useGiRenderer = (
     };
   }, [cancelMeasurement]);
 
-  const updateSettings = useCallback((patch: Partial<RenderSettings>): void => {
-    setSettings((current) => ({ ...current, ...patch }));
-  }, []);
+  const updateSettings = useCallback(
+    (patch: Partial<RenderSettings>): void => {
+      setSettings((current) => ({ ...current, ...patch }));
+      if (
+        status === "error" &&
+        ((patch.mode !== undefined &&
+          patch.mode !== settingsRef.current.mode) ||
+          (patch.restirMethod !== undefined &&
+            patch.restirMethod !== settingsRef.current.restirMethod))
+      ) {
+        setStatus("initializing");
+        setStats(EMPTY_STATS);
+        setErrorMessage(null);
+        setRendererVersion((version) => version + 1);
+      }
+    },
+    [status],
+  );
 
   const resetView = useCallback((): void => {
     cancelMeasurement("Performance capture stopped because the camera moved.");
@@ -632,8 +673,10 @@ export const useGiRenderer = (
     settings,
     updateSettings,
     stats,
+    activity,
     status,
     errorMessage,
+    errorReport,
     measurePerformance,
     saveComparisonReference,
     compareReferenceAfter,

@@ -105,7 +105,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
   let depth = textureLoad(texDepth, pixel, 0).x;
   if (!surfaceHit(depth)) {
-    textureStore(outHistory, pixel, vec4f(0.0, 0.0, 0.0, 1.0));
+    let fresh = select(vec3f(0.0), textureLoad(texIllumination, pixel, 0).xyz, (uni.flags & FLAG_BDPT) != 0u);
+    textureStore(outHistory, pixel, vec4f(fresh, 1.0));
     return;
   }
   let x = surfacePosition(uni.cam, pixel, depth);

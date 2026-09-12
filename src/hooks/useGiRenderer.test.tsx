@@ -68,7 +68,8 @@ const createFakeRenderer = (): FakeRenderer => {
     deviceLost,
     destroy,
     allocationError: null,
-    renderFrame: vi.fn(),
+    activity: null,
+    renderFrame: vi.fn(() => true),
     setSettings: vi.fn(),
     notifyCameraChanged: vi.fn(),
     supportsGpuTiming: false,
@@ -106,6 +107,7 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
     canvasRef,
     status,
     errorMessage,
+    errorReport,
     retryRenderer,
     updateSettings,
     measurePerformance,
@@ -127,6 +129,7 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
       <canvas ref={canvasRef} />
       <output data-testid="status">{status}</output>
       <output data-testid="error">{errorMessage}</output>
+      <output data-testid="report">{errorReport}</output>
       <button
         type="button"
         onClick={() => updateSettings({ resolutionScale: 0.5 })}
@@ -285,6 +288,7 @@ describe("useGiRenderer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Lower resolution" }));
 
     await act(async () => {
+      first.setStats({ accumFrames: 42 });
       first.lose("unknown", "GPU reset");
       await first.renderer.deviceLost;
     });
@@ -294,6 +298,8 @@ describe("useGiRenderer", () => {
       "The WebGPU device was lost: GPU reset",
     );
     expect(cancelAnimationFrame).toHaveBeenCalled();
+    expect(screen.getByTestId("report")).toHaveTextContent("GPU reset");
+    expect(screen.getByTestId("report")).toHaveTextContent('"accumFrames":42');
     expect(first.destroy).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -365,6 +371,38 @@ describe("useGiRenderer", () => {
     await waitFor(() =>
       expect(screen.getByTestId("captured-callbacks")).toHaveTextContent("125"),
     );
+  });
+
+  it("does not count animation callbacks while GPU submission is blocked", async () => {
+    const fake = createFakeRenderer();
+    vi.mocked(fake.renderer.renderFrame).mockReturnValue(false);
+    const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+    let nextFrame: FrameRequestCallback | null = null;
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        nextFrame = callback;
+        return 1;
+      }),
+    );
+    render(<RendererHarness rendererFactory={create} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Measure" }));
+    act(() => {
+      for (let now = 0; now <= 11_000; now += 40) {
+        const frame = nextFrame;
+        nextFrame = null;
+        frame?.(now);
+      }
+    });
+    expect(screen.getByTestId("captured-callbacks")).toBeEmptyDOMElement();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PERFORMANCE_CAPTURE_TIMEOUT_MS + 1);
+    });
+    expect(screen.getByTestId("capture-error")).toHaveTextContent("timed out");
   });
 
   it("keeps stats snapshots on the throttled cadence while idle", async () => {
@@ -586,6 +624,7 @@ describe("useGiRenderer", () => {
     });
     vi.mocked(fake.renderer.renderFrame).mockImplementation((camera) => {
       currentCamera = camera;
+      return true;
     });
     fake.compareReferenceAfter.mockImplementation((label) => {
       if (label !== "restir" && label !== "path-traced") {

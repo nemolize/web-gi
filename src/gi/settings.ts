@@ -2,7 +2,7 @@ import type { SceneVariant } from "@/gi/scene";
 
 export const RENDER_MODES = ["restir", "path-traced", "reference"] as const;
 export type RenderMode = (typeof RENDER_MODES)[number];
-export const RESTIR_METHODS = ["gi", "pt-fallback"] as const;
+export const RESTIR_METHODS = ["gi", "pt-fallback", "bdpt"] as const;
 export type RestirMethod = (typeof RESTIR_METHODS)[number];
 export const COMPARISON_MODES = ["restir", "path-traced"] as const;
 export type ComparisonMode = (typeof COMPARISON_MODES)[number];
@@ -175,6 +175,10 @@ export const sanitizedRenderQueryParams = (search: string): URLSearchParams => {
   const sanitized = new URLSearchParams();
   const restirMethod = enumValue(source, "restir", RESTIR_METHODS);
   if (restirMethod !== undefined) sanitized.set("restir", restirMethod);
+  for (const key of ["temporal", "spatial", "denoise"]) {
+    const value = enumValue(source, key, ["on", "off"]);
+    if (value !== undefined) sanitized.set(key, value);
+  }
   const matrix = enumValue(source, "preset", MATRIX_PRESETS);
   if (matrix !== undefined) {
     sanitized.set("preset", matrix);
@@ -226,9 +230,16 @@ export const settingsFromSearch = (search: string): RenderSettings => {
       return value === null ? [] : [[key, Number(value)]];
     }),
   );
+  const toggle = (key: string, fallback: boolean): boolean =>
+    params.has(key) ? params.get(key) === "on" : fallback;
   return {
     ...base,
     ...overrides,
+    diTemporal: toggle("temporal", base.diTemporal),
+    giTemporal: toggle("temporal", base.giTemporal),
+    diSpatial: toggle("spatial", base.diSpatial),
+    giSpatial: toggle("spatial", base.giSpatial),
+    denoise: toggle("denoise", base.denoise),
     restirMethod:
       enumValue(params, "restir", RESTIR_METHODS) ?? base.restirMethod,
     mode:
@@ -261,6 +272,7 @@ export const FLAG_GI_TEMPORAL = 1 << 4;
 export const FLAG_GI_SPATIAL = 1 << 5;
 export const FLAG_DENOISE = 1 << 6;
 export const FLAG_PT_FALLBACK = 1 << 7;
+export const FLAG_BDPT = 1 << 8;
 
 export const packFlags = (settings: RenderSettings): number =>
   (settings.diEnabled ? FLAG_DI_ENABLED : 0) |
@@ -270,13 +282,11 @@ export const packFlags = (settings: RenderSettings): number =>
   (settings.giTemporal ? FLAG_GI_TEMPORAL : 0) |
   (settings.giSpatial ? FLAG_GI_SPATIAL : 0) |
   (settings.denoise ? FLAG_DENOISE : 0) |
-  (settings.restirMethod === "pt-fallback" ? FLAG_PT_FALLBACK : 0);
+  (settings.restirMethod === "pt-fallback" ? FLAG_PT_FALLBACK : 0) |
+  (settings.mode === "restir" && settings.restirMethod === "bdpt"
+    ? FLAG_BDPT
+    : 0);
 
-/**
- * Settings that invalidate accumulated history. Camera motion is deliberately
- * absent: diffuse irradiance survives camera motion. The renderer separately
- * resets view-dependent reference and glass-scene radiance.
- */
 const ACCUMULATION_KEYS = [
   "scene",
   "mode",

@@ -1,4 +1,6 @@
 import { ControlPanel } from "@/components/ControlPanel";
+import { FailureReport } from "@/components/FailureReport";
+import { RendererProgress } from "@/components/RendererProgress";
 import { StatsOverlay } from "@/components/StatsOverlay";
 import { autoComparisonMode, shouldAutoMeasure } from "@/gi/settings";
 import { useGiRenderer } from "@/hooks/useGiRenderer";
@@ -6,18 +8,26 @@ import { useGiRenderer } from "@/hooks/useGiRenderer";
 interface OverlayProps {
   readonly title: string;
   readonly detail: string;
+  readonly report?: string | null;
   readonly actionLabel?: string;
   readonly onAction?: () => void;
 }
 
-const Overlay = ({ title, detail, actionLabel, onAction }: OverlayProps) => (
+const Overlay = ({
+  title,
+  detail,
+  report,
+  actionLabel,
+  onAction,
+}: OverlayProps) => (
   <div
     role="alert"
     className="absolute inset-0 flex items-center justify-center bg-neutral-950/90 p-8"
   >
-    <div className="max-w-md text-center">
+    <div className="max-h-full w-full max-w-md overflow-y-auto text-center break-words">
       <h2 className="text-lg font-semibold text-neutral-100">{title}</h2>
       <p className="mt-2 text-sm text-neutral-400">{detail}</p>
+      {report != null && <FailureReport key={report} report={report} />}
       {actionLabel !== undefined && onAction !== undefined && (
         <button
           type="button"
@@ -37,8 +47,10 @@ export const App = () => {
     settings,
     updateSettings,
     stats,
+    activity,
     status,
     errorMessage,
+    errorReport,
     measurePerformance,
     saveComparisonReference,
     compareReferenceAfter,
@@ -69,8 +81,9 @@ export const App = () => {
             autoCompareMode={autoComparisonMode(window.location.search)}
           />
         )}
-        {status === "initializing" && (
-          <Overlay title="Starting WebGPU…" detail="Requesting a GPU device." />
+        {status === "initializing" && <RendererProgress />}
+        {status === "running" && activity !== null && (
+          <RendererProgress activity={activity} />
         )}
         {status === "unsupported" && (
           <Overlay
@@ -82,6 +95,7 @@ export const App = () => {
           <Overlay
             title="Renderer unavailable"
             detail={errorMessage ?? "Unknown error."}
+            report={errorReport}
             actionLabel="Retry renderer"
             onAction={retryRenderer}
           />
