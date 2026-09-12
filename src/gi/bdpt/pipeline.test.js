@@ -75,3 +75,29 @@ describe("BDPT compiler compatibility", () => {
     expect(device.createComputePipelineAsync).toHaveBeenCalledTimes(3);
   });
 });
+
+it("serializes compilation on each device and continues after a failed request", async () => {
+  const device = fixture();
+  let release;
+  device.createComputePipelineAsync
+    .mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          release = () => reject(new PipelineError("validation"));
+        }),
+    )
+    .mockResolvedValue({});
+  const first = createBdptPipeline(device, {}, "first", "", {}).catch(
+    (error) => error,
+  );
+  const second = createBdptPipeline(device, {}, "second", "", {});
+  await vi.waitFor(() =>
+    expect(device.createComputePipelineAsync).toHaveBeenCalledTimes(1),
+  );
+  release();
+  expect(await first).toBeInstanceOf(PipelineError);
+  await second;
+  expect(
+    device.createComputePipelineAsync.mock.calls.map(([d]) => d.label),
+  ).toEqual(["first", "second"]);
+});

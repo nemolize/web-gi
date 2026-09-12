@@ -219,7 +219,7 @@ const run = async (device: GPUDevice, report: (line: string) => void) => {
 export const bdptExecutionSuite: DiagnosticSuite = {
   id: "bdpt-execution",
   label: "ReSTIR BDPT execution",
-  version: 2,
+  version: 3,
   description:
     "Runs three frames of a 39x31 glass scene through production BDPT passes and reads initial, reused, and resolved radiance. Does not test full-resolution presentation or denoising.",
   probes: [{ label: "glass / 39x31 / 3 frames", run }],

@@ -103,10 +103,12 @@ const pipelines = new WeakMap<
   WeakMap<GPUBindGroupLayout, Map<string, Promise<BdptPipeline>>>
 >();
 
+const compilationQueues = new WeakMap<GPUDevice, Promise<void>>();
+
 export const createBdptPipeline = (
   ...args: Parameters<typeof compileBdptPipeline>
 ) => {
-  const [device, sceneLayout, label] = args;
+  const [device, sceneLayout, label, , , report] = args;
   let layouts = pipelines.get(device);
   if (!layouts) {
     layouts = new WeakMap();
@@ -119,7 +121,16 @@ export const createBdptPipeline = (
   }
   let pipeline = cache.get(label);
   if (!pipeline) {
-    pipeline = compileBdptPipeline(...args);
+    const previous = compilationQueues.get(device) ?? Promise.resolve();
+    report?.(`COMPILE QUEUED ${label}`);
+    pipeline = previous.then(() => compileBdptPipeline(...args));
+    compilationQueues.set(
+      device,
+      pipeline.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
     cache.set(label, pipeline);
   }
   return pipeline;
