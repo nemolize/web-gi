@@ -1,6 +1,10 @@
 import { createBdptPasses } from "@/gi/bdpt/passes";
 import type { BdptCheckpoint, BdptProgressReporter } from "@/gi/bdpt/pipeline";
-import { createBdptPipeline, dispatchBdptPipeline } from "@/gi/bdpt/pipeline";
+import {
+  createBdptPipeline,
+  dispatchBdptPipeline,
+  recordBdptDispatch,
+} from "@/gi/bdpt/pipeline";
 import resolve from "@/gi/shaders/bdpt-resolve.wgsl?raw";
 
 export type BdptTimestamps = (
@@ -14,6 +18,7 @@ export const createBdptRuntime = async (
   height: number,
   output: GPUTextureView,
   report?: BdptProgressReporter,
+  maxDispatchPixels?: number,
 ) => {
   const passes = await createBdptPasses(
     device,
@@ -21,6 +26,7 @@ export const createBdptRuntime = async (
     width,
     height,
     report,
+    maxDispatchPixels,
   );
   try {
     const layout = device.createBindGroupLayout({
@@ -50,6 +56,7 @@ export const createBdptRuntime = async (
       width,
       height,
       initialReservoirs: passes.initialReservoirs,
+      dispatchRegion: passes.dispatchRegion,
       get reservoirs() {
         return passes.reservoirs;
       },
@@ -73,6 +80,16 @@ export const createBdptRuntime = async (
           });
           groups.set(passes.reservoirs, group);
         }
+        if (checkpoint) {
+          return recordBdptDispatch(
+            encoder,
+            pipeline,
+            scene,
+            group,
+            passes.dispatch,
+            checkpoint,
+          );
+        }
         const timestampWrites = timestamps("bdptResolve");
         const pass = encoder.beginComputePass({
           label: "bdpt-resolve",
@@ -80,9 +97,10 @@ export const createBdptRuntime = async (
         });
         pass.setBindGroup(0, scene);
         pass.setBindGroup(1, group);
+        pass.setBindGroup(2, passes.dispatch.group);
         dispatchBdptPipeline(pass, pipeline, width, height);
         pass.end();
-        return checkpoint?.(encoder, "bdpt-resolve") ?? encoder;
+        return encoder;
       },
     };
   } catch (error) {

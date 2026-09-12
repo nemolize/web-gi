@@ -1,5 +1,12 @@
 override BDPT_WORKGROUP_SIZE: u32 = 8u;
 
+struct BdptDispatchRegion {
+  origin: vec2u,
+  extent: vec2u,
+}
+
+@group(2) @binding(0) var<uniform> bdptDispatchRegion: BdptDispatchRegion;
+
 const BDPT_MAX_VERTICES: u32 = 32u;
 
 struct BdptVertex {

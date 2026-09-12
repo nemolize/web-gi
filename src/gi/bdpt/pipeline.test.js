@@ -11,11 +11,13 @@ class PipelineError extends Error {
 
 const fixture = () => {
   vi.stubGlobal("GPUPipelineError", PipelineError);
+  vi.stubGlobal("GPUShaderStage", { COMPUTE: 4 });
   return {
     createShaderModule: vi.fn(() => ({
       getCompilationInfo: async () => ({ messages: [] }),
     })),
     createPipelineLayout: vi.fn(() => ({})),
+    createBindGroupLayout: vi.fn(() => ({})),
     createComputePipelineAsync: vi.fn(),
   };
 };

@@ -92,3 +92,10 @@ command to the light command in both orders; gather
 still follows both producers. Compare reports to distinguish failures that
 follow a stage from failures that depend on preceding work. Neither outcome
 alone establishes the driver's cause of device loss.
+
+The `?diagnostics=bdpt-batched` suite uses the same full-resolution workload and
+allocations, with a 4,096-logical-pixel cap per dispatch. It waits between tiles
+and reports stage completion plus periodic tile progress. This preserves image
+resolution and path budgets. See [mobile execution](../restir-bdpt/mobile-execution.md)
+for the normal-renderer path, comparison switch and remaining resource-pressure
+uncertainty.
