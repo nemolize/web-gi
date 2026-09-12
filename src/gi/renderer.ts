@@ -510,6 +510,7 @@ export class GiRenderer {
   private lastFrameAt = 0;
   private lastFrameMs = 0;
   private destroyed = false;
+  private readonly report: ((line: string) => void) | undefined;
   private passProbe: PassProbe | null = null;
 
   private constructor(
@@ -519,7 +520,9 @@ export class GiRenderer {
     format: GPUTextureFormat,
     settings: RenderSettings,
     tiledAtrous: boolean,
+    report?: (line: string) => void,
   ) {
+    this.report = report;
     this.device = device;
     this.context = context;
     this.canvas = canvas;
@@ -611,6 +614,7 @@ export class GiRenderer {
   static async create(
     canvas: HTMLCanvasElement,
     settings: RenderSettings,
+    report?: (line: string) => void,
   ): Promise<GiRenderer> {
     const gpu: GPU | undefined = navigator.gpu;
     if (gpu === undefined) {
@@ -624,6 +628,15 @@ export class GiRenderer {
     if (adapter === null) {
       throw new WebGpuUnsupportedError("No suitable GPU adapter was found.");
     }
+    const {
+      vendor,
+      architecture,
+      device: adapterDevice,
+      description,
+    } = adapter.info;
+    report?.(
+      `Adapter: ${JSON.stringify({ vendor, architecture, device: adapterDevice, description })}`,
+    );
     const tiledAtrous = selectTiledAtrous(
       adapter.limits,
       window.location.search,
@@ -646,6 +659,7 @@ export class GiRenderer {
     // Errors outside an error scope are invisible on browsers that don't log
     // them, and a silent GPU error renders as a black canvas.
     device.addEventListener("uncapturederror", (event) => {
+      report?.(`GPU ERROR: ${event.error.message}`);
       console.error(`[web-gi] uncaptured WebGPU error: ${event.error.message}`);
     });
     const context = canvas.getContext("webgpu");
@@ -666,6 +680,7 @@ export class GiRenderer {
       format,
       settings,
       tiledAtrous,
+      report,
     );
   }
 
@@ -982,6 +997,7 @@ export class GiRenderer {
     )
       return false;
     this.releaseBdpt();
+    this.report?.(`BDPT INITIALIZING ${targets.width}x${targets.height}`);
     const generation = this.bdptGeneration;
     const promise = createBdptRuntime(
       this.device,
@@ -989,12 +1005,14 @@ export class GiRenderer {
       targets.width,
       targets.height,
       targets.illuminationView,
+      this.report,
     )
       .then((runtime) => {
         if (this.destroyed || generation !== this.bdptGeneration) {
           runtime.destroy();
           return;
         }
+        this.report?.(`BDPT READY ${targets.width}x${targets.height}`);
         this.bdpt = runtime;
         this.bdptPending = null;
         this.accumFrames = 0;

@@ -106,6 +106,7 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
     canvasRef,
     status,
     errorMessage,
+    errorReport,
     retryRenderer,
     updateSettings,
     measurePerformance,
@@ -127,6 +128,7 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
       <canvas ref={canvasRef} />
       <output data-testid="status">{status}</output>
       <output data-testid="error">{errorMessage}</output>
+      <output data-testid="report">{errorReport}</output>
       <button
         type="button"
         onClick={() => updateSettings({ resolutionScale: 0.5 })}
@@ -285,6 +287,7 @@ describe("useGiRenderer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Lower resolution" }));
 
     await act(async () => {
+      first.setStats({ accumFrames: 42 });
       first.lose("unknown", "GPU reset");
       await first.renderer.deviceLost;
     });
@@ -294,6 +297,8 @@ describe("useGiRenderer", () => {
       "The WebGPU device was lost: GPU reset",
     );
     expect(cancelAnimationFrame).toHaveBeenCalled();
+    expect(screen.getByTestId("report")).toHaveTextContent("GPU reset");
+    expect(screen.getByTestId("report")).toHaveTextContent('"accumFrames":42');
     expect(first.destroy).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));

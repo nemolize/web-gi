@@ -10,6 +10,7 @@ import {
   type LinearComparisonMatrixReport,
 } from "@/gi/comparison-matrix";
 import type { LinearComparisonReport } from "@/gi/comparison-session";
+import { createFailureReporter } from "@/gi/diagnostics/failure-report";
 import {
   createPerformanceRecorder,
   PERFORMANCE_CAPTURE_DURATION_MS,
@@ -33,6 +34,7 @@ export type UseGiRenderer = {
   readonly stats: RendererStats;
   readonly status: RendererStatus;
   readonly errorMessage: string | null;
+  readonly errorReport: string | null;
   readonly measurePerformance: () => Promise<PerformanceMeasurement>;
   readonly saveComparisonReference: () => Promise<boolean>;
   readonly compareReferenceAfter: (
@@ -76,10 +78,11 @@ export type RendererHandle = Pick<
 export type RendererFactory = (
   canvas: HTMLCanvasElement,
   settings: RenderSettings,
+  report?: (line: string) => void,
 ) => Promise<RendererHandle>;
 
-const createRenderer: RendererFactory = (canvas, settings) =>
-  GiRenderer.create(canvas, settings);
+const createRenderer: RendererFactory = (canvas, settings, report) =>
+  GiRenderer.create(canvas, settings, report);
 
 const EMPTY_STATS: RendererStats = {
   width: 0,
@@ -124,6 +127,7 @@ export const useGiRenderer = (
   const [stats, setStats] = useState<RendererStats>(EMPTY_STATS);
   const [status, setStatus] = useState<RendererStatus>("initializing");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorReport, setErrorReport] = useState<string | null>(null);
   const [rendererVersion, setRendererVersion] = useState(0);
   const measurementRef = useRef<ActiveMeasurement | null>(null);
   const wakeLockRef = useRef<WakeLockSession | null>(null);
@@ -162,6 +166,16 @@ export const useGiRenderer = (
     const canvas = canvasRef.current;
     if (canvas === null) return;
 
+    const diagnostics = createFailureReporter();
+    const captureFailure = (message: string, active: RendererHandle | null) => {
+      setErrorReport(
+        diagnostics.snapshot(
+          message,
+          settingsRef.current,
+          active?.stats ?? null,
+        ),
+      );
+    };
     let disposed = false;
     let animationFrame = 0;
     let renderer: RendererHandle | null = null;
@@ -171,6 +185,7 @@ export const useGiRenderer = (
         renderer = await rendererFactoryRef.current(
           canvas,
           settingsRef.current,
+          diagnostics.record,
         );
         if (disposed) {
           renderer.destroy();
@@ -180,6 +195,7 @@ export const useGiRenderer = (
         rendererRef.current = renderer;
         setStats(EMPTY_STATS);
         setErrorMessage(null);
+        setErrorReport(null);
         setStatus("running");
 
         const activeRenderer = renderer;
@@ -197,6 +213,10 @@ export const useGiRenderer = (
             "Performance capture stopped because the GPU device was lost.",
           );
           rendererRef.current = null;
+          captureFailure(
+            `GPU device lost (${info.reason}): ${info.message}`,
+            activeRenderer,
+          );
           activeRenderer.destroy();
           const detail = info.message.trim();
           setErrorMessage(
@@ -222,6 +242,7 @@ export const useGiRenderer = (
               "Performance capture stopped because render targets could not be allocated.",
             );
             rendererRef.current = null;
+            captureFailure(failure, active);
             active.destroy();
             setErrorMessage(failure);
             setStatus("error");
@@ -311,7 +332,9 @@ export const useGiRenderer = (
         setStatus(
           error instanceof WebGpuUnsupportedError ? "unsupported" : "error",
         );
-        setErrorMessage(error instanceof Error ? error.message : String(error));
+        const message = error instanceof Error ? error.message : String(error);
+        captureFailure(message, renderer);
+        setErrorMessage(message);
       }
     };
     void start();
@@ -647,6 +670,7 @@ export const useGiRenderer = (
     stats,
     status,
     errorMessage,
+    errorReport,
     measurePerformance,
     saveComparisonReference,
     compareReferenceAfter,

@@ -28,6 +28,8 @@ const renderApp = (status: RendererStatus): void => {
     },
     status,
     errorMessage: status === "error" ? "boom" : null,
+    errorReport:
+      status === "error" ? "Renderer failure report v1\nERROR boom" : null,
     measurePerformance: vi.fn(),
     saveComparisonReference: vi.fn(),
     compareReferenceAfter: vi.fn(),
