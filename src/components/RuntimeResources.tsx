@@ -33,15 +33,6 @@ export const RuntimeResources = () => {
   }, []);
   return (
     <>
-      <dt title="System CPU utilization is not exposed to this web page.">
-        CPU
-      </dt>
-      <dd
-        className="text-right text-neutral-200"
-        aria-label="CPU usage unavailable"
-      >
-        N/A
-      </dd>
       <dt title="Approximate JavaScript heap usage and heap limit; excludes GPU memory and is not total device RAM.">
         JS heap
       </dt>

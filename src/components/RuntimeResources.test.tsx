@@ -39,9 +39,6 @@ test("shows heap usage and limit with periodic refresh, then releases the timer"
     </dl>,
   );
   expect(screen.getByTestId("stat-js-heap").textContent).toBe("64 / 4096 MiB");
-  expect(screen.getByLabelText("CPU usage unavailable").textContent).toBe(
-    "N/A",
-  );
   memory.usedJSHeapSize = 96 * 1048576;
   act(() => {
     vi.advanceTimersByTime(1000);
