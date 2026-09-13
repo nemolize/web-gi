@@ -73,3 +73,21 @@ These are presentation-cadence observations including CPU, GPU and completion
 waits, not individual shader timings. Batching increased overhead on this
 machine; it is a stability mitigation rather than a speed optimization. The
 measurement does not establish Fold recovery or performance.
+
+## Compile-time device loss
+
+Two Fold 7 / Chrome 140 reports for preview `27d0f873` lose the device while
+compiling `bdpt-spatial` at 8x8, before the first frame. The spatial compilation
+ran for approximately 4.1 and 7.7 seconds; these reports do not establish a fixed
+timeout or identify the underlying browser/driver failure. The 4096-pixel
+submission cap applies to execution, not pipeline compilation.
+
+Use `?restir=bdpt&bdptWorkgroupSize=4` to start every BDPT pipeline at 4x4,
+retaining the 1x1 fallback for internal pipeline errors. Use
+`bdptWorkgroupSize=1` to compile only 1x1. Missing or invalid values retain the
+8x8, 4x4, 1x1 sequence. The renderer reports the requested limit, and pipeline
+cache keys include it. Device loss remains an error; a smaller attempt on the
+same lost device is not a recovery mechanism.
+
+These opt-in limits preserve sampling settings and dispatch coverage. They are
+compilation diagnostics, not a validated Fold fix or performance optimization.

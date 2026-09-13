@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   bdptVertexLimit,
+  configureBdptWorkgroups,
   createBdptPipeline,
   dispatchBdptPipeline,
 } from "./pipeline";
@@ -146,5 +147,37 @@ it("keeps every uniform-budget vertex and separates compiled capacities", async 
     await expect(
       createBdptPipeline(device, layout, "camera", "", {}, undefined, invalid),
     ).rejects.toThrow("vertex capacity");
+  }
+});
+
+it("starts at the requested group limit and keeps device caches separate", async () => {
+  const device = fixture();
+  device.createComputePipelineAsync.mockResolvedValue({});
+  const layout = {};
+  const compile = () => createBdptPipeline(device, layout, "camera", "", {});
+  const normal = await compile();
+  expect(configureBdptWorkgroups(device, "?bdptWorkgroupSize=4")).toBe(4);
+  device.createComputePipelineAsync.mockRejectedValueOnce(
+    new PipelineError("internal"),
+  );
+  expect((await compile()).workgroupSize).toBe(1);
+  configureBdptWorkgroups(device, "?bdptWorkgroupSize=1");
+  expect((await compile()).workgroupSize).toBe(1);
+  configureBdptWorkgroups(device, "?bdptWorkgroupSize=8");
+  expect(await compile()).toBe(normal);
+  expect(
+    device.createComputePipelineAsync.mock.calls.map(
+      ([d]) => d.compute.constants.BDPT_WORKGROUP_SIZE,
+    ),
+  ).toEqual([8, 4, 1, 1]);
+  const other = fixture();
+  other.createComputePipelineAsync.mockResolvedValue({});
+  expect(
+    (await createBdptPipeline(other, {}, "camera", "", {})).workgroupSize,
+  ).toBe(8);
+  for (const raw of ["", "0", "2", "16", "4.0", "04", "garbage"]) {
+    expect(configureBdptWorkgroups(device, `?bdptWorkgroupSize=${raw}`)).toBe(
+      8,
+    );
   }
 });

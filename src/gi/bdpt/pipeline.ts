@@ -26,6 +26,18 @@ export const bdptShaderPrefix = [
   motion,
 ].join("\n");
 
+const workgroupLimits = new WeakMap<GPUDevice, number>();
+
+export const configureBdptWorkgroups = (
+  device: GPUDevice,
+  search: string,
+): number => {
+  const raw = new URLSearchParams(search).get("bdptWorkgroupSize");
+  const limit = raw === "1" ? 1 : raw === "4" ? 4 : 8;
+  workgroupLimits.set(device, limit);
+  return limit;
+};
+
 export const bdptVertexLimit = (
   maxBounces: number,
   glassShapeCount: number,
@@ -192,6 +204,7 @@ export const recordBdptDispatch = (
 };
 
 const compileBdptPipeline = async (
+  maximumWorkgroupSize: number,
   device: GPUDevice,
   sceneLayout: GPUBindGroupLayout,
   label: string,
@@ -226,7 +239,9 @@ const compileBdptPipeline = async (
     bindGroupLayouts: [sceneLayout, passLayout, getBdptDispatchLayout(device)],
   });
   const failures: string[] = [];
-  for (const workgroupSize of [8, 4, 1]) {
+  for (const workgroupSize of [8, 4, 1].filter(
+    (size) => size <= maximumWorkgroupSize,
+  )) {
     report?.(`COMPILE START ${label} / ${workgroupSize}x${workgroupSize}`);
     try {
       const pipeline = await device.createComputePipelineAsync({
@@ -261,11 +276,15 @@ const pipelines = new WeakMap<
 
 const compilationQueues = new WeakMap<GPUDevice, Promise<void>>();
 
-export const createBdptPipeline = (
-  ...args: Parameters<typeof compileBdptPipeline>
-) => {
+type BdptPipelineArguments =
+  Parameters<typeof compileBdptPipeline> extends [number, ...infer Arguments]
+    ? Arguments
+    : never;
+
+export const createBdptPipeline = (...args: BdptPipelineArguments) => {
   const [device, sceneLayout, label, , , report, maxVertices = 32] = args;
-  const key = `${label}:${String(maxVertices)}`;
+  const maximumWorkgroupSize = workgroupLimits.get(device) ?? 8;
+  const key = `${label}:${String(maxVertices)}:${String(maximumWorkgroupSize)}`;
   let layouts = pipelines.get(device);
   if (!layouts) {
     layouts = new WeakMap();
@@ -280,7 +299,9 @@ export const createBdptPipeline = (
   if (!pipeline) {
     const previous = compilationQueues.get(device) ?? Promise.resolve();
     report?.(`COMPILE QUEUED ${label}`);
-    pipeline = previous.then(() => compileBdptPipeline(...args));
+    pipeline = previous.then(() =>
+      compileBdptPipeline(maximumWorkgroupSize, ...args),
+    );
     compilationQueues.set(
       device,
       pipeline.then(

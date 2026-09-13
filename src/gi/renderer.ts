@@ -11,7 +11,7 @@ import {
   bdptDispatchPixelLimit,
   submitBdptFrame,
 } from "@/gi/bdpt/frame-submissions";
-import { bdptVertexLimit } from "@/gi/bdpt/pipeline";
+import { bdptVertexLimit, configureBdptWorkgroups } from "@/gi/bdpt/pipeline";
 import type { BdptRuntime } from "@/gi/bdpt/runtime";
 import { createBdptRuntime } from "@/gi/bdpt/runtime";
 import type { CameraBasis, OrbitCamera } from "@/gi/camera";
@@ -705,6 +705,11 @@ export class GiRenderer {
         ? { requiredFeatures: [timestamps] }
         : {}),
     });
+    const bdptWorkgroupLimit = configureBdptWorkgroups(
+      device,
+      window.location.search,
+    );
+    report?.(`BDPT workgroup size limit: ${bdptWorkgroupLimit}`);
     // Errors outside an error scope are invisible on browsers that don't log
     // them, and a silent GPU error renders as a black canvas.
     device.addEventListener("uncapturederror", (event) => {
