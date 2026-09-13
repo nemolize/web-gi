@@ -118,7 +118,16 @@ export const runBdptRenderProbe = async (
             resource: { buffer },
           })),
         });
-        passes = await createPasses(device, layout, width, height);
+        const { bdptVertexLimit } = await import("/src/gi/bdpt/pipeline.ts");
+        passes = await createPasses(
+          device,
+          layout,
+          width,
+          height,
+          undefined,
+          undefined,
+          bdptVertexLimit(integers[40], scene.glassShapes.length),
+        );
         const staging = device.createBuffer({
           size: pixels * 160,
           usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,

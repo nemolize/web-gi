@@ -11,6 +11,7 @@ import {
   bdptDispatchPixelLimit,
   submitBdptFrame,
 } from "@/gi/bdpt/frame-submissions";
+import { bdptVertexLimit } from "@/gi/bdpt/pipeline";
 import type { BdptRuntime } from "@/gi/bdpt/runtime";
 import { createBdptRuntime } from "@/gi/bdpt/runtime";
 import type { CameraBasis, OrbitCamera } from "@/gi/camera";
@@ -945,6 +946,12 @@ export class GiRenderer {
       this.abortComparison("Render settings changed during the comparison.");
     }
     this.settings = next;
+    if (
+      (previous.scene !== next.scene ||
+        previous.maxBounces !== next.maxBounces) &&
+      (this.bdpt || this.bdptPending)
+    )
+      this.releaseBdpt();
     if (previous.scene !== next.scene) {
       this.quadBuffer.destroy();
       this.lightBuffer.destroy();
@@ -1091,9 +1098,14 @@ export class GiRenderer {
       if (this.bdpt || this.bdptPending) this.releaseBdpt();
       return true;
     }
+    const maxVertices = bdptVertexLimit(
+      this.settings.maxBounces,
+      this.scene.glassShapes.length,
+    );
     if (
       this.bdpt?.width === targets.width &&
-      this.bdpt.height === targets.height
+      this.bdpt.height === targets.height &&
+      this.bdpt.maxVertices === maxVertices
     )
       return true;
     if (this.bdptInitialization !== null) return false;
@@ -1101,6 +1113,7 @@ export class GiRenderer {
     this.report?.(`BDPT INITIALIZING ${targets.width}x${targets.height}`);
     this.report?.(`BDPT pixel cap: ${this.bdptPixelLimit}`);
     this.report?.(`BDPT dispatch pixel cap: ${this.bdptDispatchPixels}`);
+    this.report?.(`BDPT vertex capacity: ${maxVertices}`);
     const generation = this.bdptGeneration;
     this.bdptPreparationActivity = {
       kind: "preparing",
@@ -1127,6 +1140,7 @@ export class GiRenderer {
         }
       },
       this.bdptDispatchPixels || undefined,
+      maxVertices,
     )
       .then((runtime) => {
         if (this.destroyed || generation !== this.bdptGeneration) {
@@ -1509,7 +1523,7 @@ export class GiRenderer {
     const transition = this.presentationTransition;
     if (transition !== null) {
       if (!transition.pending) {
-        const step = Math.min(0.25, (now - transition.updatedAt) / 120);
+        const step = (now - transition.updatedAt) / 120;
         transition.blend = Math.max(0, transition.blend - step);
       }
       transition.updatedAt = now;

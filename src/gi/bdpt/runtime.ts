@@ -19,6 +19,7 @@ export const createBdptRuntime = async (
   output: GPUTextureView,
   report?: BdptProgressReporter,
   maxDispatchPixels?: number,
+  maxVertices = 32,
 ) => {
   const passes = await createBdptPasses(
     device,
@@ -27,6 +28,7 @@ export const createBdptRuntime = async (
     height,
     report,
     maxDispatchPixels,
+    maxVertices,
   );
   try {
     const layout = device.createBindGroupLayout({
@@ -50,11 +52,13 @@ export const createBdptRuntime = async (
       resolve,
       layout,
       report,
+      maxVertices,
     );
     const groups = new Map<GPUBuffer, GPUBindGroup>();
     return {
       width,
       height,
+      maxVertices,
       initialReservoirs: passes.initialReservoirs,
       dispatchRegion: passes.dispatchRegion,
       get reservoirs() {

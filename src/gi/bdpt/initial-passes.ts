@@ -35,6 +35,7 @@ export const createBdptInitialPasses = async (
   height: number,
   report?: BdptProgressReporter,
   maxDispatchPixels?: number,
+  maxVertices = 32,
 ): Promise<BdptInitialPasses> => {
   const pixels = width * height;
   if (
@@ -77,6 +78,7 @@ export const createBdptInitialPasses = async (
       cameraPass,
       cameraLayout,
       report,
+      maxVertices,
     ),
     createBdptPipeline(
       device,
@@ -85,6 +87,7 @@ export const createBdptInitialPasses = async (
       lightPass,
       lightLayout,
       report,
+      maxVertices,
     ),
     createBdptPipeline(
       device,
@@ -93,6 +96,7 @@ export const createBdptInitialPasses = async (
       gatherPass,
       gatherLayout,
       report,
+      maxVertices,
     ),
   ]);
   const resources: GPUBuffer[] = [];

@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createBdptPipeline, dispatchBdptPipeline } from "./pipeline";
+import {
+  bdptVertexLimit,
+  createBdptPipeline,
+  dispatchBdptPipeline,
+} from "./pipeline";
 
 class PipelineError extends Error {
   constructor(reason) {
@@ -102,4 +106,45 @@ it("serializes compilation on each device and continues after a failed request",
   expect(
     device.createComputePipelineAsync.mock.calls.map(([d]) => d.label),
   ).toEqual(["first", "second"]);
+});
+
+it("keeps every uniform-budget vertex and separates compiled capacities", async () => {
+  expect(bdptVertexLimit(3, 0)).toBe(10);
+  expect(bdptVertexLimit(6, 3)).toBe(21);
+  expect(bdptVertexLimit(12, 20)).toBe(32);
+  const device = fixture();
+  device.createComputePipelineAsync.mockImplementation(async () => ({}));
+  const layout = {};
+  const small = await createBdptPipeline(
+    device,
+    layout,
+    "camera",
+    "",
+    {},
+    undefined,
+    10,
+  );
+  const large = await createBdptPipeline(
+    device,
+    layout,
+    "camera",
+    "",
+    {},
+    undefined,
+    21,
+  );
+  expect(large).not.toBe(small);
+  expect(
+    await createBdptPipeline(device, layout, "camera", "", {}, undefined, 10),
+  ).toBe(small);
+  expect(
+    device.createShaderModule.mock.calls.map(
+      ([d]) => /const BDPT_MAX_VERTICES: u32 = (\d+)u;/.exec(d.code)?.[1],
+    ),
+  ).toEqual(["10", "21"]);
+  for (const invalid of [1, 33, 2.5, NaN]) {
+    await expect(
+      createBdptPipeline(device, layout, "camera", "", {}, undefined, invalid),
+    ).rejects.toThrow("vertex capacity");
+  }
 });

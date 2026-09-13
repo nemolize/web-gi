@@ -23,7 +23,9 @@ Both initial reservoirs have confidence one, including empty reservoirs.
 
 Candidate evaluation and replay share Reference PT's ordered depth budget.
 After the last permitted diffuse vertex, only a direct emitter connection is
-accepted. Full-path technique MIS is recomputed after shifts rather than cached
+accepted. Subpath generation stops when further vertices cannot pass this budget. Camera
+paths still test the sampled direct-emitter continuation at the last diffuse
+vertex. Full-path technique MIS is recomputed after shifts rather than cached
 with the paper's recursive acceleration. `bdptMisEdgeFactor` uses BDPT's
 relative delta-zero remapping; it is not an absolute proposal density.
 
@@ -96,7 +98,10 @@ longer paths, including glass transport. Primary emitter visibility remains.
 Both initial sampling and replay use this partition. The path-reuse controls
 apply to BDPT; separate ReSTIR DI candidate/reuse controls are hidden.
 
-Pipelines compile lazily and are cached per device and scene layout. Size-bound
+Pipelines compile lazily and are cached per device, scene layout, and vertex
+capacity. The renderer specializes function-local arrays to the existing
+`bdptVertexLimit` budget; scene/depth changes invalidate obsolete initialization
+and select a matching capacity. Diagnostic callers retain the 32-vertex default. Size-bound
 buffers are destroyed on recreation, method changes, and renderer destruction;
 stale asynchronous initializations are destroyed on completion. GPU allocation
 errors are captured. Render dimensions account for the largest 192-byte binding

@@ -28,9 +28,14 @@ fn bdptExtendSubpath(path: ptr<function, BdptSubpath>, first: HitInfo, incoming:
   var hit = first;
   var direction = incoming;
   var beta = throughput;
+  var diffuseVertices = 0u;
   let limit = min(maximumVertices, BDPT_MAX_VERTICES);
   loop {
     if (!hit.hit || (*path).count >= limit) {
+      break;
+    }
+    if (diffuseVertices >= uni.maxBounces + 1u
+      && (!radianceTransport || hit.materialIndex > 0u || maxComponent(hit.emission) <= 0.0)) {
       break;
     }
     let index = (*path).count;
@@ -39,6 +44,7 @@ fn bdptExtendSubpath(path: ptr<function, BdptSubpath>, first: HitInfo, incoming:
     if (maxComponent(hit.emission) > 0.0 || (*path).count >= limit) {
       break;
     }
+    diffuseVertices += select(1u, 0u, hit.materialIndex > 0u);
     let random = vec3f(bdptRandom(), bdptRandom(), bdptRandom());
     let scatter = bdptSampleScatter(hit, direction, radianceTransport, random);
     (*path).vertices[index].sampledForwardPdf = scatter.forwardPdf;

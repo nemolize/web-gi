@@ -17,7 +17,7 @@ if (!baseURL || !baselineRef || !outputPath)
   throw Error(
     "Usage: node e2e-tests/measure-bdpt.mjs BASE_URL BASELINE_REF OUTPUT_JSON [SCENE SAMPLES BOUNCES DISPATCH_CAP]",
   );
-const paths = ["bdpt-replay", "bdpt-spatial"];
+const paths = ["bdpt-subpath", "bdpt-replay", "bdpt-spatial"];
 const sources = paths.map((n) => ({
   current: readFileSync("src/gi/shaders/" + n + ".wgsl", "utf8"),
   old: execFileSync(
@@ -44,27 +44,46 @@ try {
       viewport: { width: 430, height: 900 },
       deviceScaleFactor: 2.25,
     });
+    page.on("pageerror", (error) => console.error(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") console.error(message.text());
+    });
     await page.addInitScript(
       ({ variant, sources }) => {
         const create = GPUDevice.prototype.createShaderModule;
         window.__shaderChecks = [];
         GPUDevice.prototype.createShaderModule = function (desc) {
+          const originalCode = desc.code;
+          const capacity = /const BDPT_MAX_VERTICES: u32 = (\d+)u;/.exec(
+            desc.code,
+          )?.[1];
+          const normalized = desc.code.replace(
+            /const BDPT_MAX_VERTICES: u32 = \d+u;/,
+            "const BDPT_MAX_VERTICES: u32 = 32u;",
+          );
           if (desc.label === "bdpt-spatial") {
             for (const s of sources) {
-              if (!desc.code.includes(s.current))
+              if (!normalized.includes(s.current))
                 throw Error("Unexpected shader source");
             }
-            window.__shaderChecks.push(variant);
+            window.__shaderChecks.push({
+              variant,
+              capacity: variant === "before" ? 32 : Number(capacity),
+            });
           }
           if (variant === "before") {
+            desc = { ...desc, code: normalized };
             for (const s of sources)
               desc = { ...desc, code: desc.code.replace(s.current, s.old) };
           }
+          if (variant === "after" && desc.code !== originalCode)
+            throw Error("Optimized shader was modified by the benchmark");
           return create.call(this, desc);
         };
       },
       { variant, sources },
     );
+    console.log("Starting", variant);
     await page.goto(baseURL + "/?restir=bdpt&bdptDispatchPixels=" + cap);
     await page.getByRole("button", { name: "Controls", exact: true }).click();
     await page.getByLabel("Scene", { exact: true }).selectOption(scene);
@@ -83,11 +102,16 @@ try {
       throw Error("Settings mismatch");
     await page.getByRole("button", { name: "Close controls" }).click();
     await page.waitForFunction(
-      () =>
-        Number(
-          document.querySelector('[data-testid="stat-accumulated"]')
-            ?.textContent,
-        ) > 10,
+      () => {
+        const alert = document.querySelector('[role="alert"]');
+        if (alert) throw Error(alert.textContent);
+        return (
+          Number(
+            document.querySelector('[data-testid="stat-accumulated"]')
+              ?.textContent,
+          ) > 10
+        );
+      },
       {},
       { timeout: 120000 },
     );

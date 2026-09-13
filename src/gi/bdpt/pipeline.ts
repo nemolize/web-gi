@@ -26,6 +26,11 @@ export const bdptShaderPrefix = [
   motion,
 ].join("\n");
 
+export const bdptVertexLimit = (
+  maxBounces: number,
+  glassShapeCount: number,
+): number => Math.min(32, maxBounces + 3 + Math.max(4, glassShapeCount * 4));
+
 export type BdptDispatchRegion = readonly [
   originX: number,
   originY: number,
@@ -193,11 +198,20 @@ const compileBdptPipeline = async (
   body: string,
   passLayout: GPUBindGroupLayout,
   report?: BdptProgressReporter,
+  maxVertices = 32,
 ) => {
+  if (!Number.isInteger(maxVertices) || maxVertices < 2 || maxVertices > 32)
+    throw new RangeError(
+      "BDPT vertex capacity must be an integer from 2 to 32.",
+    );
+  const prefix = bdptShaderPrefix.replace(
+    "const BDPT_MAX_VERTICES: u32 = 32u;",
+    `const BDPT_MAX_VERTICES: u32 = ${String(maxVertices)}u;`,
+  );
   report?.(`SHADER START ${label}`, { pipeline: label });
   const module = device.createShaderModule({
     label,
-    code: `${bdptShaderPrefix}\n${body}`,
+    code: `${prefix}\n${body}`,
   });
   const diagnostics = await module.getCompilationInfo();
   const errors = diagnostics.messages.filter(
@@ -250,7 +264,8 @@ const compilationQueues = new WeakMap<GPUDevice, Promise<void>>();
 export const createBdptPipeline = (
   ...args: Parameters<typeof compileBdptPipeline>
 ) => {
-  const [device, sceneLayout, label, , , report] = args;
+  const [device, sceneLayout, label, , , report, maxVertices = 32] = args;
+  const key = `${label}:${String(maxVertices)}`;
   let layouts = pipelines.get(device);
   if (!layouts) {
     layouts = new WeakMap();
@@ -261,7 +276,7 @@ export const createBdptPipeline = (
     cache = new Map();
     layouts.set(sceneLayout, cache);
   }
-  let pipeline = cache.get(label);
+  let pipeline = cache.get(key);
   if (!pipeline) {
     const previous = compilationQueues.get(device) ?? Promise.resolve();
     report?.(`COMPILE QUEUED ${label}`);
@@ -273,7 +288,7 @@ export const createBdptPipeline = (
         () => undefined,
       ),
     );
-    cache.set(label, pipeline);
+    cache.set(key, pipeline);
   }
   return pipeline;
 };

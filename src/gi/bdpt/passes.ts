@@ -37,6 +37,7 @@ export const createBdptPasses = async (
   height: number,
   report?: BdptProgressReporter,
   maxDispatchPixels?: number,
+  maxVertices = 32,
 ): Promise<BdptPasses> => {
   const initial = await createBdptInitialPasses(
     device,
@@ -45,6 +46,7 @@ export const createBdptPasses = async (
     height,
     report,
     maxDispatchPixels,
+    maxVertices,
   );
   const resources: GPUBuffer[] = [];
   try {
@@ -73,6 +75,7 @@ export const createBdptPasses = async (
           temporal,
           temporalLayout,
           report,
+          maxVertices,
         ),
         createBdptPipeline(
           device,
@@ -81,6 +84,7 @@ export const createBdptPasses = async (
           spatial,
           spatialLayout,
           report,
+          maxVertices,
         ),
         createBdptPipeline(
           device,
@@ -89,6 +93,7 @@ export const createBdptPasses = async (
           reproject,
           reprojectLayout,
           report,
+          maxVertices,
         ),
       ]);
     const buffer = (label: string, stride = 160) => {

@@ -73,3 +73,62 @@ submission strategy on O2.local, not Adreno performance or compatibility. This
 single-digit overall reduction does not resolve the reported 14 s Fold frame
 time. Remaining candidates include recursive MIS acceleration and replay costs;
 those require separate correctness checks and fresh measurements.
+
+## Vertex capacity and budget pruning (2026-09-13)
+
+The renderer now sizes function-local path/MIS arrays to
+`min(32, maxBounces + 3 + max(4, glassShapeCount * 4))`, the same bound already
+used by candidate evaluation. This is 10 vertices for classic at three bounces
+and 21 for the three-glass-shape scene at six bounces. It preserves the supported
+path set while giving the compiler smaller arrays. Register allocation and
+spilling were not measured, so the timings do not identify the driver's exact
+mechanism.
+
+Pipeline cache keys include capacity. Scene/depth changes discard stale pending
+initialization, reset history, and select the matching pipelines. Direct callers
+that omit capacity retain 32 vertices, including existing diagnostics.
+
+Subpath construction also stops beyond the existing diffuse budget. Camera
+paths retain the sampled direct-emitter continuation after the last permitted
+diffuse vertex; light paths need no further endpoint after that budget. The
+frozen unbounded-subpath fixture checks every enumerated candidate against the
+optimized builder at 1, 3, 6, and 12 bounces, including glass transport. GPU
+integration checks exercise capacities 10, 16, 21, and 27, changing scenes/depth
+while compilation is pending. Raw specialized glass initialization and reuse
+are checked against Reference PT, including motion and history clearing.
+
+The presentation transition now consumes elapsed time without a per-frame 25%
+cap. A slow completed frame can finish the 120 ms blend immediately, rather
+than retaining coarse history for at least four more frames. This does not
+change the fixed-resolution performance measurements.
+
+The measurement tool normalizes the capacity declaration only for source
+verification and restores 32 vertices for the baseline. Optimized shader code
+is passed through unchanged; the report records compiled capacities. Baseline
+`192244a` includes the earlier spatial-source preparation. Keep all GPU tests
+and other rendering tabs closed during the interleaved measurements. Restart
+the dev server if its cached raw shader imports fail source verification.
+
+Two earlier experiments were not retained: eager candidate rejection regressed
+classic cadence by about 3%, and scalar MIS density ratios improved it by only
+about 1.5% while adding a numeric fallback. The paper's cached recursive MIS
+and partial-suffix replay remain separate work.
+
+### Production integration measurements
+
+O2.local, Apple M2 Max, Chrome 152 / Metal 3, viewport 430x900 at DPR 2.25,
+render size 352x738. Default denoising and temporal/spatial reuse are enabled.
+The interleaved three-run means below include all unchanged passes and GPU
+completion waits. Each run warmed ten frames and measured at least thirty.
+
+| Scene / neighbors / bounces / dispatch cap | Baseline runs (ms/frame) | Optimized runs (ms/frame) | Reduction |
+| ------------------------------------------ | ------------------------ | ------------------------- | --------- |
+| Classic / 4 / 3 / none                     | 113.53, 119.02, 116.14   | 64.69, 65.76, 64.40       | 44.1%     |
+| Glass / 8 / 6 / none                       | 273.38, 281.32, 275.03   | 197.24, 199.38, 204.99    | 27.5%     |
+| Classic / 4 / 3 / 4096 pixels              | 423.79, 423.83, 426.00   | 256.67, 263.80, 264.98    | 38.3%     |
+
+Classic changed from 8.6 to 15.4 frames/s; heavy glass from 3.6 to 5.0 frames/s.
+The optimization is substantial on this GPU but does not make the heavy glass
+configuration real-time. Fold 7 and M4 Air remain unmeasured. The batched row
+measures Adreno's submission strategy on the M2 Max, not Fold performance or
+compatibility; its conservative dispatch limit is unchanged.
