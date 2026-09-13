@@ -97,19 +97,37 @@ fn bdptReplay(sample: BdptReplaySample, camera: Camera, pixel: vec2u, lightSubpa
   return evaluation;
 }
 
-fn bdptShiftBetweenCameras(sample: BdptReplaySample, sourceCamera: Camera, destinationCamera: Camera, sourcePixel: vec2u, destinationPixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptShift {
+struct BdptShiftSource {
+  sample: BdptReplaySample,
+  evaluation: BdptReplayEvaluation,
+  connection: u32,
+  pdf: f32,
+}
+
+fn bdptPrepareShift(sample: BdptReplaySample, camera: Camera, pixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptShiftSource {
+  var source: BdptShiftSource;
+  source.sample = sample;
+  source.evaluation = bdptReplay(sample, camera, pixel, lightSubpathCount, workspace);
+  if (sample.techniqueSeeds.y > 1u && maxComponent(source.evaluation.candidate.estimator) > 0.0) {
+    source.connection = bdptCameraReconnection(&(*workspace).cameraPath);
+    source.pdf = bdptCameraConnectionPdf(&(*workspace).cameraPath, source.connection);
+    if (source.connection > 0u) {
+      let surface = (*workspace).cameraPath.vertices[source.connection - 1u].surface;
+      source.sample.cameraReconnection = vec4f(surface.pos, f32(source.connection));
+      source.sample.coordinates.cameraSurface = surface.quadIndex * 2u + select(0u, 1u, surface.frontFace);
+    }
+  }
+  return source;
+}
+
+fn bdptApplyShift(prepared: BdptShiftSource, sourceCamera: Camera, destinationCamera: Camera, sourcePixel: vec2u, destinationPixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptShift {
+  let sample = prepared.sample;
   var shifted: BdptShift;
   shifted.sample = sample;
   if (sample.techniqueSeeds.y > 1u) {
-    let source = bdptReplay(sample, sourceCamera, sourcePixel, lightSubpathCount, workspace);
-    if (maxComponent(source.candidate.estimator) <= 0.0) { return shifted; }
-    let connection = bdptCameraReconnection(&(*workspace).cameraPath);
-    let sourcePdf = bdptCameraConnectionPdf(&(*workspace).cameraPath, connection);
-    if (connection > 0u) {
-      let surface = (*workspace).cameraPath.vertices[connection - 1u].surface;
-      shifted.sample.cameraReconnection = vec4f(surface.pos, f32(connection));
-      shifted.sample.coordinates.cameraSurface = surface.quadIndex * 2u + select(0u, 1u, surface.frontFace);
-    }
+    if (maxComponent(prepared.evaluation.candidate.estimator) <= 0.0) { return shifted; }
+    let connection = prepared.connection;
+    let sourcePdf = prepared.pdf;
     shifted.evaluation = bdptReplay(shifted.sample, destinationCamera, destinationPixel, lightSubpathCount, workspace);
     if (maxComponent(shifted.evaluation.candidate.estimator) <= 0.0
       || bdptCameraReconnection(&(*workspace).cameraPath) != connection) { return shifted; }
@@ -120,7 +138,7 @@ fn bdptShiftBetweenCameras(sample: BdptReplaySample, sourceCamera: Camera, desti
     }
     return shifted;
   }
-  let source = bdptReplay(sample, sourceCamera, sourcePixel, lightSubpathCount, workspace);
+  let source = prepared.evaluation;
   if (source.cameraPdfArea <= 0.0 || any(source.candidate.pixel != sourcePixel)) {
     return shifted;
   }
@@ -142,6 +160,11 @@ fn bdptShiftBetweenCameras(sample: BdptReplaySample, sourceCamera: Camera, desti
       * (source.cameraPdfArea / shifted.evaluation.cameraPdfArea);
   }
   return shifted;
+}
+
+fn bdptShiftBetweenCameras(sample: BdptReplaySample, sourceCamera: Camera, destinationCamera: Camera, sourcePixel: vec2u, destinationPixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptShift {
+  let prepared = bdptPrepareShift(sample, sourceCamera, sourcePixel, lightSubpathCount, workspace);
+  return bdptApplyShift(prepared, sourceCamera, destinationCamera, sourcePixel, destinationPixel, lightSubpathCount, workspace);
 }
 
 fn bdptShiftReplay(sample: BdptReplaySample, camera: Camera, sourcePixel: vec2u, destinationPixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptShift {

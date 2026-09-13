@@ -44,13 +44,17 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let centerConfidence = confidence / f32(min(32u, uni.spatialSamples));
   let centerTarget = center.normal.path.targetDensity;
   var centerWeight = 1.0;
+  var preparedCenter: BdptShiftSource;
+  if (centerTarget > 0.0) {
+    preparedCenter = bdptPrepareShift(bdptReservoirSample(center.normal), uni.cam, pixel, lightCount, &workspace);
+  }
   for (var sourceIndex = 1u; sourceIndex < count; sourceIndex++) {
     let sourcePixel = domains[sourceIndex];
     let source = temporalReservoirs[sourcePixel.y * uni.resolution.x + sourcePixel.x].normal;
     confidence += source.path.confidence;
     var centerPairWeight = 1.0;
     if (centerTarget > 0.0 && source.path.confidence > 0.0) {
-      let inverse = bdptShiftReplay(bdptReservoirSample(center.normal), uni.cam, pixel, sourcePixel, lightCount, &workspace);
+      let inverse = bdptApplyShift(preparedCenter, uni.cam, uni.cam, pixel, sourcePixel, lightCount, &workspace);
       let inverseSample = BdptPathSample(inverse.sample.techniqueSeeds,
         vec4f(inverse.evaluation.candidate.estimator, inverse.evaluation.candidate.misWeight));
       let other = bdptBalanceNumerator(source.path.confidence, bdptTarget(inverseSample), inverse.jacobian);
