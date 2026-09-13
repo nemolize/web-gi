@@ -30,7 +30,7 @@ fn bdptFilmNdc(film: vec2f) -> vec2f {
   return film / vec2f(uni.resolution) * vec2f(2.0, -2.0) + vec2f(-1.0, 1.0);
 }
 
-fn bdptReplay(sample: BdptReplaySample, camera: Camera, pixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptReplayEvaluation {
+fn bdptReplayPath(sample: BdptReplaySample, camera: Camera, pixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>, reuseLightSubpath: bool) -> BdptReplayEvaluation {
   var evaluation: BdptReplayEvaluation;
   let s = sample.techniqueSeeds.x;
   let t = sample.techniqueSeeds.y;
@@ -40,7 +40,9 @@ fn bdptReplay(sample: BdptReplaySample, camera: Camera, pixel: vec2u, lightSubpa
   let cameraPath = &(*workspace).cameraPath;
   let lightPath = &(*workspace).lightPath;
   (*cameraPath).count = 0u;
-  bdptBuildLightSubpath(sample.techniqueSeeds.w, s, lightPath);
+  if (!reuseLightSubpath) {
+    bdptBuildLightSubpath(sample.techniqueSeeds.w, s, lightPath);
+  }
   if (t > 1u) {
     gRngState = sample.techniqueSeeds.z;
     let jitter = vec2f(bdptRandom(), bdptRandom());
@@ -97,6 +99,10 @@ fn bdptReplay(sample: BdptReplaySample, camera: Camera, pixel: vec2u, lightSubpa
   return evaluation;
 }
 
+fn bdptReplay(sample: BdptReplaySample, camera: Camera, pixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptReplayEvaluation {
+  return bdptReplayPath(sample, camera, pixel, lightSubpathCount, workspace, false);
+}
+
 struct BdptShiftSource {
   sample: BdptReplaySample,
   evaluation: BdptReplayEvaluation,
@@ -120,7 +126,7 @@ fn bdptPrepareShift(sample: BdptReplaySample, camera: Camera, pixel: vec2u, ligh
   return source;
 }
 
-fn bdptApplyShift(prepared: BdptShiftSource, sourceCamera: Camera, destinationCamera: Camera, sourcePixel: vec2u, destinationPixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptShift {
+fn bdptApplyPreparedShift(prepared: BdptShiftSource, sourceCamera: Camera, destinationCamera: Camera, sourcePixel: vec2u, destinationPixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>, reuseLightSubpath: bool) -> BdptShift {
   let sample = prepared.sample;
   var shifted: BdptShift;
   shifted.sample = sample;
@@ -128,7 +134,7 @@ fn bdptApplyShift(prepared: BdptShiftSource, sourceCamera: Camera, destinationCa
     if (maxComponent(prepared.evaluation.candidate.estimator) <= 0.0) { return shifted; }
     let connection = prepared.connection;
     let sourcePdf = prepared.pdf;
-    shifted.evaluation = bdptReplay(shifted.sample, destinationCamera, destinationPixel, lightSubpathCount, workspace);
+    shifted.evaluation = bdptReplayPath(shifted.sample, destinationCamera, destinationPixel, lightSubpathCount, workspace, reuseLightSubpath);
     if (maxComponent(shifted.evaluation.candidate.estimator) <= 0.0
       || bdptCameraReconnection(&(*workspace).cameraPath) != connection) { return shifted; }
     if (connection == 0u) {
@@ -153,7 +159,7 @@ fn bdptApplyShift(prepared: BdptShiftSource, sourceCamera: Camera, destinationCa
     return shifted;
   }
   shifted.sample.coordinates = BdptReplayCoordinates(fract(source.film), 1u, 0u);
-  shifted.evaluation = bdptReplay(shifted.sample, destinationCamera, destinationPixel, lightSubpathCount, workspace);
+  shifted.evaluation = bdptReplayPath(shifted.sample, destinationCamera, destinationPixel, lightSubpathCount, workspace, reuseLightSubpath);
   if (shifted.evaluation.cameraPdfArea > 0.0) {
     // The estimator includes proposal PDFs; convert the endpoint shift to primary-sample measure.
     shifted.jacobian = (shifted.evaluation.lightPdfArea / source.lightPdfArea)
@@ -162,9 +168,14 @@ fn bdptApplyShift(prepared: BdptShiftSource, sourceCamera: Camera, destinationCa
   return shifted;
 }
 
+fn bdptApplyShift(prepared: BdptShiftSource, sourceCamera: Camera, destinationCamera: Camera, sourcePixel: vec2u, destinationPixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptShift {
+  return bdptApplyPreparedShift(prepared, sourceCamera, destinationCamera, sourcePixel, destinationPixel, lightSubpathCount, workspace, false);
+}
+
 fn bdptShiftBetweenCameras(sample: BdptReplaySample, sourceCamera: Camera, destinationCamera: Camera, sourcePixel: vec2u, destinationPixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptShift {
   let prepared = bdptPrepareShift(sample, sourceCamera, sourcePixel, lightSubpathCount, workspace);
-  return bdptApplyShift(prepared, sourceCamera, destinationCamera, sourcePixel, destinationPixel, lightSubpathCount, workspace);
+  // Immediate preparation keeps this sample's light prefix in the workspace.
+  return bdptApplyPreparedShift(prepared, sourceCamera, destinationCamera, sourcePixel, destinationPixel, lightSubpathCount, workspace, true);
 }
 
 fn bdptShiftReplay(sample: BdptReplaySample, camera: Camera, sourcePixel: vec2u, destinationPixel: vec2u, lightSubpathCount: u32, workspace: ptr<function, BdptWorkspace>) -> BdptShift {

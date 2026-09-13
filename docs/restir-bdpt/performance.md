@@ -21,7 +21,9 @@ node e2e-tests/measure-bdpt.mjs http://127.0.0.1:5197 93b3d86 glass.json glassSh
 ```
 
 The arguments after the output path are scene, spatial neighbors, bounces, and
-optional dispatch pixel cap (zero disables batching). The tool uses installed
+optional dispatch pixel cap (zero disables batching), and baseline capacity mode
+(`32` by default for historical comparisons, or `matched` for revisions that
+already specialize capacity). The tool uses installed
 Chrome, opens one rendering tab at a time, verifies settings through the controls,
 warms up ten frames, and measures at least thirty accumulated frames per run. Six
 runs interleave baseline and working shaders in B/A/A/B/B/A order. Shader creation
@@ -132,3 +134,49 @@ The optimization is substantial on this GPU but does not make the heavy glass
 configuration real-time. Fold 7 and M4 Air remain unmeasured. The batched row
 measures Adreno's submission strategy on the M2 Max, not Fold performance or
 compatibility; its conservative dispatch limit is unchanged.
+
+## Immediate light replay and streaming MIS (2026-09-13)
+
+`bdptShiftBetweenCameras` now reuses the seeded light prefix left by its
+immediately preceding `bdptPrepareShift`. Destination camera replay and light
+endpoint replacement still run. Cached center sources continue rebuilding the
+light subpath: their workspace may have been overwritten by another neighbor.
+This avoids adding an owned subpath copy to the prepared source.
+
+MIS accumulates the forward log density and zero count while consuming technique
+scores, removing two function-local arrays. Reverse densities retain their
+existing arrays. The arithmetic and technique accumulation order are preserved;
+this is not the paper's cached recursive MIS method. Samples, path budgets,
+visibility, Jacobians, denoising, resolution, and dispatch limits are unchanged.
+
+The CPU density-product oracle covers capacities 10, 21, 27, and 32, with zero
+densities, delta vertices, and zero light samples. Replay checks compare immediate
+reuse with independent rebuilding through eight shifts and return shifts, both
+with stationary and moved cameras, including camera reconnection and replaced
+light endpoints.
+
+Use baseline `ce5d332` with matched capacities to avoid counting the earlier
+workspace specialization again:
+
+```sh
+node e2e-tests/measure-bdpt.mjs http://127.0.0.1:5197 ce5d332 result.json classic 4 3 0 matched
+node e2e-tests/measure-bdpt.mjs http://127.0.0.1:5197 ce5d332 glass.json glassShapes 8 6 0 matched
+node e2e-tests/measure-bdpt.mjs http://127.0.0.1:5197 ce5d332 batched.json classic 4 3 4096 matched
+```
+
+Same M2 Max / Chrome 152 / Metal 3 environment and 352x738 render size as above.
+Each row includes three interleaved runs per variant, ten warmup frames, at least
+thirty measured frames, and all unchanged rendering and submission costs.
+
+| Scene / neighbors / bounces / dispatch cap | Baseline runs (ms/frame) | Optimized runs (ms/frame) | Reduction |
+| ------------------------------------------ | ------------------------ | ------------------------- | --------- |
+| Classic / 4 / 3 / none                     | 66.41, 63.77, 65.87      | 59.31, 63.66, 65.53       | 3.8%      |
+| Glass / 8 / 6 / none                       | 200.11, 198.71, 195.14   | 173.26, 174.95, 171.35    | 12.5%     |
+| Classic / 4 / 3 / 4096 pixels              | 264.31, 254.98, 263.85   | 254.95, 247.72, 247.74    | 4.2%      |
+
+Heavy glass improves from 197.98 to 173.19 ms/frame (5.1 to 5.8 frames/s).
+Light-prefix reuse alone measured about 3% in classic and 4% in heavy glass;
+removing the forward MIS arrays accounts for the larger combined glass gain.
+The classic gain is small relative to its run-to-run spread. These desktop
+results do not establish Fold 7 performance or compilation compatibility, and
+the heavy glass scene remains below interactive frame rates.

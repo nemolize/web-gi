@@ -12,12 +12,15 @@ const [
   samples = "4",
   bounces = "3",
   cap = "0",
+  baselineCapacity = "32",
 ] = process.argv.slice(2);
 if (!baseURL || !baselineRef || !outputPath)
   throw Error(
-    "Usage: node e2e-tests/measure-bdpt.mjs BASE_URL BASELINE_REF OUTPUT_JSON [SCENE SAMPLES BOUNCES DISPATCH_CAP]",
+    "Usage: node e2e-tests/measure-bdpt.mjs BASE_URL BASELINE_REF OUTPUT_JSON [SCENE SAMPLES BOUNCES DISPATCH_CAP BASELINE_CAPACITY]",
   );
-const paths = ["bdpt-subpath", "bdpt-replay", "bdpt-spatial"];
+if (!["32", "matched"].includes(baselineCapacity))
+  throw Error("BASELINE_CAPACITY must be 32 or matched");
+const paths = ["bdpt-subpath", "bdpt-mis", "bdpt-replay", "bdpt-spatial"];
 const sources = paths.map((n) => ({
   current: readFileSync("src/gi/shaders/" + n + ".wgsl", "utf8"),
   old: execFileSync(
@@ -49,7 +52,7 @@ try {
       if (message.type() === "error") console.error(message.text());
     });
     await page.addInitScript(
-      ({ variant, sources }) => {
+      ({ variant, sources, baselineCapacity }) => {
         const create = GPUDevice.prototype.createShaderModule;
         window.__shaderChecks = [];
         GPUDevice.prototype.createShaderModule = function (desc) {
@@ -68,7 +71,10 @@ try {
             }
             window.__shaderChecks.push({
               variant,
-              capacity: variant === "before" ? 32 : Number(capacity),
+              capacity:
+                variant === "before" && baselineCapacity === "32"
+                  ? 32
+                  : Number(capacity),
             });
           }
           if (variant === "before") {
@@ -76,12 +82,25 @@ try {
             for (const s of sources)
               desc = { ...desc, code: desc.code.replace(s.current, s.old) };
           }
+          if (
+            variant === "before" &&
+            baselineCapacity === "matched" &&
+            capacity
+          ) {
+            desc = {
+              ...desc,
+              code: desc.code.replace(
+                "const BDPT_MAX_VERTICES: u32 = 32u;",
+                `const BDPT_MAX_VERTICES: u32 = ${capacity}u;`,
+              ),
+            };
+          }
           if (variant === "after" && desc.code !== originalCode)
             throw Error("Optimized shader was modified by the benchmark");
           return create.call(this, desc);
         };
       },
-      { variant, sources },
+      { variant, sources, baselineCapacity },
     );
     console.log("Starting", variant);
     await page.goto(baseURL + "/?restir=bdpt&bdptDispatchPixels=" + cap);
@@ -179,6 +198,7 @@ try {
         samples,
         bounces,
         cap,
+        baselineCapacity,
         viewport: { width: 430, height: 900, dpr: 2.25 },
         warmupFrames: 10,
         results,

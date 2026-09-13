@@ -33,7 +33,7 @@ struct Result {
 @compute @workgroup_size(32)
 fn main(@builtin(global_invocation_id) id: vec3u) {
   var path: BdptMisPath;
-  path.count = 2u + id.x % 31u;
+  path.count = 2u + id.x % (BDPT_MAX_VERTICES - 1u);
   path.emitterPdfArea = select(pow(10.0, f32(i32(id.x % 25u) - 12)), 0.0, id.x % 17u == 0u);
   path.vertices[0] = BdptMisVertex(uni.cam.pos.xyz, uni.cam.forward.xyz, false);
   for (var i = 1u; i < path.count; i++) {
@@ -52,56 +52,62 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   results[id.x].parameters = vec4f(f32(path.count), path.emitterPdfArea, f32(samples), 0.0);
 }`;
 
-test("MIS agrees with direct CPU products across long paths and zero densities", async ({
-  page,
-}) => {
-  test.setTimeout(120_000);
-  await page.goto("/");
-  const result = await runBdptProbe(page, prefix + entry, 132);
-  test.skip(result === null, "WebGPU is unavailable.");
-  expect(result.errors).toEqual([]);
-  let maximumError = 0;
-  let supportedPaths = 0;
-  for (let id = 0; id < 1024; id++) {
-    const row = result.data.slice(id * 132, (id + 1) * 132);
-    const [count, emitter, lightSamples] = row.slice(128);
-    const scores = [];
-    for (let t = 1; t <= count; t++) {
-      const samples = t === 1 ? lightSamples : 1;
-      const factors = row.slice(1, t);
-      if (t < count)
-        factors.push(emitter, ...row.slice(32 + t, 32 + count - 1));
-      const supported =
-        samples > 0 &&
-        factors.every((value) => value > 0) &&
-        (t === count || (row[64 + t - 1] === 0 && row[64 + t] === 0));
-      scores.push(
-        supported
-          ? 2 *
-              (Math.log(samples) +
-                factors.reduce(
-                  (sum, value) => sum + Math.log(Math.max(value, 1e-38)),
-                  0,
-                ))
-          : -Infinity,
-      );
-    }
-    const maximum = Math.max(...scores);
-    const terms = scores.map((score) =>
-      Number.isFinite(score) ? Math.exp(score - maximum) : 0,
+for (const capacity of [10, 21, 27, 32]) {
+  test(`MIS agrees with direct CPU products across long paths and zero densities, capacity=${capacity}`, async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await page.goto("/");
+    const specialized = prefix.replace(
+      "const BDPT_MAX_VERTICES: u32 = 32u;",
+      `const BDPT_MAX_VERTICES: u32 = ${capacity}u;`,
     );
-    const sum = terms.reduce((a, b) => a + b, 0);
-    if (sum > 0) supportedPaths++;
-    for (let index = 0; index < count; index++) {
-      const actual = row[96 + index];
-      expect(Number.isFinite(actual)).toBe(true);
-      const expected = sum > 0 ? terms[index] / sum : 0;
-      maximumError = Math.max(maximumError, Math.abs(actual - expected));
-      expect(actual).toBeGreaterThanOrEqual(0);
-      expect(actual).toBeLessThanOrEqual(1.0001);
+    const result = await runBdptProbe(page, specialized + entry, 132);
+    test.skip(result === null, "WebGPU is unavailable.");
+    expect(result.errors).toEqual([]);
+    let maximumError = 0;
+    let supportedPaths = 0;
+    for (let id = 0; id < 1024; id++) {
+      const row = result.data.slice(id * 132, (id + 1) * 132);
+      const [count, emitter, lightSamples] = row.slice(128);
+      const scores = [];
+      for (let t = 1; t <= count; t++) {
+        const samples = t === 1 ? lightSamples : 1;
+        const factors = row.slice(1, t);
+        if (t < count)
+          factors.push(emitter, ...row.slice(32 + t, 32 + count - 1));
+        const supported =
+          samples > 0 &&
+          factors.every((value) => value > 0) &&
+          (t === count || (row[64 + t - 1] === 0 && row[64 + t] === 0));
+        scores.push(
+          supported
+            ? 2 *
+                (Math.log(samples) +
+                  factors.reduce(
+                    (sum, value) => sum + Math.log(Math.max(value, 1e-38)),
+                    0,
+                  ))
+            : -Infinity,
+        );
+      }
+      const maximum = Math.max(...scores);
+      const terms = scores.map((score) =>
+        Number.isFinite(score) ? Math.exp(score - maximum) : 0,
+      );
+      const sum = terms.reduce((a, b) => a + b, 0);
+      if (sum > 0) supportedPaths++;
+      for (let index = 0; index < count; index++) {
+        const actual = row[96 + index];
+        expect(Number.isFinite(actual)).toBe(true);
+        const expected = sum > 0 ? terms[index] / sum : 0;
+        maximumError = Math.max(maximumError, Math.abs(actual - expected));
+        expect(actual).toBeGreaterThanOrEqual(0);
+        expect(actual).toBeLessThanOrEqual(1.0001);
+      }
     }
-  }
-  expect(supportedPaths).toBeGreaterThan(100);
-  expect(maximumError).toBeLessThan(0.0002);
-  console.log({ supportedPaths, maximumError });
-});
+    expect(supportedPaths).toBeGreaterThan(100);
+    expect(maximumError).toBeLessThan(0.0002);
+    console.log({ supportedPaths, maximumError });
+  });
+}
