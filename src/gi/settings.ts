@@ -173,6 +173,22 @@ const enumValue = <T extends string>(
 export const sanitizedRenderQueryParams = (search: string): URLSearchParams => {
   const source = new URLSearchParams(search);
   const sanitized = new URLSearchParams();
+  const workgroup = enumValue(source, "bdptWorkgroupSize", ["1", "4", "8"]);
+  if (workgroup !== undefined) sanitized.set("bdptWorkgroupSize", workgroup);
+  const dispatch = source.get("bdptDispatchPixels");
+  if (
+    dispatch !== null &&
+    /^(0|[1-9][0-9]*)$/.test(dispatch) &&
+    Number.isSafeInteger(Number(dispatch))
+  )
+    sanitized.set(
+      "bdptDispatchPixels",
+      String(
+        Number(dispatch) === 0
+          ? 0
+          : Math.max(64, Math.min(Number(dispatch), 1_000_000)),
+      ),
+    );
   const restirMethod = enumValue(source, "restir", RESTIR_METHODS);
   if (restirMethod !== undefined) sanitized.set("restir", restirMethod);
   for (const key of ["temporal", "spatial", "denoise"]) {

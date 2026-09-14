@@ -24,8 +24,9 @@ submission and waits for GPU completion before continuing. The renderer defers
 presentation until the final submission and invalidates pending work for
 settings or resolution changes. Camera-only motion finishes the captured frame
 and retains reservoir history for the next frame's cross-camera reprojection. The completed-frame path controls accumulation; partial frames
-must not become history. Tiled execution reports wall-clock frame duration;
-ordinary per-pass timestamp queries are not used for this path.
+must not become history. Tiled execution reports wall-clock frame duration in the live stats. During
+performance capture, it also records timestamps for each tile and denoising /
+presentation pass when the device exposes `timestamp-query`.
 
 The normal renderer selects a 4,096-logical-pixel dispatch cap for adapters
 identified as Qualcomm or Adreno. This is a conservative mitigation, not a
@@ -84,10 +85,35 @@ submission cap applies to execution, not pipeline compilation.
 
 Use `?restir=bdpt&bdptWorkgroupSize=4` to start every BDPT pipeline at 4x4,
 retaining the 1x1 fallback for internal pipeline errors. Use
-`bdptWorkgroupSize=1` to compile only 1x1. Missing or invalid values retain the
-8x8, 4x4, 1x1 sequence. The renderer reports the requested limit, and pipeline
+`bdptWorkgroupSize=1` to compile only 1x1. Missing or invalid values start at 4x4 on Qualcomm / Adreno and at 8x8
+on other adapters. `bdptWorkgroupSize=8` explicitly restores the larger sequence. The renderer reports the requested limit, and pipeline
 cache keys include it. Device loss remains an error; a smaller attempt on the
 same lost device is not a recovery mechanism.
 
-These opt-in limits preserve sampling settings and dispatch coverage. They are
-compilation diagnostics, not a validated Fold fix or performance optimization.
+Fold 7 testing confirmed continued rendering at 4x4. After temporal history
+was isolated from spatial reuse, the user confirmed that progressive white
+clipping stopped, with reported latency remaining about 2200 ms. These are
+user observations, not matched performance measurements.
+
+## Measuring the normal tiled renderer
+
+Open the normal BDPT preview and use **Measure**, then **Copy result**. The
+three captures each discard 30 warmup frames before a five-second sampling
+window; at 2200 ms/frame this takes several minutes. Keep the page visible and
+the camera and settings fixed. The capture timeout and interruption threshold
+allow slow BDPT frames.
+
+The copied `runs[].measurement.passMs` aggregates GPU timestamps for camera
+paths, light paths, gathering, caustic reprojection, temporal reuse, spatial
+reuse, resolve, and each denoising / presentation pass. All tiles retain normal
+submission ordering and completion waits. Timestamp queries are resolved before
+reuse, with one buffer readback after the complete frame. `frameMs` spans the
+first GPU pass through presentation, including gaps between submissions; the
+sum of `passMs` measures pass execution only. Their difference includes
+submission gaps and work outside pass brackets, not just CPU overhead. The
+ordinary frame statistic also includes command encoding and measurement
+readback. Timestamp collection adds overhead and is enabled only for capture.
+
+Devices without `timestamp-query` retain the explicit `wallFallback` report;
+no per-stage GPU timings are claimed. Explicit workgroup and dispatch overrides
+are retained in the sanitized report URL.

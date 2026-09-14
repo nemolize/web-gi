@@ -11,6 +11,10 @@ import {
   bdptDispatchPixelLimit,
   submitBdptFrame,
 } from "@/gi/bdpt/frame-submissions";
+import {
+  type BdptFrameTiming,
+  createBdptFrameTiming,
+} from "@/gi/bdpt/frame-timing";
 import { bdptVertexLimit, configureBdptWorkgroups } from "@/gi/bdpt/pipeline";
 import type { BdptRuntime } from "@/gi/bdpt/runtime";
 import { createBdptRuntime } from "@/gi/bdpt/runtime";
@@ -708,6 +712,7 @@ export class GiRenderer {
     const bdptWorkgroupLimit = configureBdptWorkgroups(
       device,
       window.location.search,
+      adapter.info,
     );
     report?.(`BDPT workgroup size limit: ${bdptWorkgroupLimit}`);
     // Errors outside an error scope are invisible on browsers that don't log
@@ -1628,13 +1633,18 @@ export class GiRenderer {
     const tiled = this.usesTiledBdpt();
     const commands: BdptFrameSubmission[] = [];
     const probe = this.passProbe;
+    const tiledTiming =
+      tiled && probe?.capturing === true && this.bdpt !== null
+        ? createBdptFrameTiming(this.device, this.bdpt.submissionCount + 1)
+        : undefined;
     const timing = probe !== null && probe.capturing && !tiled;
     if (timing && probe !== null) probe.labels.length = 0;
 
-    /** Timestamp bracket for the next pass, or nothing when not capturing. */
     const timestampWrites = (
       label: string,
     ): { timestampWrites: GPUComputePassTimestampWrites } | undefined => {
+      if (tiledTiming)
+        return { timestampWrites: tiledTiming.timestamps(label) };
       if (
         !timing ||
         probe === null ||
@@ -1709,6 +1719,7 @@ export class GiRenderer {
           (label) => timestampWrites(label)?.timestampWrites,
           tiled
             ? (stageEncoder, label, region) => {
+                tiledTiming?.checkpoint(stageEncoder);
                 const buffer = stageEncoder.finish();
                 commands.push({
                   label,
@@ -1802,6 +1813,7 @@ export class GiRenderer {
         label: output === "present" ? "denoise-present" : "denoise",
         finish: () => {
           recordPresentation();
+          tiledTiming?.checkpoint(encoder);
           return encoder.finish();
         },
       });
@@ -1811,6 +1823,7 @@ export class GiRenderer {
         commitFrame,
         output === "present",
         started,
+        tiledTiming,
       );
       return;
     }
@@ -1920,6 +1933,7 @@ export class GiRenderer {
     commit: () => void,
     present: boolean,
     startedAt: number,
+    timing?: BdptFrameTiming,
   ): void {
     this.bdptFrameActive = true;
     this.bdptFrameInvalidated = false;
@@ -1967,8 +1981,26 @@ export class GiRenderer {
           );
       },
     )
-      .then((finished) => {
-        completed = finished;
+      .then(async (finished) => {
+        if (finished && timing) {
+          try {
+            const sample = await timing.read();
+            if (
+              sample &&
+              !this.bdptFrameInvalidated &&
+              this.passProbe?.capturing === true
+            )
+              this.passProbe.samples.push(sample);
+          } catch {
+            // A failed readback drops telemetry without failing a rendered frame.
+          }
+        }
+        completed =
+          finished &&
+          !this.destroyed &&
+          !this.deviceIsLost &&
+          !this.bdptFrameInvalidated;
+        finished = completed;
         if (finished) {
           commit();
           if (present) {
@@ -1984,6 +2016,7 @@ export class GiRenderer {
         }
       })
       .finally(() => {
+        timing?.destroy();
         this.bdptFrameActive = false;
         if (!this.destroyed) {
           if (!completed || this.bdptDeferredReset) this.resetAccumulation();
@@ -2266,7 +2299,7 @@ export class GiRenderer {
   }
 
   get supportsGpuTiming(): boolean {
-    return this.passProbe !== null && !this.usesTiledBdpt();
+    return this.passProbe !== null;
   }
 
   setGpuTimingEnabled(enabled: boolean): void {

@@ -59,6 +59,7 @@ export const createBdptRuntime = async (
       width,
       height,
       maxVertices,
+      submissionCount: passes.dispatch.regions.length * 7,
       initialReservoirs: passes.initialReservoirs,
       dispatchRegion: passes.dispatchRegion,
       get reservoirs() {
@@ -92,6 +93,7 @@ export const createBdptRuntime = async (
             group,
             passes.dispatch,
             checkpoint,
+            timestamps,
           );
         }
         const timestampWrites = timestamps("bdptResolve");

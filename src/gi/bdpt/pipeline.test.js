@@ -181,3 +181,32 @@ it("starts at the requested group limit and keeps device caches separate", async
     );
   }
 });
+
+it("defaults Qualcomm and Adreno to 4x4 while preserving explicit overrides", async () => {
+  for (const adapter of [
+    { vendor: "Qualcomm", architecture: "", description: "" },
+    { vendor: "", architecture: "adreno-8xx", description: "" },
+    { vendor: "", architecture: "", description: "Adreno 830" },
+  ]) {
+    const device = fixture();
+    device.createComputePipelineAsync.mockResolvedValue({});
+    for (const search of ["", "?bdptWorkgroupSize=2", "?bdptWorkgroupSize=bad"])
+      expect(configureBdptWorkgroups(device, search, adapter)).toBe(4);
+    expect(
+      (await createBdptPipeline(device, {}, "camera", "", {})).workgroupSize,
+    ).toBe(4);
+    expect(
+      configureBdptWorkgroups(device, "?bdptWorkgroupSize=8", adapter),
+    ).toBe(8);
+    expect(
+      configureBdptWorkgroups(device, "?bdptWorkgroupSize=1", adapter),
+    ).toBe(1);
+  }
+  expect(
+    configureBdptWorkgroups(fixture(), "", {
+      vendor: "apple",
+      architecture: "",
+      description: "",
+    }),
+  ).toBe(8);
+});

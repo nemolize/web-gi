@@ -31,9 +31,17 @@ const workgroupLimits = new WeakMap<GPUDevice, number>();
 export const configureBdptWorkgroups = (
   device: GPUDevice,
   search: string,
+  adapter?: Pick<GPUAdapterInfo, "vendor" | "architecture" | "description">,
 ): number => {
   const raw = new URLSearchParams(search).get("bdptWorkgroupSize");
-  const limit = raw === "1" ? 1 : raw === "4" ? 4 : 8;
+  const fallback =
+    adapter &&
+    /qualcomm|adreno/i.test(
+      `${adapter.vendor} ${adapter.architecture} ${adapter.description}`,
+    )
+      ? 4
+      : 8;
+  const limit = raw === "1" ? 1 : raw === "4" ? 4 : raw === "8" ? 8 : fallback;
   workgroupLimits.set(device, limit);
   return limit;
 };
@@ -185,10 +193,15 @@ export const recordBdptDispatch = (
   group: GPUBindGroup | undefined,
   dispatch: BdptDispatch,
   checkpoint: BdptCheckpoint,
+  timestamps?: (label: string) => GPUComputePassTimestampWrites | undefined,
 ): GPUCommandEncoder => {
   if (!group) throw new Error("Missing BDPT pass bindings.");
   for (const region of dispatch.regions) {
-    const pass = encoder.beginComputePass({ label: compiled.pipeline.label });
+    const timestampWrites = timestamps?.(compiled.pipeline.label);
+    const pass = encoder.beginComputePass({
+      label: compiled.pipeline.label,
+      ...(timestampWrites ? { timestampWrites } : {}),
+    });
     pass.setBindGroup(0, scene);
     pass.setBindGroup(1, group);
     pass.setBindGroup(2, dispatch.group);

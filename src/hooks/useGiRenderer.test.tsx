@@ -581,6 +581,37 @@ describe("useGiRenderer", () => {
     );
   });
 
+  it("captures slow BDPT frames through warmup without timing out", async () => {
+    window.history.replaceState(null, "", "/?restir=bdpt");
+    const fake = createFakeRenderer();
+    fake.setStats({ frameMs: 2200 });
+    const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+    let nextFrame: FrameRequestCallback | null = null;
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        nextFrame = callback;
+        return 1;
+      }),
+    );
+    render(<RendererHarness rendererFactory={create} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Measure" }));
+    for (let index = 0; index < 34; index++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2200);
+        const frame = nextFrame;
+        nextFrame = null;
+        frame?.((index + 1) * 2200);
+      });
+    }
+    expect(screen.getByTestId("capture-error")).toBeEmptyDOMElement();
+    expect(screen.getByTestId("captured-callbacks")).toHaveTextContent("3");
+  });
+
   it.each([16, 2000])(
     "cancels interrupted capture with latest frame time %s",
     async (frameMs) => {

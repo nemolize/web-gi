@@ -22,7 +22,7 @@ export interface BdptInitialPasses {
   readonly record: (
     encoder: GPUCommandEncoder,
     scene: GPUBindGroup,
-    timestampWrites?: GPUComputePassTimestampWrites,
+    timestamps?: (label: string) => GPUComputePassTimestampWrites | undefined,
     checkpoint?: BdptCheckpoint,
   ) => GPUCommandEncoder;
   readonly destroy: () => void;
@@ -152,7 +152,7 @@ export const createBdptInitialPasses = async (
         lightPathCount: pixels,
         dispatch,
         dispatchRegion: dispatch.buffer,
-        record: (encoder, sceneGroup, timestampWrites, checkpoint) => {
+        record: (encoder, sceneGroup, timestamps, checkpoint) => {
           if (dispatch.tiled && !checkpoint)
             throw new Error("Tiled BDPT recording requires a checkpoint.");
           if (checkpoint) {
@@ -165,11 +165,13 @@ export const createBdptInitialPasses = async (
                 groups[index],
                 dispatch,
                 checkpoint,
+                timestamps,
               );
             });
             return encoder;
           }
           encoder.clearBuffer(heads);
+          const timestampWrites = timestamps?.("bdptInitial");
           const sharedPass = encoder.beginComputePass({
             label: "bdpt-initial",
             ...(timestampWrites ? { timestampWrites } : {}),

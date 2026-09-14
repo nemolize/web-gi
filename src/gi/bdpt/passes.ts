@@ -161,12 +161,7 @@ export const createBdptPasses = async (
           reset = true;
         },
         record: (encoder, sceneGroup, timestamps, checkpoint) => {
-          encoder = initial.record(
-            encoder,
-            sceneGroup,
-            timestamps?.("bdptInitial"),
-            checkpoint,
-          );
+          encoder = initial.record(encoder, sceneGroup, timestamps, checkpoint);
           if (reset) {
             history.forEach((resource) => encoder.clearBuffer(resource));
             reset = false;
@@ -185,6 +180,7 @@ export const createBdptPasses = async (
                 groups[parity],
                 initial.dispatch,
                 checkpoint,
+                timestamps,
               );
             }
             parity = 1 - parity;
