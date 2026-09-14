@@ -79,6 +79,10 @@ includes a defensive center term, and normalizes by accepted neighbors plus
 one. Reverse shifts provide competing density for the center. Empty neighbors
 retain confidence. Spatial reuse preserves the temporal caustic reservoir.
 
+Only the temporal result becomes next-frame history. Spatial reuse writes a
+separate output reservoir for presentation, so repeatedly shifted neighbors
+cannot feed back into later temporal merges or inflate their confidence.
+
 `createBdptPasses` records initialization, reprojection, temporal merging, and
 spatial reuse. Read its `reservoirs` getter after recording. `resetHistory`
 clears both histories on the next recording; scene or sampling changes require

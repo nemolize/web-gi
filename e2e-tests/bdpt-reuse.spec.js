@@ -4,6 +4,26 @@ import { attachBdptComparisonImage } from "./bdpt-image";
 import { runBdptRenderProbe } from "./bdpt-render-probe";
 import { isPreviewTarget } from "./target";
 
+test("BDPT spatial reuse does not inflate the next frame's temporal confidence", async ({
+  page,
+}) => {
+  test.skip(isPreviewTarget, "The pass harness imports development modules.");
+  await page.goto("/?diagnostics=core");
+  const result = await runBdptRenderProbe(page, {
+    reuse: true,
+    frames: 16,
+    historyCap: 512,
+    spatialStopFrame: 15,
+  });
+  test.skip(result === null, "WebGPU is unavailable in this browser.");
+  expect(result.errors).toEqual([]);
+  expect(result.finite).toBe(true);
+  expect(result.spatialSelectionsChanged).toBeGreaterThan(0);
+  expect(result.finalNormalConfidenceRange).toEqual([16, 16]);
+  expect(result.causticsPreserved).toBe(true);
+  expect(result.darkCleared).toBe(true);
+});
+
 test("BDPT spatiotemporal passes preserve energy and clear reservoir history", async ({
   page,
 }) => {

@@ -109,7 +109,7 @@ export const createBdptPasses = async (
       return result;
     };
     return await allocateBdptResources(device, () => {
-      const scratch = buffer("bdpt-temporal");
+      const scratch = buffer("bdpt-spatial");
       const nodes = buffer("bdpt-temporal-nodes", 112);
       const history = [
         buffer("bdpt-history-0"),
@@ -127,23 +127,32 @@ export const createBdptPasses = async (
           })),
         });
       const temporalGroups = [
-        bind(temporalLayout, [initial.reservoirs, history[1], scratch, nodes]),
-        bind(temporalLayout, [initial.reservoirs, history[0], scratch, nodes]),
+        bind(temporalLayout, [
+          initial.reservoirs,
+          history[1],
+          history[0],
+          nodes,
+        ]),
+        bind(temporalLayout, [
+          initial.reservoirs,
+          history[0],
+          history[1],
+          nodes,
+        ]),
       ];
       const reprojectGroups = [
         bind(reprojectLayout, [history[1], nodes]),
         bind(reprojectLayout, [history[0], nodes]),
       ];
-      const spatialGroups = history.map((destination) =>
-        bind(spatialLayout, [scratch, destination]),
+      const spatialGroups = history.map((source) =>
+        bind(spatialLayout, [source, scratch]),
       );
       let parity = 0;
-      let output: GPUBuffer = history[0];
       let reset = true;
       return {
         initialReservoirs: initial.reservoirs,
         get reservoirs() {
-          return output;
+          return scratch;
         },
         lightPathCount: initial.lightPathCount,
         dispatch: initial.dispatch,
@@ -178,7 +187,6 @@ export const createBdptPasses = async (
                 checkpoint,
               );
             }
-            output = parity === 0 ? history[0] : history[1];
             parity = 1 - parity;
             return encoder;
           }
@@ -198,7 +206,6 @@ export const createBdptPasses = async (
             dispatchBdptPipeline(sharedPass, pipeline, width, height);
           }
           sharedPass.end();
-          output = parity === 0 ? history[0] : history[1];
           parity = 1 - parity;
           return encoder;
         },

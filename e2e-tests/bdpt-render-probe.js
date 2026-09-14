@@ -7,6 +7,7 @@ export const runBdptRenderProbe = async (
     historyCap = 8,
     cameraMotion = false,
     unlit = false,
+    spatialStopFrame,
   } = {},
 ) => {
   return page.evaluate(
@@ -17,6 +18,7 @@ export const runBdptRenderProbe = async (
       historyCap,
       cameraMotion,
       unlit,
+      spatialStopFrame,
     }) => {
       const adapter = await navigator.gpu?.requestAdapter();
       if (!adapter) return null;
@@ -202,12 +204,14 @@ export const runBdptRenderProbe = async (
         let finite = true;
         let confidenceValid = true;
         let confidenceSignature = 2166136261;
+        const finalNormalConfidenceRange = [Infinity, -Infinity];
         const read = async (frame) => {
           floats.copyWithin(16, 0, 16);
           if (cameraMotion)
             floats[0] = camera.pos.x + 0.15 * Math.sin(frame * 0.2);
           integers[34] = frame;
           integers[35] = frame;
+          if (frame === spatialStopFrame) integers[42] &= ~32;
           device.queue.writeBuffer(uniform, 0, data);
           const encoder = device.createCommandEncoder();
           passes.record(encoder, group);
@@ -269,6 +273,16 @@ export const runBdptRenderProbe = async (
               const mis = values[offset + 7];
               const weight = values[offset + 9];
               const target = values[offset + 11];
+              if (frame === frames - 1 && kind === 0) {
+                finalNormalConfidenceRange[0] = Math.min(
+                  finalNormalConfidenceRange[0],
+                  values[offset + 10],
+                );
+                finalNormalConfidenceRange[1] = Math.max(
+                  finalNormalConfidenceRange[1],
+                  values[offset + 10],
+                );
+              }
               const minimumConfidence =
                 reuse && !cameraMotion ? Math.min(frame + 1, historyCap) : 1;
               confidenceValid &&=
@@ -344,6 +358,7 @@ export const runBdptRenderProbe = async (
           finite,
           confidenceValid,
           confidenceSignature,
+          finalNormalConfidenceRange,
           darkCleared,
           lightPathCount: passes.lightPathCount,
           width,
@@ -359,6 +374,14 @@ export const runBdptRenderProbe = async (
         device.destroy();
       }
     },
-    { reuse, frames, spatialSamples, historyCap, cameraMotion, unlit },
+    {
+      reuse,
+      frames,
+      spatialSamples,
+      historyCap,
+      cameraMotion,
+      unlit,
+      spatialStopFrame,
+    },
   );
 };
