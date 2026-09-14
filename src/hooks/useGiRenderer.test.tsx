@@ -116,6 +116,7 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
   const [capturedCallbacks, setCapturedCallbacks] = useState<number | null>(
     null,
   );
+  const [performanceProgress, setPerformanceProgress] = useState("");
   const [captureError, setCaptureError] = useState<string | null>(null);
   const [matrixCases, setMatrixCases] = useState<number | null>(null);
   const [matrixReport, setMatrixReport] =
@@ -178,7 +179,9 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
       <button
         type="button"
         onClick={() => {
-          void measurePerformance()
+          void measurePerformance((progress) =>
+            setPerformanceProgress(JSON.stringify(progress)),
+          )
             .then((measurement) => {
               setCapturedCallbacks(measurement.measurement.sampling.callbacks);
             })
@@ -192,6 +195,7 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
         Measure
       </button>
       <output data-testid="captured-callbacks">{capturedCallbacks}</output>
+      <output data-testid="performance-progress">{performanceProgress}</output>
       <output data-testid="capture-error">{captureError}</output>
       <output data-testid="matrix-cases">{matrixCases}</output>
       <output data-testid="matrix-progress">{matrixProgress}</output>
@@ -332,6 +336,94 @@ describe("useGiRenderer", () => {
     );
   });
 
+  it.each([0, 2000])(
+    "allows slow rendering with initial frame time %s to complete capture",
+    async (initialFrameMs) => {
+      const fake = createFakeRenderer();
+      fake.setStats({ frameMs: initialFrameMs });
+      const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+      let nextFrame: FrameRequestCallback | null = null;
+      vi.stubGlobal(
+        "requestAnimationFrame",
+        vi.fn((callback: FrameRequestCallback) => {
+          nextFrame = callback;
+          return 1;
+        }),
+      );
+      render(<RendererHarness rendererFactory={create} />);
+      await waitFor(() =>
+        expect(screen.getByTestId("status")).toHaveTextContent("running"),
+      );
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      fireEvent.click(screen.getByRole("button", { name: "Measure" }));
+      fake.setStats({ frameMs: 2000 });
+      for (let index = 0; index < 34; index++) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(2000);
+          const frame = nextFrame;
+          nextFrame = null;
+          frame?.((index + 1) * 2000);
+        });
+        if (index === 29)
+          expect(
+            JSON.parse(
+              screen.getByTestId("performance-progress").textContent ?? "{}",
+            ),
+          ).toMatchObject({ phase: "warmup", completedFrames: 30 });
+      }
+      expect(screen.getByTestId("capture-error")).toBeEmptyDOMElement();
+      expect(screen.getByTestId("captured-callbacks")).toHaveTextContent("3");
+    },
+  );
+
+  it("forwards recorder warmup and sampling progress", async () => {
+    const fake = createFakeRenderer();
+    const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+    let nextFrame: FrameRequestCallback | null = null;
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        nextFrame = callback;
+        return 1;
+      }),
+    );
+    render(<RendererHarness rendererFactory={create} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Measure" }));
+    const progress = () =>
+      JSON.parse(
+        screen.getByTestId("performance-progress").textContent ?? "{}",
+      );
+    expect(progress()).toEqual({
+      phase: "warmup",
+      completedFrames: 0,
+      totalFrames: 30,
+    });
+    const advance = (at: number) =>
+      act(() => {
+        const frame = nextFrame;
+        nextFrame = null;
+        frame?.(at);
+      });
+    const start = performance.now();
+    for (let index = 1; index <= 30; index++) advance(start + index * 500);
+    expect(progress()).toEqual({
+      phase: "warmup",
+      completedFrames: 30,
+      totalFrames: 30,
+    });
+    advance(start + 15500);
+    expect(progress()).toEqual({
+      phase: "sampling",
+      elapsedMs: 0,
+      durationMs: 5000,
+    });
+    advance(start + 16000);
+    expect(progress().elapsedMs).toBeCloseTo(500);
+  });
+
   it("captures every rendered frame over the measurement window", async () => {
     const fake = createFakeRenderer();
     const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
@@ -451,41 +543,45 @@ describe("useGiRenderer", () => {
     );
   });
 
-  it("cancels a capture after an interrupted frame sequence", async () => {
-    const fake = createFakeRenderer();
-    const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
-    let nextFrame: FrameRequestCallback | null = null;
-    vi.stubGlobal(
-      "requestAnimationFrame",
-      vi.fn((callback: FrameRequestCallback) => {
-        nextFrame = callback;
-        return 1;
-      }),
-    );
+  it.each([16, 2000])(
+    "cancels interrupted capture with latest frame time %s",
+    async (frameMs) => {
+      const fake = createFakeRenderer();
+      const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+      let nextFrame: FrameRequestCallback | null = null;
+      vi.stubGlobal(
+        "requestAnimationFrame",
+        vi.fn((callback: FrameRequestCallback) => {
+          nextFrame = callback;
+          return 1;
+        }),
+      );
 
-    render(<RendererHarness rendererFactory={create} />);
-    await waitFor(() =>
-      expect(screen.getByTestId("status")).toHaveTextContent("running"),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Measure" }));
+      render(<RendererHarness rendererFactory={create} />);
+      await waitFor(() =>
+        expect(screen.getByTestId("status")).toHaveTextContent("running"),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Measure" }));
 
-    act(() => {
-      const frame = nextFrame;
-      nextFrame = null;
-      frame?.(0);
-    });
-    act(() => {
-      const frame = nextFrame;
-      nextFrame = null;
-      frame?.(2_000);
-    });
+      act(() => {
+        const frame = nextFrame;
+        nextFrame = null;
+        frame?.(0);
+      });
+      fake.setStats({ frameMs });
+      act(() => {
+        const frame = nextFrame;
+        nextFrame = null;
+        frame?.(2_000);
+      });
 
-    await waitFor(() =>
-      expect(screen.getByTestId("capture-error")).toHaveTextContent(
-        "Performance capture stopped because rendering was interrupted.",
-      ),
-    );
-  });
+      await waitFor(() =>
+        expect(screen.getByTestId("capture-error")).toHaveTextContent(
+          "Performance capture stopped because rendering was interrupted.",
+        ),
+      );
+    },
+  );
 
   it("cancels a capture when the page becomes hidden", async () => {
     const fake = createFakeRenderer();

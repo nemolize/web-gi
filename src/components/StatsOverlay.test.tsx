@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -136,7 +137,7 @@ describe("StatsOverlay performance capture", () => {
     );
 
     const measureButton = screen.getByRole("button", {
-      name: "Measure 3×5 s",
+      name: "Measure 3 runs",
     });
     fireEvent.click(measureButton);
 
@@ -571,10 +572,10 @@ describe("StatsOverlay performance capture", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Measure 3×5 s" }));
+    fireEvent.click(screen.getByRole("button", { name: "Measure 3 runs" }));
     expect(await screen.findByText("renderer stopped")).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "Measure 3×5 s" }));
+    fireEvent.click(screen.getByRole("button", { name: "Measure 3 runs" }));
     expect(await screen.findByText(/33.10 ms GPU median run/)).toBeVisible();
   });
 
@@ -595,7 +596,7 @@ describe("StatsOverlay performance capture", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Measure 3×5 s" }));
+    fireEvent.click(screen.getByRole("button", { name: "Measure 3 runs" }));
     await screen.findByText(/33.10 ms GPU median run/);
     fireEvent.click(screen.getByRole("button", { name: "Copy result" }));
 
@@ -638,22 +639,53 @@ describe("StatsOverlay performance capture", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Measure 3×5 s" }));
+    fireEvent.click(screen.getByRole("button", { name: "Measure 3 runs" }));
+    expect(
+      screen.getByRole("button", { name: "Warming up 1/3…" }),
+    ).toBeVisible();
+    expect(measurePerformance).toHaveBeenCalledOnce();
+    act(() =>
+      measurePerformance.mock.calls[0]?.[0]({
+        phase: "warmup",
+        completedFrames: 12,
+        totalFrames: 30,
+      }),
+    );
+    expect(
+      screen.getByText(
+        "Warming up run 1 of 3: 12 / 30 frames before sampling.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/Measuring run 1/)).toBeNull();
+    act(() =>
+      measurePerformance.mock.calls[0]?.[0]({
+        phase: "sampling",
+        elapsedMs: 2000,
+        durationMs: 5000,
+      }),
+    );
     expect(
       screen.getByRole("button", { name: "Measuring 1/3…" }),
     ).toBeVisible();
-    expect(measurePerformance).toHaveBeenCalledOnce();
+    expect(
+      screen.getByText(
+        "Measuring run 1 of 3: 2.0 / 5 seconds. Updates as frames are reported.",
+      ),
+    ).toBeVisible();
 
     resolveFirst?.(measurement);
     await waitFor(() => expect(measurePerformance).toHaveBeenCalledTimes(2));
     expect(
-      screen.getByRole("button", { name: "Measuring 2/3…" }),
+      screen.getByRole("button", { name: "Warming up 2/3…" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Warming up run 2 of 3: 0 / 30 frames before sampling."),
     ).toBeVisible();
 
     resolveSecond?.(measurement);
     await waitFor(() => expect(measurePerformance).toHaveBeenCalledTimes(3));
     expect(
-      screen.getByRole("button", { name: "Measuring 3/3…" }),
+      screen.getByRole("button", { name: "Warming up 3/3…" }),
     ).toBeVisible();
 
     resolveThird?.(measurement);

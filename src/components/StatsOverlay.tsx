@@ -24,8 +24,10 @@ import {
   formatPerformanceReport,
   PERFORMANCE_CAPTURE_DURATION_MS,
   PERFORMANCE_CAPTURE_RUN_COUNT,
+  PERFORMANCE_WARMUP_FRAMES,
   type PerformanceCapture,
   type PerformanceMeasurement,
+  type PerformanceProgress,
   type PerformanceReportContext,
   sanitizePerformanceReportUrl,
 } from "@/gi/performance";
@@ -37,10 +39,22 @@ import type {
 } from "@/gi/settings";
 import { sanitizedRenderQueryParams } from "@/gi/settings";
 
+const describeMeasurementProgress = (
+  run: number,
+  progress: PerformanceProgress | null,
+): string => {
+  const runLabel = `run ${String(run)} of ${String(PERFORMANCE_CAPTURE_RUN_COUNT)}`;
+  if (progress?.phase === "sampling")
+    return `Measuring ${runLabel}: ${(progress.elapsedMs / 1_000).toFixed(1)} / ${String(progress.durationMs / 1_000)} seconds. Updates as frames are reported.`;
+  return `Warming up ${runLabel}: ${String(progress?.completedFrames ?? 0)} / ${String(progress?.totalFrames ?? PERFORMANCE_WARMUP_FRAMES)} frames before sampling.`;
+};
+
 export type StatsOverlayProps = {
   readonly stats: RendererStats;
   readonly settings: RenderSettings;
-  readonly measurePerformance: () => Promise<PerformanceMeasurement>;
+  readonly measurePerformance: (
+    onProgress?: (progress: PerformanceProgress) => void,
+  ) => Promise<PerformanceMeasurement>;
   readonly saveComparisonReference: () => Promise<boolean>;
   readonly compareReferenceAfter: (
     label: string,
@@ -131,6 +145,8 @@ export const StatsOverlay = ({
   const [capture, setCapture] = useState<PerformanceCapture | null>(null);
   const [activeRun, setActiveRun] = useState(0);
   const [report, setReport] = useState<string | null>(null);
+  const [captureProgress, setCaptureProgress] =
+    useState<PerformanceProgress | null>(null);
   const [captureError, setCaptureError] = useState<string | null>(null);
   const comparisonSettingsKey = JSON.stringify(settings);
   const [comparisonStatus, setComparisonStatus] = useState<{
@@ -165,7 +181,8 @@ export const StatsOverlay = ({
       const runs: PerformanceMeasurement[] = [];
       for (let index = 0; index < PERFORMANCE_CAPTURE_RUN_COUNT; index++) {
         setActiveRun(index + 1);
-        runs.push(await measurePerformance());
+        setCaptureProgress(null);
+        runs.push(await measurePerformance(setCaptureProgress));
       }
       const result = aggregatePerformanceMeasurements(runs);
       setActiveRun(0);
@@ -339,9 +356,9 @@ export const StatsOverlay = ({
   const primaryLabel = isComparing
     ? "Comparing…"
     : captureStatus === "measuring"
-      ? `Measuring ${String(activeRun)}/${String(PERFORMANCE_CAPTURE_RUN_COUNT)}…`
+      ? `${captureProgress?.phase === "sampling" ? "Measuring" : "Warming up"} ${String(activeRun)}/${String(PERFORMANCE_CAPTURE_RUN_COUNT)}…`
       : report === null
-        ? `Measure ${String(PERFORMANCE_CAPTURE_RUN_COUNT)}×${String(PERFORMANCE_CAPTURE_DURATION_MS / 1_000)} s`
+        ? `Measure ${String(PERFORMANCE_CAPTURE_RUN_COUNT)} runs`
         : captureStatus === "copied"
           ? "Copy again"
           : "Copy result";
@@ -506,14 +523,15 @@ export const StatsOverlay = ({
         </div>
         <p aria-live="polite" className="mt-1 text-xs text-neutral-400">
           {captureStatus === "measuring"
-            ? `Measuring run ${String(activeRun)} of ${String(PERFORMANCE_CAPTURE_RUN_COUNT)} for ${String(PERFORMANCE_CAPTURE_DURATION_MS / 1_000)} seconds.`
+            ? describeMeasurementProgress(activeRun, captureProgress)
             : captureStatus === "ready"
               ? capture === null
                 ? "Comparison complete. Copy result is ready."
                 : "Measurement complete. Copy result is ready."
               : captureStatus === "copied"
                 ? "Result copied to clipboard."
-                : captureError}
+                : (captureError ??
+                  `Each run warms up for ${String(PERFORMANCE_WARMUP_FRAMES)} frames, then samples for at least ${String(PERFORMANCE_CAPTURE_DURATION_MS / 1_000)} seconds. Slow rendering can take several minutes.`)}
         </p>
       </div>
     </section>
