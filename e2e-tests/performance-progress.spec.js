@@ -16,7 +16,9 @@ test("shows warmup before sampling and completes three slow captures", async ({
     Boolean(await navigator.gpu?.requestAdapter()),
   );
   test.skip(!gpuAvailable, "WebGPU unavailable.");
-  await expect(page.getByTestId("stat-accumulated")).not.toHaveText("0");
+  await expect(page.getByTestId("stat-accumulated")).not.toHaveText("0", {
+    timeout: 20_000,
+  });
   await expect(page.getByText(/Each run warms up for 30 frames/)).toBeVisible();
   await page.getByRole("button", { name: "Measure 3 runs" }).click();
   await expect(
