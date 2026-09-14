@@ -57,6 +57,55 @@ describe("performance capture", () => {
     });
   });
 
+  it("reports warmup frames separately from sampled elapsed time", () => {
+    const recorder = createPerformanceRecorder(5000, 2);
+    expect(recorder.progress).toEqual({
+      phase: "warmup",
+      completedFrames: 0,
+      totalFrames: 2,
+    });
+    recorder.observe({ at: 2000, callbackIntervalMs: 2000, accepted: true });
+    expect(recorder.progress).toEqual({
+      phase: "warmup",
+      completedFrames: 1,
+      totalFrames: 2,
+    });
+    recorder.observe({ at: 4000, callbackIntervalMs: 2000, accepted: true });
+    expect(recorder.progress).toEqual({
+      phase: "warmup",
+      completedFrames: 2,
+      totalFrames: 2,
+    });
+    recorder.observe({ at: 6000, callbackIntervalMs: 2000, accepted: true });
+    expect(recorder.progress).toEqual({
+      phase: "sampling",
+      elapsedMs: 0,
+      durationMs: 5000,
+    });
+    recorder.observe({ at: 8000, callbackIntervalMs: 2000, accepted: true });
+    expect(recorder.progress).toEqual({
+      phase: "sampling",
+      elapsedMs: 2000,
+      durationMs: 5000,
+    });
+    recorder.observe({ at: 10000, callbackIntervalMs: 2000, accepted: true });
+    const result = recorder.observe({
+      at: 12000,
+      callbackIntervalMs: 2000,
+      accepted: true,
+    });
+    expect(recorder.progress).toEqual({
+      phase: "sampling",
+      elapsedMs: 6000,
+      durationMs: 5000,
+    });
+    expect(result?.measurement.sampling).toMatchObject({
+      windowMs: 6000,
+      callbacks: 3,
+      warmupFrames: 2,
+    });
+  });
+
   it("discards warm-up frames before opening the window", () => {
     const recorder = createPerformanceRecorder(100, 2);
 

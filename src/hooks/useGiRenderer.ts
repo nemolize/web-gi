@@ -12,9 +12,9 @@ import {
 import type { LinearComparisonReport } from "@/gi/comparison-session";
 import {
   createPerformanceRecorder,
-  PERFORMANCE_CAPTURE_DURATION_MS,
-  PERFORMANCE_WARMUP_FRAMES,
+  performanceCaptureLimits,
   type PerformanceMeasurement,
+  type PerformanceProgress,
 } from "@/gi/performance";
 import type { RendererStats } from "@/gi/renderer";
 import { GiRenderer, WebGpuUnsupportedError } from "@/gi/renderer";
@@ -33,7 +33,9 @@ export type UseGiRenderer = {
   readonly stats: RendererStats;
   readonly status: RendererStatus;
   readonly errorMessage: string | null;
-  readonly measurePerformance: () => Promise<PerformanceMeasurement>;
+  readonly measurePerformance: (
+    onProgress?: (progress: PerformanceProgress) => void,
+  ) => Promise<PerformanceMeasurement>;
   readonly saveComparisonReference: () => Promise<boolean>;
   readonly compareReferenceAfter: (
     label: string,
@@ -93,19 +95,25 @@ type ActiveMeasurement = {
   readonly recorder: ReturnType<typeof createPerformanceRecorder>;
   readonly resolve: (measurement: PerformanceMeasurement) => void;
   readonly reject: (error: Error) => void;
-  readonly timeoutId: number;
+  timeoutId: number;
+  readonly startedAt: number;
+  deadline: number;
+  readonly onTimeout: () => void;
   renderContext: Pick<
     PerformanceMeasurement,
     "atrousVariant" | "renderResolution"
   > | null;
   lastFrameAt: number | null;
+  maxFrameGapMs: number;
+  hasFrameTiming: boolean;
+  readonly onProgress?: (progress: PerformanceProgress) => void;
+  lastProgressAt: number;
+  lastProgressPhase: PerformanceProgress["phase"];
 };
 
 const STATS_INTERVAL_MS = 250;
-/** Warm-up runs before the window opens, so it has to fit inside the timeout. */
 export const PERFORMANCE_CAPTURE_TIMEOUT_MS =
-  PERFORMANCE_CAPTURE_DURATION_MS + PERFORMANCE_WARMUP_FRAMES * 100 + 2_000;
-const MAX_CAPTURE_FRAME_GAP_MS = 1_000;
+  performanceCaptureLimits(0).timeoutMs;
 const ORBIT_SPEED = 0.005;
 const DOLLY_SPEED = 0.0015;
 
@@ -264,8 +272,9 @@ export const useGiRenderer = (
                   "Performance capture stopped because the render configuration changed.",
                 );
               } else if (
+                measurement.hasFrameTiming &&
                 measurement.lastFrameAt !== null &&
-                now - measurement.lastFrameAt > MAX_CAPTURE_FRAME_GAP_MS
+                now - measurement.lastFrameAt > measurement.maxFrameGapMs
               ) {
                 cancelMeasurement(
                   "Performance capture stopped because rendering was interrupted.",
@@ -274,6 +283,30 @@ export const useGiRenderer = (
             }
 
             if (measurementRef.current === measurement) {
+              if (
+                currentContext !== null &&
+                measurement.recorder.progress.phase === "warmup"
+              ) {
+                const limits = performanceCaptureLimits(currentStats.frameMs);
+                if (
+                  Number.isFinite(currentStats.frameMs) &&
+                  currentStats.frameMs > 0
+                )
+                  measurement.hasFrameTiming = true;
+                measurement.maxFrameGapMs = Math.max(
+                  measurement.maxFrameGapMs,
+                  limits.maxFrameGapMs,
+                );
+                const deadline = measurement.startedAt + limits.timeoutMs;
+                if (deadline > measurement.deadline) {
+                  measurement.deadline = deadline;
+                  window.clearTimeout(measurement.timeoutId);
+                  measurement.timeoutId = window.setTimeout(
+                    measurement.onTimeout,
+                    Math.max(0, deadline - performance.now()),
+                  );
+                }
+              }
               measurement.lastFrameAt = now;
               // Drained every frame: leaving samples queued would attribute
               // them to whichever window happened to close next.
@@ -285,6 +318,18 @@ export const useGiRenderer = (
                 gpu,
                 gpuSupported: active.supportsGpuTiming,
               });
+              if (measurement.onProgress) {
+                const progress = measurement.recorder.progress;
+                if (
+                  now - measurement.lastProgressAt >= STATS_INTERVAL_MS ||
+                  progress.phase !== measurement.lastProgressPhase ||
+                  result !== null
+                ) {
+                  measurement.lastProgressAt = now;
+                  measurement.lastProgressPhase = progress.phase;
+                  measurement.onProgress(progress);
+                }
+              }
               if (result !== null) {
                 const context = measurement.renderContext;
                 measurementRef.current = null;
@@ -438,8 +483,10 @@ export const useGiRenderer = (
     setRendererVersion((version) => version + 1);
   }, []);
 
-  const measurePerformance =
-    useCallback((): Promise<PerformanceMeasurement> => {
+  const measurePerformance = useCallback(
+    (
+      onProgress?: (progress: PerformanceProgress) => void,
+    ): Promise<PerformanceMeasurement> => {
       const renderer = rendererRef.current;
       if (renderer === null) {
         return Promise.reject(new Error("The renderer is not running."));
@@ -450,28 +497,46 @@ export const useGiRenderer = (
         );
       }
 
+      const { maxFrameGapMs, timeoutMs } = performanceCaptureLimits(
+        renderer.stats.frameMs,
+      );
       renderer.setGpuTimingEnabled(true);
       renderer.takeGpuSamples();
 
       return keepingScreenAwake(
         () =>
           new Promise((resolve, reject) => {
-            const timeoutId = window.setTimeout(() => {
+            const onTimeout = () =>
               cancelMeasurement(
                 "Performance capture timed out before enough frames were rendered.",
               );
-            }, PERFORMANCE_CAPTURE_TIMEOUT_MS);
+            const timeoutId = window.setTimeout(onTimeout, timeoutMs);
+            const startedAt = performance.now();
+            const recorder = createPerformanceRecorder();
             measurementRef.current = {
-              recorder: createPerformanceRecorder(),
+              recorder,
               resolve,
               reject,
               timeoutId,
+              startedAt,
+              deadline: startedAt + timeoutMs,
+              onTimeout,
               renderContext: null,
               lastFrameAt: null,
+              maxFrameGapMs,
+              hasFrameTiming:
+                Number.isFinite(renderer.stats.frameMs) &&
+                renderer.stats.frameMs > 0,
+              ...(onProgress ? { onProgress } : {}),
+              lastProgressAt: performance.now(),
+              lastProgressPhase: "warmup",
             };
+            onProgress?.(recorder.progress);
           }),
       );
-    }, [cancelMeasurement, keepingScreenAwake]);
+    },
+    [cancelMeasurement, keepingScreenAwake],
+  );
 
   const saveComparisonReference = useCallback((): Promise<boolean> => {
     const renderer = rendererRef.current;

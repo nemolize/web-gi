@@ -12,6 +12,19 @@ export const PERFORMANCE_CAPTURE_RUN_COUNT = 3;
  */
 export const PERFORMANCE_WARMUP_FRAMES = 30;
 
+export const performanceCaptureLimits = (frameMs: number) => {
+  const frameBudgetMs =
+    Number.isFinite(frameMs) && frameMs > 0 ? frameMs * 4 : 0;
+  return {
+    maxFrameGapMs: Math.max(1_000, frameBudgetMs),
+    timeoutMs: Math.max(
+      PERFORMANCE_CAPTURE_DURATION_MS + PERFORMANCE_WARMUP_FRAMES * 100 + 2_000,
+      PERFORMANCE_CAPTURE_DURATION_MS +
+        (PERFORMANCE_WARMUP_FRAMES + 2) * frameBudgetMs,
+    ),
+  };
+};
+
 /**
  * A run whose later frames are this much slower than its earlier ones is
  * flagged. The threshold is deliberately loose — it exists to catch a device
@@ -148,7 +161,20 @@ export interface FrameObservation {
   readonly gpuSupported?: boolean;
 }
 
+export type PerformanceProgress =
+  | {
+      readonly phase: "warmup";
+      readonly completedFrames: number;
+      readonly totalFrames: number;
+    }
+  | {
+      readonly phase: "sampling";
+      readonly elapsedMs: number;
+      readonly durationMs: number;
+    };
+
 export interface PerformanceRecorder {
+  readonly progress: PerformanceProgress;
   readonly observe: (frame: FrameObservation) => RecorderResult | null;
 }
 
@@ -238,6 +264,7 @@ export const createPerformanceRecorder = (
   let startedAt: number | null = null;
   let warmedFrames = 0;
   let completed = false;
+  let elapsedMs = 0;
   let callbacks = 0;
   let rejected = 0;
   let gpuSupported = true;
@@ -302,6 +329,15 @@ export const createPerformanceRecorder = (
   };
 
   return {
+    get progress(): PerformanceProgress {
+      return startedAt === null
+        ? {
+            phase: "warmup",
+            completedFrames: warmedFrames,
+            totalFrames: warmupFrames,
+          }
+        : { phase: "sampling", elapsedMs, durationMs };
+    },
     observe: (frame) => {
       if (completed) return null;
       if (warmedFrames < warmupFrames) {
@@ -329,6 +365,7 @@ export const createPerformanceRecorder = (
       }
 
       const windowMs = frame.at - startedAt;
+      elapsedMs = windowMs;
       if (windowMs < durationMs) return null;
 
       completed = true;

@@ -16,9 +16,13 @@ Repeatable benchmark runs can start from short query strings:
 `preset=heavy` loads a deliberately demanding configuration — many lights, a
 wide DI candidate count, and several bounces — so the renderers are compared
 where the work is, not at defaults. `measure=auto` starts the standard
-three-by-five second capture as soon as the renderer is ready; the completed
-report remains available through `Copy result`, and records the exact settings it
-ran at.
+three-run capture as soon as the renderer is ready. Each run first discards
+30 warmup frames, then samples for at least five seconds, ending on a reported
+frame. The UI shows warmup frame counts separately from sampled elapsed time;
+the five seconds excludes warmup, so slow rendering can take several minutes.
+Capture deadlines adapt to observed frame duration during warmup.
+The completed report remains available through `Copy result` and records the
+exact settings it ran at.
 
 Equal-time linear-radiance comparisons use similarly short URLs:
 
