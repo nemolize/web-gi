@@ -1,4 +1,4 @@
-import type { BdptCheckpoint, BdptDispatchRegion } from "@/gi/bdpt/pipeline";
+import type { BdptCheckpoint } from "@/gi/bdpt/pipeline";
 import { createBdptRuntime } from "@/gi/bdpt/runtime";
 import { cameraBasis, DEFAULT_CAMERA } from "@/gi/camera";
 import type { DiagnosticSuite } from "@/gi/diagnostics/runner";
@@ -149,18 +149,10 @@ const run = async (
       u[49] = frame;
       device.queue.writeBuffer(uniform, 0, data);
       report(`START frame ${frame} submit/readback`);
-      const commands: {
-        label: string;
-        buffer: GPUCommandBuffer;
-        region?: BdptDispatchRegion;
-      }[] = [];
+      const commands: { label: string; buffer: GPUCommandBuffer }[] = [];
       const checkpoint: BdptCheckpoint | undefined = staged
-        ? (encoder, label, region) => {
-            commands.push({
-              label,
-              buffer: encoder.finish(),
-              ...(region ? { region } : {}),
-            });
+        ? (encoder, label) => {
+            commands.push({ label, buffer: encoder.finish() });
             return device.createCommandEncoder();
           }
         : undefined;
@@ -208,12 +200,8 @@ const run = async (
           }
           stageTile++;
           try {
-            if (command.region)
-              device.queue.writeBuffer(
-                runtime.dispatchRegion,
-                0,
-                new Uint32Array(command.region),
-              );
+            // One tile per submission, awaited individually: this diagnostic
+            // exists to name the tile a device loss lands on.
             device.queue.submit([command.buffer]);
             await device.queue.onSubmittedWorkDone();
             if (errors.length) throw new Error(errors.join("\n"));

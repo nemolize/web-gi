@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  BDPT_REGION_STRIDE,
   bdptVertexLimit,
   configureBdptWorkgroups,
+  createBdptDispatch,
   createBdptPipeline,
   dispatchBdptPipeline,
+  recordBdptDispatch,
 } from "./pipeline";
 
 class PipelineError extends Error {
@@ -209,4 +212,106 @@ it("defaults Qualcomm and Adreno to 4x4 while preserving explicit overrides", as
       description: "",
     }),
   ).toBe(8);
+});
+
+describe("BDPT tiled region binding", () => {
+  const dispatchFixture = () => {
+    vi.stubGlobal("GPUShaderStage", { COMPUTE: 4 });
+    vi.stubGlobal("GPUBufferUsage", { UNIFORM: 64, COPY_DST: 8 });
+    const writes = [];
+    return {
+      writes,
+      device: {
+        createBuffer: vi.fn(() => ({ destroy: vi.fn() })),
+        createBindGroupLayout: vi.fn((descriptor) => descriptor),
+        createBindGroup: vi.fn(() => ({})),
+        queue: {
+          writeBuffer: vi.fn((_buffer, offset, data) =>
+            writes.push([offset, ...data]),
+          ),
+        },
+      },
+    };
+  };
+
+  it("keeps the slot stride at the alignment WebGPU guarantees", () => {
+    // A dynamic uniform offset must be a multiple of
+    // minUniformBufferOffsetAlignment, whose maximum permitted value is 256.
+    // A smaller stride packs the slots tighter and is rejected at bind time.
+    expect(BDPT_REGION_STRIDE).toBe(256);
+  });
+
+  it("gives every tile its own region slot and binds each dispatch to it", () => {
+    const { device, writes } = dispatchFixture();
+    // 8x8 capped at 16 pixels -> tiles of 8x2 -> four stacked rows.
+    const dispatch = createBdptDispatch(device, 8, 8, 16);
+    expect(dispatch.regions).toEqual([
+      [0, 0, 8, 2],
+      [0, 2, 8, 2],
+      [0, 4, 8, 2],
+      [0, 6, 8, 2],
+    ]);
+
+    // Each region is written once, to its own slot, before any submission.
+    expect(writes).toEqual([
+      [0, 0, 0, 8, 2],
+      [BDPT_REGION_STRIDE, 0, 2, 8, 2],
+      [BDPT_REGION_STRIDE * 2, 0, 4, 8, 2],
+      [BDPT_REGION_STRIDE * 3, 0, 6, 8, 2],
+    ]);
+
+    const offsets = [];
+    const encoder = {
+      beginComputePass: () => ({
+        setBindGroup: (index, _group, dynamicOffsets) => {
+          if (index === 2) offsets.push(dynamicOffsets?.[0]);
+        },
+        setPipeline: () => undefined,
+        dispatchWorkgroups: () => undefined,
+        end: () => undefined,
+      }),
+    };
+    recordBdptDispatch(
+      encoder,
+      { pipeline: { label: "bdpt-spatial" }, workgroupSize: 4 },
+      {},
+      {},
+      dispatch,
+      () => encoder,
+    );
+    expect(offsets).toEqual([
+      0,
+      BDPT_REGION_STRIDE,
+      BDPT_REGION_STRIDE * 2,
+      BDPT_REGION_STRIDE * 3,
+    ]);
+  });
+
+  it("keeps the untiled path on a single full-image region at slot 0", () => {
+    const { device, writes } = dispatchFixture();
+    const dispatch = createBdptDispatch(device, 8, 8);
+    expect(dispatch.regions).toEqual([[0, 0, 8, 8]]);
+    expect(writes).toEqual([[0, 0, 0, 8, 8]]);
+
+    const offsets = [];
+    const encoder = {
+      beginComputePass: () => ({
+        setBindGroup: (index, _group, dynamicOffsets) => {
+          if (index === 2) offsets.push(dynamicOffsets?.[0]);
+        },
+        setPipeline: () => undefined,
+        dispatchWorkgroups: () => undefined,
+        end: () => undefined,
+      }),
+    };
+    recordBdptDispatch(
+      encoder,
+      { pipeline: { label: "bdpt-spatial" }, workgroupSize: 4 },
+      {},
+      {},
+      dispatch,
+      () => encoder,
+    );
+    expect(offsets).toEqual([0]);
+  });
 });

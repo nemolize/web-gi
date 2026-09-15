@@ -69,7 +69,16 @@ export interface BdptDispatch {
   readonly group: GPUBindGroup;
   readonly regions: readonly BdptDispatchRegion[];
   readonly tiled: boolean;
+  /** Stride between region slots; each tile binds at `index * regionStride`. */
+  readonly regionStride: number;
 }
+
+/**
+ * WebGPU's floor for `minUniformBufferOffsetAlignment`. Using the floor rather
+ * than the adapter's reported limit keeps the slot layout identical on every
+ * device, at the cost of padding on adapters that would allow less.
+ */
+export const BDPT_REGION_STRIDE = 256;
 
 const dispatchLayouts = new WeakMap<GPUDevice, GPUBindGroupLayout>();
 
@@ -83,7 +92,10 @@ export const getBdptDispatchLayout = (
         {
           binding: 0,
           visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: "uniform" },
+          // Every tile reads its own slot of one buffer, so a batch of tiles
+          // can share a submission without the region uniform being rewritten
+          // between them.
+          buffer: { type: "uniform", hasDynamicOffset: true },
         },
       ],
     });
@@ -143,19 +155,36 @@ export const createBdptDispatch = (
   const regions = bdptDispatchRegions(width, height, maximum);
   const buffer = device.createBuffer({
     label: "bdpt-dispatch-region",
-    size: 16,
+    size: Math.max(1, regions.length) * BDPT_REGION_STRIDE,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
   try {
-    device.queue.writeBuffer(buffer, 0, new Uint32Array([0, 0, width, height]));
+    // Written once for the whole frame: the untiled path keeps the full image
+    // in slot 0, and each tile owns the slot its dispatch binds.
+    if (maximum === undefined) {
+      device.queue.writeBuffer(
+        buffer,
+        0,
+        new Uint32Array([0, 0, width, height]),
+      );
+    } else {
+      for (const [index, region] of regions.entries()) {
+        device.queue.writeBuffer(
+          buffer,
+          index * BDPT_REGION_STRIDE,
+          new Uint32Array(region),
+        );
+      }
+    }
     return {
       buffer,
       group: device.createBindGroup({
         layout: getBdptDispatchLayout(device),
-        entries: [{ binding: 0, resource: { buffer } }],
+        entries: [{ binding: 0, resource: { buffer, offset: 0, size: 16 } }],
       }),
       regions,
       tiled: maximum !== undefined,
+      regionStride: BDPT_REGION_STRIDE,
     };
   } catch (error) {
     buffer.destroy();
@@ -196,7 +225,7 @@ export const recordBdptDispatch = (
   timestamps?: (label: string) => GPUComputePassTimestampWrites | undefined,
 ): GPUCommandEncoder => {
   if (!group) throw new Error("Missing BDPT pass bindings.");
-  for (const region of dispatch.regions) {
+  for (const [index, region] of dispatch.regions.entries()) {
     const timestampWrites = timestamps?.(compiled.pipeline.label);
     const pass = encoder.beginComputePass({
       label: compiled.pipeline.label,
@@ -204,14 +233,12 @@ export const recordBdptDispatch = (
     });
     pass.setBindGroup(0, scene);
     pass.setBindGroup(1, group);
-    pass.setBindGroup(2, dispatch.group);
+    pass.setBindGroup(2, dispatch.group, [
+      dispatch.tiled ? index * dispatch.regionStride : 0,
+    ]);
     dispatchBdptPipeline(pass, compiled, region[2], region[3]);
     pass.end();
-    encoder = checkpoint(
-      encoder,
-      compiled.pipeline.label,
-      dispatch.tiled ? region : undefined,
-    );
+    encoder = checkpoint(encoder, compiled.pipeline.label);
   }
   return encoder;
 };

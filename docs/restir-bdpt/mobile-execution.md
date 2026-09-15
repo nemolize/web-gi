@@ -19,8 +19,17 @@ All tiles of a stage complete before its consumer begins. Light-list and
 reprojection-list clears happen once per logical frame, and history parity
 advances once per logical frame, not once per tile.
 
-`src/gi/bdpt/frame-submissions.ts` writes each region immediately before its
-submission and waits for GPU completion before continuing. The renderer defers
+`src/gi/bdpt/frame-submissions.ts` submits tiles in batches and waits for GPU
+completion once per batch. Every region is written up front into its own slot of
+the region uniform, and each dispatch binds its slot through a dynamic offset,
+so tiles in one batch no longer share a rewritten uniform. The pixel cap still
+bounds how long a single dispatch runs, which is the property the device-loss
+mitigation rests on; batching removes only the CPU round-trip between tiles.
+`?bdptSubmissionBatch=N` sets the batch size, default 8; `1` restores one wait
+per tile. The batch is always drained before the presenting submission, so an
+invalidated frame cannot acquire the swapchain texture. Measured on a Fold 7 at
+353x738, the 2442 ms frame spent 837 ms outside any pass with 476 waits per
+frame. The renderer defers
 presentation until the final submission and invalidates pending work for
 settings or resolution changes. Camera-only motion finishes the captured frame
 and retains reservoir history for the next frame's cross-camera reprojection. The completed-frame path controls accumulation; partial frames
