@@ -238,7 +238,11 @@ export const recordBdptDispatch = (
     ]);
     dispatchBdptPipeline(pass, compiled, region[2], region[3]);
     pass.end();
-    encoder = checkpoint(encoder, compiled.pipeline.label);
+    encoder = checkpoint(
+      encoder,
+      compiled.pipeline.label,
+      dispatch.tiled ? region : undefined,
+    );
   }
   return encoder;
 };

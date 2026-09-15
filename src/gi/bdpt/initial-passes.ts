@@ -177,7 +177,7 @@ export const createBdptInitialPasses = async (
             ...(timestampWrites ? { timestampWrites } : {}),
           });
           sharedPass.setBindGroup(0, sceneGroup);
-          sharedPass.setBindGroup(2, dispatch.group);
+          sharedPass.setBindGroup(2, dispatch.group, [0]);
           pipelines.forEach((pipeline, index) => {
             sharedPass.setBindGroup(1, groups[index]);
             dispatchBdptPipeline(sharedPass, pipeline, width, height);

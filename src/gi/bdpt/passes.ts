@@ -192,7 +192,7 @@ export const createBdptPasses = async (
             ...(timestampWrites ? { timestampWrites } : {}),
           });
           sharedPass.setBindGroup(0, sceneGroup);
-          sharedPass.setBindGroup(2, initial.dispatch.group);
+          sharedPass.setBindGroup(2, initial.dispatch.group, [0]);
           for (const [pipeline, groups] of [
             [reprojectPipeline, reprojectGroups],
             [temporalPipeline, temporalGroups],
