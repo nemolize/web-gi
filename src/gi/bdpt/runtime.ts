@@ -103,7 +103,7 @@ export const createBdptRuntime = async (
         });
         pass.setBindGroup(0, scene);
         pass.setBindGroup(1, group);
-        pass.setBindGroup(2, passes.dispatch.group);
+        pass.setBindGroup(2, passes.dispatch.group, [0]);
         dispatchBdptPipeline(pass, pipeline, width, height);
         pass.end();
         return encoder;
