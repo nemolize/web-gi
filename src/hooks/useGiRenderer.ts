@@ -13,9 +13,12 @@ import type { LinearComparisonReport } from "@/gi/comparison-session";
 import { createFailureReporter } from "@/gi/diagnostics/failure-report";
 import {
   createPerformanceRecorder,
+  PERFORMANCE_CAPTURE_DURATION_MS,
+  PERFORMANCE_WARMUP_FRAMES,
   performanceCaptureLimits,
   type PerformanceMeasurement,
   type PerformanceProgress,
+  warmupBudgetMs,
 } from "@/gi/performance";
 import type { RendererActivity, RendererStats } from "@/gi/renderer";
 import { GiRenderer, WebGpuUnsupportedError } from "@/gi/renderer";
@@ -553,7 +556,11 @@ export const useGiRenderer = (
               );
             const timeoutId = window.setTimeout(onTimeout, timeoutMs);
             const startedAt = performance.now();
-            const recorder = createPerformanceRecorder();
+            const recorder = createPerformanceRecorder(
+              PERFORMANCE_CAPTURE_DURATION_MS,
+              PERFORMANCE_WARMUP_FRAMES,
+              warmupBudgetMs(renderer.stats.frameMs),
+            );
             measurementRef.current = {
               recorder,
               resolve,
