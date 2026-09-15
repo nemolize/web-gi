@@ -17,10 +17,15 @@ Repeatable benchmark runs can start from short query strings:
 wide DI candidate count, and several bounces — so the renderers are compared
 where the work is, not at defaults. `measure=auto` starts the standard
 three-run capture as soon as the renderer is ready. Each run first discards
-30 warmup frames, then samples for at least five seconds, ending on a reported
-frame. The UI shows warmup frame counts separately from sampled elapsed time;
-the five seconds excludes warmup, so slow rendering can take several minutes.
-Capture deadlines adapt to observed frame duration during warmup.
+warmup frames, then samples for at least five seconds, ending on a reported
+frame. Warmup ends at 30 frames or 6 seconds, whichever comes first, with a
+two-frame minimum, so its wall-clock cost no longer scales with frame duration:
+a renderer spending seconds per frame discards a few frames rather than 30. The
+budget scales down with the reported frame time, leaving a fast renderer at its
+full 30 frames. The UI shows warmup frames beside the elapsed budget, and
+`sampling.warmupFrames` reports the count actually discarded next to the
+`warmupBudgetMs` it ran under. The five seconds excludes warmup, and capture
+deadlines adapt to observed frame duration during warmup.
 The completed report remains available through `Copy result` and records the
 exact settings it ran at.
 

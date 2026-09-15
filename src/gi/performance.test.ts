@@ -5,8 +5,10 @@ import {
   aggregatePerformanceMeasurements,
   createPerformanceRecorder,
   formatPerformanceReport,
+  PERFORMANCE_WARMUP_MAX_MS,
   sanitizePerformanceReportUrl,
   summarizeDurations,
+  warmupBudgetMs,
 } from "@/gi/performance";
 import { DEFAULT_SETTINGS } from "@/gi/settings";
 
@@ -35,6 +37,7 @@ const measurement = (
       rejected: 0,
       coverage: 1,
       warmupFrames: 30,
+      warmupBudgetMs: 6_000,
     },
   },
   presentation: {
@@ -58,23 +61,29 @@ describe("performance capture", () => {
   });
 
   it("reports warmup frames separately from sampled elapsed time", () => {
-    const recorder = createPerformanceRecorder(5000, 2);
+    const recorder = createPerformanceRecorder(5000, 2, 60_000);
     expect(recorder.progress).toEqual({
       phase: "warmup",
       completedFrames: 0,
       totalFrames: 2,
+      elapsedMs: 0,
+      budgetMs: 60_000,
     });
     recorder.observe({ at: 2000, callbackIntervalMs: 2000, accepted: true });
     expect(recorder.progress).toEqual({
       phase: "warmup",
       completedFrames: 1,
       totalFrames: 2,
+      elapsedMs: 0,
+      budgetMs: 60_000,
     });
     recorder.observe({ at: 4000, callbackIntervalMs: 2000, accepted: true });
     expect(recorder.progress).toEqual({
       phase: "warmup",
       completedFrames: 2,
       totalFrames: 2,
+      elapsedMs: 2000,
+      budgetMs: 60_000,
     });
     recorder.observe({ at: 6000, callbackIntervalMs: 2000, accepted: true });
     expect(recorder.progress).toEqual({
@@ -103,7 +112,92 @@ describe("performance capture", () => {
       windowMs: 6000,
       callbacks: 3,
       warmupFrames: 2,
+      warmupBudgetMs: 60_000,
     });
+  });
+
+  it("ends warm-up on the time budget when frames are slow", () => {
+    // 30 frames at 2200ms would warm up for over a minute; the budget stops it
+    // at the third frame instead, which is what keeps a capture usable there.
+    const recorder = createPerformanceRecorder(100, 30, 6_000);
+    expect(
+      recorder.observe({ at: 0, callbackIntervalMs: 2_200, accepted: true }),
+    ).toBeNull();
+    expect(
+      recorder.observe({
+        at: 2_200,
+        callbackIntervalMs: 2_200,
+        accepted: true,
+      }),
+    ).toBeNull();
+    expect(recorder.progress).toMatchObject({
+      phase: "warmup",
+      completedFrames: 2,
+      elapsedMs: 2_200,
+    });
+
+    // Past the budget with the minimum met: this frame opens the window.
+    recorder.observe({ at: 6_600, callbackIntervalMs: 2_200, accepted: true });
+    expect(recorder.progress).toMatchObject({ phase: "sampling" });
+
+    const result = recorder.observe({
+      at: 8_800,
+      callbackIntervalMs: 2_200,
+      accepted: true,
+      gpu: gpuSample(2_100),
+    });
+    expect(result?.measurement.sampling).toMatchObject({
+      warmupFrames: 2,
+      warmupBudgetMs: 6_000,
+    });
+  });
+
+  it("keeps the minimum frame count when one frame outruns the budget", () => {
+    // A single frame longer than the whole budget must not open the window:
+    // that frame is the compilation cost the warm-up exists to discard.
+    const recorder = createPerformanceRecorder(100, 30, 1_000);
+    expect(
+      recorder.observe({ at: 0, callbackIntervalMs: 9_000, accepted: true }),
+    ).toBeNull();
+    expect(recorder.progress).toMatchObject({
+      phase: "warmup",
+      completedFrames: 1,
+    });
+    recorder.observe({ at: 9_000, callbackIntervalMs: 9_000, accepted: true });
+    expect(recorder.progress).toMatchObject({
+      phase: "warmup",
+      completedFrames: 2,
+    });
+    recorder.observe({ at: 18_000, callbackIntervalMs: 9_000, accepted: true });
+    expect(recorder.progress).toMatchObject({ phase: "sampling" });
+  });
+
+  it("reaches the frame count before the budget on a fast device", () => {
+    // A 16ms device spends 480ms on 30 frames, so nothing here is truncated.
+    const recorder = createPerformanceRecorder(100, 30, 6_000);
+    for (let index = 0; index < 30; index++) {
+      expect(
+        recorder.observe({
+          at: index * 16,
+          callbackIntervalMs: 16,
+          accepted: true,
+        }),
+      ).toBeNull();
+    }
+    expect(recorder.progress).toMatchObject({
+      phase: "warmup",
+      completedFrames: 30,
+      totalFrames: 30,
+    });
+    recorder.observe({ at: 480, callbackIntervalMs: 16, accepted: true });
+    expect(recorder.progress).toMatchObject({ phase: "sampling" });
+  });
+
+  it("scales the warm-up budget down for a fast device", () => {
+    expect(warmupBudgetMs(16)).toBe(480);
+    expect(warmupBudgetMs(2_200)).toBe(PERFORMANCE_WARMUP_MAX_MS);
+    expect(warmupBudgetMs(0)).toBe(PERFORMANCE_WARMUP_MAX_MS);
+    expect(warmupBudgetMs(Number.NaN)).toBe(PERFORMANCE_WARMUP_MAX_MS);
   });
 
   it("discards warm-up frames before opening the window", () => {
@@ -348,6 +442,7 @@ describe("performance capture", () => {
           rejected: 0,
           coverage: 0,
           warmupFrames: 30,
+          warmupBudgetMs: 6_000,
         },
       },
     };
