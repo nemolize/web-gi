@@ -417,7 +417,10 @@ describe("useGiRenderer", () => {
         nextFrame = null;
         frame?.(at);
       });
-    const start = performance.now();
+    // Whole milliseconds: `performance.now()` returns a fractional origin, and
+    // differencing two offsets from it leaves the elapsed values a rounding
+    // step away from the round numbers these assertions name.
+    const start = Math.ceil(performance.now());
     // The fake renderer reports 16ms frames, so the budget is 30 x 16 = 480ms
     // and these 500ms frames cross it rather than reaching the frame count.
     advance(start + 500);
