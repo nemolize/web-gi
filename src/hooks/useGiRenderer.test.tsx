@@ -364,12 +364,14 @@ describe("useGiRenderer", () => {
           nextFrame = null;
           frame?.((index + 1) * 2000);
         });
-        if (index === 29)
+        // 2000ms frames cross the 6s warm-up cap on the 4th, so sampling is
+        // already open well before the 30-frame count would have been reached.
+        if (index === 5)
           expect(
             JSON.parse(
               screen.getByTestId("performance-progress").textContent ?? "{}",
             ),
-          ).toMatchObject({ phase: "warmup", completedFrames: 30 });
+          ).toMatchObject({ phase: "sampling" });
       }
       expect(screen.getByTestId("capture-error")).toBeEmptyDOMElement();
       expect(screen.getByTestId("captured-callbacks")).toHaveTextContent("3");
@@ -400,6 +402,8 @@ describe("useGiRenderer", () => {
       phase: "warmup",
       completedFrames: 0,
       totalFrames: 30,
+      elapsedMs: 0,
+      budgetMs: 480,
     });
     const advance = (at: number) =>
       act(() => {
@@ -407,20 +411,35 @@ describe("useGiRenderer", () => {
         nextFrame = null;
         frame?.(at);
       });
-    const start = performance.now();
-    for (let index = 1; index <= 30; index++) advance(start + index * 500);
+    // Whole milliseconds: `performance.now()` returns a fractional origin, and
+    // differencing two offsets from it leaves the elapsed values a rounding
+    // step away from the round numbers these assertions name.
+    const start = Math.ceil(performance.now());
+    // The fake renderer reports 16ms frames, so the budget is 30 x 16 = 480ms
+    // and these 500ms frames cross it rather than reaching the frame count.
+    advance(start + 500);
     expect(progress()).toEqual({
       phase: "warmup",
-      completedFrames: 30,
+      completedFrames: 1,
       totalFrames: 30,
+      elapsedMs: 0,
+      budgetMs: 480,
     });
-    advance(start + 15500);
+    advance(start + 1000);
+    expect(progress()).toMatchObject({
+      phase: "warmup",
+      completedFrames: 2,
+      elapsedMs: 500,
+    });
+    // The minimum frame count is met and the budget is spent: the next frame
+    // sets the window origin instead of warming up again.
+    advance(start + 1500);
     expect(progress()).toEqual({
       phase: "sampling",
       elapsedMs: 0,
       durationMs: 5000,
     });
-    advance(start + 16000);
+    advance(start + 2000);
     expect(progress().elapsedMs).toBeCloseTo(500);
   });
 

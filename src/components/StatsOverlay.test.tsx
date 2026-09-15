@@ -40,6 +40,7 @@ const measurement: PerformanceMeasurement = {
       rejected: 0,
       coverage: 1,
       warmupFrames: 30,
+      warmupBudgetMs: 6_000,
     },
   },
   presentation: {
@@ -649,11 +650,13 @@ describe("StatsOverlay performance capture", () => {
         phase: "warmup",
         completedFrames: 12,
         totalFrames: 30,
+        elapsedMs: 2_400,
+        budgetMs: 6_000,
       }),
     );
     expect(
       screen.getByText(
-        "Warming up run 1 of 3: 12 / 30 frames before sampling.",
+        "Warming up run 1 of 3: 12 / 30 frames or 2.4 / 6.0 seconds, whichever finishes first.",
       ),
     ).toBeVisible();
     expect(screen.queryByText(/Measuring run 1/)).toBeNull();
