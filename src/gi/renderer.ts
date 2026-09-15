@@ -9,6 +9,7 @@ import {
 import type { BdptFrameSubmission } from "@/gi/bdpt/frame-submissions";
 import {
   bdptDispatchPixelLimit,
+  bdptSubmissionBatch,
   submitBdptFrame,
 } from "@/gi/bdpt/frame-submissions";
 import {
@@ -1818,7 +1819,6 @@ export class GiRenderer {
         },
       });
       this.submitTiledFrame(
-        this.bdpt,
         commands,
         commitFrame,
         output === "present",
@@ -1928,7 +1928,6 @@ export class GiRenderer {
   }
 
   private submitTiledFrame(
-    runtime: BdptRuntime,
     commands: readonly BdptFrameSubmission[],
     commit: () => void,
     present: boolean,
@@ -1948,7 +1947,6 @@ export class GiRenderer {
     };
     this.bdptPresentation = submitBdptFrame(
       this.device.queue,
-      runtime.dispatchRegion,
       commands,
       () =>
         !this.destroyed &&
@@ -1972,7 +1970,7 @@ export class GiRenderer {
           if (commands[index - 1]?.label !== command.label)
             stageStartedAt = performance.now();
           this.report?.(
-            `BDPT SUBMIT ${sequence} ${command.label} / chunk ${index + 1}/${commands.length}${command.region ? ` / region=${command.region.join(",")}` : ""}`,
+            `BDPT SUBMIT ${sequence} ${command.label} / chunk ${index + 1}/${commands.length}`,
           );
         }
         if (done && commands[index + 1]?.label !== command.label)
@@ -1980,6 +1978,7 @@ export class GiRenderer {
             `BDPT COMPLETE ${sequence} ${command.label} (${Math.round(performance.now() - stageStartedAt)} ms)`,
           );
       },
+      bdptSubmissionBatch(window.location.search),
     )
       .then(async (finished) => {
         if (finished && timing) {

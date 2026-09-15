@@ -429,11 +429,8 @@ describe("useGiRenderer", () => {
       budgetMs: 480,
     });
     advance(start + 1000);
-    expect(progress()).toMatchObject({
-      phase: "warmup",
-      completedFrames: 2,
-      elapsedMs: 500,
-    });
+    expect(progress()).toMatchObject({ phase: "warmup", completedFrames: 2 });
+    expect(progress().elapsedMs).toBeCloseTo(500);
     // The minimum frame count is met and the budget is spent: the next frame
     // sets the window origin instead of warming up again.
     advance(start + 1500);

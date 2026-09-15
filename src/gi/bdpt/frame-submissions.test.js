@@ -1,6 +1,10 @@
 import { expect, test, vi } from "vitest";
 
-import { bdptDispatchPixelLimit, submitBdptFrame } from "./frame-submissions";
+import {
+  bdptDispatchPixelLimit,
+  bdptSubmissionBatch,
+  submitBdptFrame,
+} from "./frame-submissions";
 
 test("dispatch cap detects Adreno and accepts an explicit disabled or bounded cap", () => {
   const mobile = {
@@ -20,18 +24,25 @@ test("dispatch cap detects Adreno and accepts an explicit disabled or bounded ca
     );
 });
 
-test("each region write precedes its submission and final presentation is acquired only after tiles finish", async () => {
+test("submission batch reads the query and clamps an absurd value", () => {
+  expect(bdptSubmissionBatch("")).toBe(8);
+  expect(bdptSubmissionBatch("?bdptSubmissionBatch=1")).toBe(1);
+  expect(bdptSubmissionBatch("?bdptSubmissionBatch=64")).toBe(64);
+  expect(bdptSubmissionBatch("?bdptSubmissionBatch=99999")).toBe(1024);
+  for (const value of ["0", "-1", "NaN", "1.5", ""])
+    expect(bdptSubmissionBatch(`?bdptSubmissionBatch=${value}`)).toBe(8);
+});
+
+test("tiles share one completion wait and presentation is acquired only after they finish", async () => {
   const events = [];
   const waits = [];
   const queue = {
-    writeBuffer: (_buffer, _offset, region) =>
-      events.push(["region", ...region]),
     submit: (buffers) => events.push(["submit", ...buffers]),
     onSubmittedWorkDone: () => new Promise((resolve) => waits.push(resolve)),
   };
   const commands = [
-    { label: "camera", region: [0, 0, 8, 8], finish: () => "first" },
-    { label: "camera", region: [8, 0, 3, 8], finish: () => "second" },
+    { label: "camera", finish: () => "first" },
+    { label: "camera", finish: () => "second" },
     {
       label: "present",
       finish: () => {
@@ -41,40 +52,70 @@ test("each region write precedes its submission and final presentation is acquir
     },
   ];
   const progress = vi.fn();
-  const running = submitBdptFrame(queue, {}, commands, () => true, progress);
+  const running = submitBdptFrame(queue, commands, () => true, progress, 2);
+
+  // Both tiles go out before anything is awaited: that is the reclaimed time.
   expect(events).toEqual([
-    ["region", 0, 0, 8, 8],
     ["submit", "first"],
-  ]);
-  waits.shift()();
-  await Promise.resolve();
-  expect(events.slice(-2)).toEqual([
-    ["region", 8, 0, 3, 8],
     ["submit", "second"],
   ]);
+  expect(waits).toHaveLength(1);
+
   waits.shift()();
+  await Promise.resolve();
   await Promise.resolve();
   expect(events.slice(-2)).toEqual([
     ["acquire presentation"],
     ["submit", "present"],
   ]);
+
   waits.shift()();
   expect(await running).toBe(true);
+  // Progress still counts submissions, so the batch reports both of its tiles.
   expect(progress.mock.calls).toEqual([
     [0, false],
-    [0, true],
     [1, false],
+    [0, true],
     [1, true],
     [2, false],
     [2, true],
   ]);
 });
 
+test("a batch is drained before presentation so a late invalidation still stops it", async () => {
+  let valid = true;
+  const waits = [];
+  const acquired = vi.fn();
+  const queue = {
+    submit: vi.fn(),
+    onSubmittedWorkDone: () => new Promise((resolve) => waits.push(resolve)),
+  };
+  const running = submitBdptFrame(
+    queue,
+    [
+      { label: "camera", finish: () => ({}) },
+      { label: "camera", finish: () => ({}) },
+      { label: "present", finish: acquired },
+    ],
+    () => valid,
+    vi.fn(),
+    8,
+  );
+  // Both tiles are in flight under one wait; presentation has not been encoded.
+  expect(queue.submit).toHaveBeenCalledTimes(2);
+  expect(acquired).not.toHaveBeenCalled();
+
+  valid = false;
+  waits.shift()();
+  expect(await running).toBe(false);
+  expect(acquired).not.toHaveBeenCalled();
+  expect(queue.submit).toHaveBeenCalledTimes(2);
+});
+
 test("invalidation during a tile prevents subsequent submissions and presentation", async () => {
   let valid = true;
   let release;
   const queue = {
-    writeBuffer: vi.fn(),
     submit: vi.fn(),
     onSubmittedWorkDone: () =>
       new Promise((resolve) => {
@@ -84,7 +125,6 @@ test("invalidation during a tile prevents subsequent submissions and presentatio
   const finish = vi.fn();
   const running = submitBdptFrame(
     queue,
-    {},
     [
       { label: "camera", finish: () => ({}) },
       { label: "present", finish },
@@ -102,14 +142,12 @@ test("invalidation during a tile prevents subsequent submissions and presentatio
 test("a failed completion propagates and stops the frame", async () => {
   const failure = new Error("device lost");
   const queue = {
-    writeBuffer: vi.fn(),
     submit: vi.fn(),
     onSubmittedWorkDone: vi.fn().mockRejectedValue(failure),
   };
   await expect(
     submitBdptFrame(
       queue,
-      {},
       [
         { label: "camera", finish: () => ({}) },
         { label: "present", finish: vi.fn() },
