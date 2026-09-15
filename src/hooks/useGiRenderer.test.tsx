@@ -68,7 +68,8 @@ const createFakeRenderer = (): FakeRenderer => {
     deviceLost,
     destroy,
     allocationError: null,
-    renderFrame: vi.fn(),
+    activity: null,
+    renderFrame: vi.fn(() => true),
     setSettings: vi.fn(),
     notifyCameraChanged: vi.fn(),
     supportsGpuTiming: false,
@@ -106,6 +107,7 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
     canvasRef,
     status,
     errorMessage,
+    errorReport,
     retryRenderer,
     updateSettings,
     measurePerformance,
@@ -128,6 +130,7 @@ const RendererHarness = ({ rendererFactory }: RendererHarnessProps) => {
       <canvas ref={canvasRef} />
       <output data-testid="status">{status}</output>
       <output data-testid="error">{errorMessage}</output>
+      <output data-testid="report">{errorReport}</output>
       <button
         type="button"
         onClick={() => updateSettings({ resolutionScale: 0.5 })}
@@ -289,6 +292,7 @@ describe("useGiRenderer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Lower resolution" }));
 
     await act(async () => {
+      first.setStats({ accumFrames: 42 });
       first.lose("unknown", "GPU reset");
       await first.renderer.deviceLost;
     });
@@ -298,6 +302,8 @@ describe("useGiRenderer", () => {
       "The WebGPU device was lost: GPU reset",
     );
     expect(cancelAnimationFrame).toHaveBeenCalled();
+    expect(screen.getByTestId("report")).toHaveTextContent("GPU reset");
+    expect(screen.getByTestId("report")).toHaveTextContent('"accumFrames":42');
     expect(first.destroy).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -364,12 +370,14 @@ describe("useGiRenderer", () => {
           nextFrame = null;
           frame?.((index + 1) * 2000);
         });
-        if (index === 29)
+        // 2000ms frames cross the 6s warm-up cap on the 4th, so sampling is
+        // already open well before the 30-frame count would have been reached.
+        if (index === 5)
           expect(
             JSON.parse(
               screen.getByTestId("performance-progress").textContent ?? "{}",
             ),
-          ).toMatchObject({ phase: "warmup", completedFrames: 30 });
+          ).toMatchObject({ phase: "sampling" });
       }
       expect(screen.getByTestId("capture-error")).toBeEmptyDOMElement();
       expect(screen.getByTestId("captured-callbacks")).toHaveTextContent("3");
@@ -400,6 +408,8 @@ describe("useGiRenderer", () => {
       phase: "warmup",
       completedFrames: 0,
       totalFrames: 30,
+      elapsedMs: 0,
+      budgetMs: 480,
     });
     const advance = (at: number) =>
       act(() => {
@@ -408,19 +418,28 @@ describe("useGiRenderer", () => {
         frame?.(at);
       });
     const start = performance.now();
-    for (let index = 1; index <= 30; index++) advance(start + index * 500);
+    // The fake renderer reports 16ms frames, so the budget is 30 x 16 = 480ms
+    // and these 500ms frames cross it rather than reaching the frame count.
+    advance(start + 500);
     expect(progress()).toEqual({
       phase: "warmup",
-      completedFrames: 30,
+      completedFrames: 1,
       totalFrames: 30,
+      elapsedMs: 0,
+      budgetMs: 480,
     });
-    advance(start + 15500);
+    advance(start + 1000);
+    expect(progress()).toMatchObject({ phase: "warmup", completedFrames: 2 });
+    expect(progress().elapsedMs).toBeCloseTo(500);
+    // The minimum frame count is met and the budget is spent: the next frame
+    // sets the window origin instead of warming up again.
+    advance(start + 1500);
     expect(progress()).toEqual({
       phase: "sampling",
       elapsedMs: 0,
       durationMs: 5000,
     });
-    advance(start + 16000);
+    advance(start + 2000);
     expect(progress().elapsedMs).toBeCloseTo(500);
   });
 
@@ -457,6 +476,38 @@ describe("useGiRenderer", () => {
     await waitFor(() =>
       expect(screen.getByTestId("captured-callbacks")).toHaveTextContent("125"),
     );
+  });
+
+  it("does not count animation callbacks while GPU submission is blocked", async () => {
+    const fake = createFakeRenderer();
+    vi.mocked(fake.renderer.renderFrame).mockReturnValue(false);
+    const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+    let nextFrame: FrameRequestCallback | null = null;
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        nextFrame = callback;
+        return 1;
+      }),
+    );
+    render(<RendererHarness rendererFactory={create} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Measure" }));
+    act(() => {
+      for (let now = 0; now <= 11_000; now += 40) {
+        const frame = nextFrame;
+        nextFrame = null;
+        frame?.(now);
+      }
+    });
+    expect(screen.getByTestId("captured-callbacks")).toBeEmptyDOMElement();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PERFORMANCE_CAPTURE_TIMEOUT_MS + 1);
+    });
+    expect(screen.getByTestId("capture-error")).toHaveTextContent("timed out");
   });
 
   it("keeps stats snapshots on the throttled cadence while idle", async () => {
@@ -541,6 +592,37 @@ describe("useGiRenderer", () => {
         "Performance capture stopped because the render configuration changed.",
       ),
     );
+  });
+
+  it("captures slow BDPT frames through warmup without timing out", async () => {
+    window.history.replaceState(null, "", "/?restir=bdpt");
+    const fake = createFakeRenderer();
+    fake.setStats({ frameMs: 2200 });
+    const create = vi.fn<RendererFactory>().mockResolvedValue(fake.renderer);
+    let nextFrame: FrameRequestCallback | null = null;
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        nextFrame = callback;
+        return 1;
+      }),
+    );
+    render(<RendererHarness rendererFactory={create} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Measure" }));
+    for (let index = 0; index < 34; index++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2200);
+        const frame = nextFrame;
+        nextFrame = null;
+        frame?.((index + 1) * 2200);
+      });
+    }
+    expect(screen.getByTestId("capture-error")).toBeEmptyDOMElement();
+    expect(screen.getByTestId("captured-callbacks")).toHaveTextContent("3");
   });
 
   it.each([16, 2000])(
@@ -682,6 +764,7 @@ describe("useGiRenderer", () => {
     });
     vi.mocked(fake.renderer.renderFrame).mockImplementation((camera) => {
       currentCamera = camera;
+      return true;
     });
     fake.compareReferenceAfter.mockImplementation((label) => {
       if (label !== "restir" && label !== "path-traced") {

@@ -58,8 +58,8 @@ describe("interaction target reuse", () => {
     expect(renderer.historyFrames).toBe(0);
   });
 
-  it.each([16, 200])(
-    "restores presentation gradually with %i ms frame intervals",
+  it.each([16, 200, 14000])(
+    "restores presentation by elapsed time with %i ms frame intervals",
     (interval) => {
       const renderer = rendererWithTargets();
       renderer.ensureTargets();
@@ -79,12 +79,14 @@ describe("interaction target reuse", () => {
         now += interval;
         const blend = advance();
         expect(blend).toBeLessThan(previous);
-        expect(previous - blend).toBeLessThanOrEqual(0.250001);
+        expect(blend).toBeCloseTo(
+          Math.max(0, 1 - ((frames + 1) * interval) / 120),
+        );
         previous = blend;
         frames += 1;
       }
       expect(previous).toBe(0);
-      expect(frames).toBeGreaterThanOrEqual(4);
+      expect(frames).toBe(Math.ceil(120 / interval));
       expect(renderer.presentationTransition).toBeNull();
     },
   );
