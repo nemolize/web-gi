@@ -12,15 +12,41 @@ export const PERFORMANCE_CAPTURE_RUN_COUNT = 3;
  */
 export const PERFORMANCE_WARMUP_FRAMES = 30;
 
+/**
+ * Upper bound on warm-up wall time. The frame count is what the warm-up is
+ * actually for, and it is reached in well under a second on a fast device; a
+ * renderer spending seconds per frame would instead spend minutes reaching it,
+ * far past the point where compilation and clock ramp have settled.
+ */
+export const PERFORMANCE_WARMUP_MAX_MS = 6_000;
+
+/**
+ * Frames the warm-up never drops below, however slow they are. A window opened
+ * on the very first frame would sit on compilation cost.
+ */
+export const PERFORMANCE_WARMUP_MIN_FRAMES = 2;
+
+/**
+ * Warm-up ends at whichever bound arrives first, so the wall-clock cost of a
+ * capture no longer scales with frame duration.
+ */
+export const warmupBudgetMs = (frameMs: number): number =>
+  Number.isFinite(frameMs) && frameMs > 0
+    ? Math.min(PERFORMANCE_WARMUP_MAX_MS, PERFORMANCE_WARMUP_FRAMES * frameMs)
+    : PERFORMANCE_WARMUP_MAX_MS;
+
 export const performanceCaptureLimits = (frameMs: number) => {
   const frameBudgetMs =
     Number.isFinite(frameMs) && frameMs > 0 ? frameMs * 4 : 0;
+  // The minimum frame count outlives the time cap on a slow device, so the
+  // timeout has to cover it rather than the cap alone.
+  const warmupMs =
+    warmupBudgetMs(frameMs) + PERFORMANCE_WARMUP_MIN_FRAMES * frameBudgetMs;
   return {
     maxFrameGapMs: Math.max(1_000, frameBudgetMs),
     timeoutMs: Math.max(
-      PERFORMANCE_CAPTURE_DURATION_MS + PERFORMANCE_WARMUP_FRAMES * 100 + 2_000,
-      PERFORMANCE_CAPTURE_DURATION_MS +
-        (PERFORMANCE_WARMUP_FRAMES + 2) * frameBudgetMs,
+      PERFORMANCE_CAPTURE_DURATION_MS + PERFORMANCE_WARMUP_MAX_MS + 2_000,
+      PERFORMANCE_CAPTURE_DURATION_MS + warmupMs + 2 * frameBudgetMs,
     ),
   };
 };
@@ -62,6 +88,8 @@ export interface SamplingSummary {
   readonly rejected: number;
   readonly coverage: number;
   readonly warmupFrames: number;
+  /** The wall-clock bound the warm-up ran under, for reading `warmupFrames`. */
+  readonly warmupBudgetMs: number;
 }
 
 /**
@@ -166,6 +194,8 @@ export type PerformanceProgress =
       readonly phase: "warmup";
       readonly completedFrames: number;
       readonly totalFrames: number;
+      readonly elapsedMs: number;
+      readonly budgetMs: number;
     }
   | {
       readonly phase: "sampling";
@@ -260,9 +290,12 @@ const isVsyncBound = (
 export const createPerformanceRecorder = (
   durationMs = PERFORMANCE_CAPTURE_DURATION_MS,
   warmupFrames = PERFORMANCE_WARMUP_FRAMES,
+  warmupMaxMs = PERFORMANCE_WARMUP_MAX_MS,
 ): PerformanceRecorder => {
   let startedAt: number | null = null;
   let warmedFrames = 0;
+  let warmupFirstAt: number | null = null;
+  let warmupElapsedMs = 0;
   let completed = false;
   let elapsedMs = 0;
   let callbacks = 0;
@@ -271,6 +304,17 @@ export const createPerformanceRecorder = (
   const intervals: number[] = [];
   const gpuSamples: GpuFrameSample[] = [];
 
+  // The minimum wins over the time cap so a single very slow frame cannot open
+  // the window; the cap wins over the frame count so warm-up wall time stays
+  // bounded. `warmupFrames` below the minimum is honoured as written, which is
+  // what lets a test warm up zero frames.
+  const warmupComplete = (at: number): boolean => {
+    if (warmedFrames >= warmupFrames) return true;
+    if (warmedFrames < Math.min(PERFORMANCE_WARMUP_MIN_FRAMES, warmupFrames))
+      return false;
+    return warmupFirstAt !== null && at - warmupFirstAt >= warmupMaxMs;
+  };
+
   const finish = (windowMs: number): RecorderResult => {
     const sampling: SamplingSummary = {
       windowMs,
@@ -278,7 +322,8 @@ export const createPerformanceRecorder = (
       sampled: gpuSamples.length,
       rejected,
       coverage: callbacks > 0 ? gpuSamples.length / callbacks : 0,
-      warmupFrames,
+      warmupFrames: warmedFrames,
+      warmupBudgetMs: warmupMaxMs,
     };
     const callbackIntervalMs = summarizeDurations(intervals);
     const displayPeriodMs = matchDisplayPeriod(intervals);
@@ -335,13 +380,17 @@ export const createPerformanceRecorder = (
             phase: "warmup",
             completedFrames: warmedFrames,
             totalFrames: warmupFrames,
+            elapsedMs: warmupElapsedMs,
+            budgetMs: warmupMaxMs,
           }
         : { phase: "sampling", elapsedMs, durationMs };
     },
     observe: (frame) => {
       if (completed) return null;
-      if (warmedFrames < warmupFrames) {
+      if (!warmupComplete(frame.at)) {
         warmedFrames += 1;
+        warmupFirstAt ??= frame.at;
+        warmupElapsedMs = frame.at - warmupFirstAt;
         return null;
       }
       if (startedAt === null) {

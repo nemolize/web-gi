@@ -98,10 +98,16 @@ user observations, not matched performance measurements.
 ## Measuring the normal tiled renderer
 
 Open the normal BDPT preview and use **Measure**, then **Copy result**. The
-three captures each discard 30 warmup frames before a five-second sampling
-window; at 2200 ms/frame this takes several minutes. Keep the page visible and
-the camera and settings fixed. The capture timeout and interruption threshold
-allow slow BDPT frames.
+three captures each discard warmup frames before a five-second sampling window.
+Warm-up ends at 30 frames or 6 seconds, whichever comes first, with a two-frame
+minimum, so a 2200 ms/frame device discards 3 frames rather than 30. The budget
+scales down with the reported frame time, leaving a fast device at its full 30
+frames. Keep the page visible and the camera and settings fixed. The capture
+timeout and interruption threshold allow slow BDPT frames.
+
+`runs[].measurement.sampling` reports `warmupFrames` actually discarded beside
+the `warmupBudgetMs` they ran under, so a truncated warm-up is visible in the
+report rather than inferred from frame duration.
 
 The copied `runs[].measurement.passMs` aggregates GPU timestamps for camera
 paths, light paths, gathering, caustic reprojection, temporal reuse, spatial

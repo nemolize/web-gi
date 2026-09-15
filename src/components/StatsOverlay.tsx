@@ -26,6 +26,7 @@ import {
   PERFORMANCE_CAPTURE_DURATION_MS,
   PERFORMANCE_CAPTURE_RUN_COUNT,
   PERFORMANCE_WARMUP_FRAMES,
+  PERFORMANCE_WARMUP_MAX_MS,
   type PerformanceCapture,
   type PerformanceMeasurement,
   type PerformanceProgress,
@@ -47,7 +48,10 @@ const describeMeasurementProgress = (
   const runLabel = `run ${String(run)} of ${String(PERFORMANCE_CAPTURE_RUN_COUNT)}`;
   if (progress?.phase === "sampling")
     return `Measuring ${runLabel}: ${(progress.elapsedMs / 1_000).toFixed(1)} / ${String(progress.durationMs / 1_000)} seconds. Updates as frames are reported.`;
-  return `Warming up ${runLabel}: ${String(progress?.completedFrames ?? 0)} / ${String(progress?.totalFrames ?? PERFORMANCE_WARMUP_FRAMES)} frames before sampling.`;
+  const frames = `${String(progress?.completedFrames ?? 0)} / ${String(progress?.totalFrames ?? PERFORMANCE_WARMUP_FRAMES)} frames`;
+  if (progress?.phase !== "warmup")
+    return `Warming up ${runLabel}: ${frames} before sampling.`;
+  return `Warming up ${runLabel}: ${frames} or ${(progress.elapsedMs / 1_000).toFixed(1)} / ${(progress.budgetMs / 1_000).toFixed(1)} seconds, whichever finishes first.`;
 };
 
 export type StatsOverlayProps = {
@@ -533,7 +537,7 @@ export const StatsOverlay = ({
               : captureStatus === "copied"
                 ? "Result copied to clipboard."
                 : (captureError ??
-                  `Each run warms up for ${String(PERFORMANCE_WARMUP_FRAMES)} frames, then samples for at least ${String(PERFORMANCE_CAPTURE_DURATION_MS / 1_000)} seconds. Slow rendering can take several minutes.`)}
+                  `Each run warms up for ${String(PERFORMANCE_WARMUP_FRAMES)} frames or ${String(PERFORMANCE_WARMUP_MAX_MS / 1_000)} seconds, whichever comes first, then samples for at least ${String(PERFORMANCE_CAPTURE_DURATION_MS / 1_000)} seconds.`)}
         </p>
       </div>
     </section>
