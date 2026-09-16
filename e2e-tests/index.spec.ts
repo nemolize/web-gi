@@ -412,7 +412,7 @@ test.describe("mobile controls", () => {
 
     await page.keyboard.press("Shift+Tab");
     await expect(
-      panel.getByRole("button", { name: "Reset view" }),
+      panel.getByRole("link", { name: "GPU diagnostics" }),
     ).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(closeButton).toBeFocused();

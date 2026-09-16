@@ -588,3 +588,17 @@ describe("requiresAccumulationReset", () => {
     },
   );
 });
+
+it("retains only valid BDPT execution overrides in shared measurement URLs", () => {
+  expect(
+    sanitizedRenderQueryParams(
+      "?restir=bdpt&bdptWorkgroupSize=4&bdptDispatchPixels=4096&token=private",
+    ).toString(),
+  ).toBe("bdptWorkgroupSize=4&bdptDispatchPixels=4096&restir=bdpt");
+  for (const value of ["-1", "NaN", "1.5", "9007199254740992"])
+    expect(
+      sanitizedRenderQueryParams(
+        `?bdptDispatchPixels=${value}&bdptWorkgroupSize=2`,
+      ).toString(),
+    ).toBe("");
+});

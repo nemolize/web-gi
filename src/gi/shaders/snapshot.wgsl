@@ -9,9 +9,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   if (any(pixel >= vec2u(uni.transition.xy))) {
     return;
   }
-  let radiance = textureLoad(texColor, pixel, 0).xyz
+  var radiance = textureLoad(texColor, pixel, 0).xyz
     * textureLoad(texAlbedo, pixel, 0).xyz
     + textureLoad(texEmission, pixel, 0).xyz;
+  if ((uni.flags & FLAG_BDPT) != 0u) { radiance = textureLoad(texColor, pixel, 0).xyz; }
   textureStore(outSnapshot, pixel,
     vec4f(linearToSrgb(acesFilmic(radiance * uni.exposure)), 1.0));
 }

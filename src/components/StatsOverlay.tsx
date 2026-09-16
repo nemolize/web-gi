@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { RuntimeResources } from "@/components/RuntimeResources";
 import type {
   ComparisonMatrixProgress,
   LinearComparisonMatrixReport,
@@ -416,7 +417,7 @@ export const StatsOverlay = ({
       aria-busy={captureStatus === "measuring" || isComparing}
       className="absolute top-3 left-3 z-20 max-w-[calc(100vw-7rem)] rounded-lg bg-neutral-950/80 px-3 py-2 backdrop-blur"
     >
-      <dl className="grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 font-mono text-xs text-neutral-400">
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 font-mono text-xs text-neutral-400">
         <dt>resolution</dt>
         <dd className="text-right text-neutral-200">
           {stats.width}×{stats.height}
@@ -427,6 +428,7 @@ export const StatsOverlay = ({
         </dd>
         <dt>fps</dt>
         <dd className="text-right text-neutral-200">{fps.toFixed(0)}</dd>
+        <RuntimeResources />
         <dt>a-trous</dt>
         <dd className="text-right text-neutral-200">
           {stats.atrousVariant ?? "—"}

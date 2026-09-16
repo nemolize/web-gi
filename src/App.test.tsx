@@ -27,7 +27,10 @@ const renderApp = (status: RendererStatus): void => {
       atrousVariant: "tiled-16",
     },
     status,
+    activity: null,
     errorMessage: status === "error" ? "boom" : null,
+    errorReport:
+      status === "error" ? "Renderer failure report v1\nERROR boom" : null,
     measurePerformance: vi.fn(),
     saveComparisonReference: vi.fn(),
     compareReferenceAfter: vi.fn(),
@@ -62,7 +65,9 @@ describe("stats HUD", () => {
       expect(
         screen.queryByRole("region", { name: "Stats" }),
       ).not.toBeInTheDocument();
-      expect(screen.getByRole("alert")).toBeInTheDocument();
+      expect(
+        screen.getByRole(status === "initializing" ? "status" : "alert"),
+      ).toBeInTheDocument();
     },
   );
 });
