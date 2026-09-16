@@ -13,12 +13,15 @@ test("batched BDPT defers scene changes while a tile is pending and exposes prog
       if (buffer.label.startsWith("bdpt-history-")) window.__historyClears++;
       return clear.call(this, buffer, ...rest);
     };
-    const write = GPUQueue.prototype.writeBuffer;
-    GPUQueue.prototype.writeBuffer = function (buffer, offset, data, ...rest) {
-      if (window.__armTileHold && buffer.label === "bdpt-dispatch-region") {
+    // Keyed on the tile's own compute pass rather than a region write: regions
+    // are written once when the dispatch is built, so a per-frame hook must
+    // watch something each tile still does every frame.
+    const begin = GPUCommandEncoder.prototype.beginComputePass;
+    GPUCommandEncoder.prototype.beginComputePass = function (descriptor) {
+      if (window.__armTileHold && descriptor?.label?.startsWith("bdpt-")) {
         window.__tileWritten = true;
       }
-      return write.call(this, buffer, offset, data, ...rest);
+      return begin.call(this, descriptor);
     };
     const done = GPUQueue.prototype.onSubmittedWorkDone;
     GPUQueue.prototype.onSubmittedWorkDone = async function () {
