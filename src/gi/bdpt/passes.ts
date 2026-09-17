@@ -3,6 +3,7 @@ import { createBdptInitialPasses } from "@/gi/bdpt/initial-passes";
 import type {
   BdptCheckpoint,
   BdptDispatch,
+  BdptPipeline,
   BdptProgressReporter,
 } from "@/gi/bdpt/pipeline";
 import {
@@ -14,7 +15,19 @@ import reproject from "@/gi/shaders/bdpt-caustic-reproject.wgsl?raw";
 import spatial from "@/gi/shaders/bdpt-spatial.wgsl?raw";
 import temporal from "@/gi/shaders/bdpt-temporal.wgsl?raw";
 
+export interface BdptSpatialExperiment {
+  readonly workgroups: Readonly<Record<string, number>>;
+  select(candidate: boolean): void;
+  recordFrozen(
+    encoder: GPUCommandEncoder,
+    scene: GPUBindGroup,
+    checkpoint: BdptCheckpoint,
+  ): GPUCommandEncoder;
+}
+
 export interface BdptPasses {
+  readonly workgroups: Readonly<Record<string, number>>;
+  prepareSpatialExperiment(source: string): Promise<BdptSpatialExperiment>;
   readonly initialReservoirs: GPUBuffer;
   readonly reservoirs: GPUBuffer;
   readonly lightPathCount: number;
@@ -147,9 +160,56 @@ export const createBdptPasses = async (
       const spatialGroups = history.map((source) =>
         bind(spatialLayout, [source, scratch]),
       );
+      let selectedSpatial = spatialPipeline;
+      let lastSpatialParity: number | null = null;
       let parity = 0;
       let reset = true;
       return {
+        workgroups: {
+          ...initial.workgroups,
+          ...Object.fromEntries(
+            [temporalPipeline, spatialPipeline, reprojectPipeline].map((p) => [
+              p.pipeline.label,
+              p.workgroupSize,
+            ]),
+          ),
+        },
+        prepareSpatialExperiment: async (source) => {
+          const candidate: BdptPipeline = await createBdptPipeline(
+            device,
+            sceneLayout,
+            "bdpt-spatial-candidate",
+            source,
+            spatialLayout,
+            report,
+            maxVertices,
+          );
+          if (candidate.workgroupSize !== spatialPipeline.workgroupSize)
+            throw new Error(
+              "Spatial workgroup sizes differ; this comparison is not controlled.",
+            );
+          return {
+            workgroups: {
+              baseline: spatialPipeline.workgroupSize,
+              candidate: candidate.workgroupSize,
+            },
+            select: (useCandidate) => {
+              selectedSpatial = useCandidate ? candidate : spatialPipeline;
+            },
+            recordFrozen: (encoder, scene, checkpoint) => {
+              if (lastSpatialParity === null)
+                throw new Error("No spatial input has been rendered.");
+              return recordBdptDispatch(
+                encoder,
+                selectedSpatial,
+                scene,
+                spatialGroups[lastSpatialParity],
+                initial.dispatch,
+                checkpoint,
+              );
+            },
+          };
+        },
         initialReservoirs: initial.reservoirs,
         get reservoirs() {
           return scratch;
@@ -167,11 +227,12 @@ export const createBdptPasses = async (
             reset = false;
           }
           encoder.clearBuffer(nodes);
+          lastSpatialParity = parity;
           if (checkpoint) {
             for (const [pipeline, groups] of [
               [reprojectPipeline, reprojectGroups],
               [temporalPipeline, temporalGroups],
-              [spatialPipeline, spatialGroups],
+              [selectedSpatial, spatialGroups],
             ] as const) {
               encoder = recordBdptDispatch(
                 encoder,
@@ -196,7 +257,7 @@ export const createBdptPasses = async (
           for (const [pipeline, groups] of [
             [reprojectPipeline, reprojectGroups],
             [temporalPipeline, temporalGroups],
-            [spatialPipeline, spatialGroups],
+            [selectedSpatial, spatialGroups],
           ] as const) {
             sharedPass.setBindGroup(1, groups[parity]);
             dispatchBdptPipeline(sharedPass, pipeline, width, height);
