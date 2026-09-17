@@ -56,6 +56,11 @@ export const createBdptRuntime = async (
     );
     const groups = new Map<GPUBuffer, GPUBindGroup>();
     return {
+      workgroups: {
+        ...passes.workgroups,
+        [pipeline.pipeline.label]: pipeline.workgroupSize,
+      },
+      prepareSpatialExperiment: passes.prepareSpatialExperiment,
       width,
       height,
       maxVertices,

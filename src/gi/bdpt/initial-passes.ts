@@ -16,6 +16,7 @@ import lightPass from "@/gi/shaders/bdpt-initial-light.wgsl?raw";
 
 export interface BdptInitialPasses {
   readonly reservoirs: GPUBuffer;
+  readonly workgroups: Readonly<Record<string, number>>;
   readonly lightPathCount: number;
   readonly dispatch: BdptDispatch;
   readonly dispatchRegion: GPUBuffer;
@@ -148,6 +149,9 @@ export const createBdptInitialPasses = async (
       ];
       const pipelines = [cameraPipeline, lightPipeline, gatherPipeline];
       return {
+        workgroups: Object.fromEntries(
+          pipelines.map((p) => [p.pipeline.label, p.workgroupSize]),
+        ),
         reservoirs,
         lightPathCount: pixels,
         dispatch,

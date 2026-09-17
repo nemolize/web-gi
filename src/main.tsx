@@ -10,9 +10,11 @@ if (!rootElement) throw new Error("Failed to find the root element");
 
 const params = new URLSearchParams(location.search);
 const Application =
-  params.has("diagnostics") || params.has("bdptDiagnostics")
-    ? lazy(() => import("@/components/GpuDiagnostics"))
-    : App;
+  params.get("diagnostics") === "bdpt-spatial-ab"
+    ? lazy(() => import("@/components/BdptSpatialComparison"))
+    : params.has("diagnostics") || params.has("bdptDiagnostics")
+      ? lazy(() => import("@/components/GpuDiagnostics"))
+      : App;
 
 createRoot(rootElement).render(
   <StrictMode>

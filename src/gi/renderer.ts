@@ -669,7 +669,9 @@ export class GiRenderer {
     canvas: HTMLCanvasElement,
     settings: RenderSettings,
     report?: (line: string) => void,
+    signal?: AbortSignal,
   ): Promise<GiRenderer> {
+    signal?.throwIfAborted();
     const gpu: GPU | undefined = navigator.gpu;
     if (gpu === undefined) {
       throw new WebGpuUnsupportedError(
@@ -679,6 +681,7 @@ export class GiRenderer {
     const adapter = await gpu.requestAdapter({
       powerPreference: "high-performance",
     });
+    signal?.throwIfAborted();
     if (adapter === null) {
       throw new WebGpuUnsupportedError("No suitable GPU adapter was found.");
     }
@@ -710,6 +713,10 @@ export class GiRenderer {
         ? { requiredFeatures: [timestamps] }
         : {}),
     });
+    if (signal?.aborted === true) {
+      device.destroy();
+      signal.throwIfAborted();
+    }
     const bdptWorkgroupLimit = configureBdptWorkgroups(
       device,
       window.location.search,
@@ -2071,9 +2078,11 @@ export class GiRenderer {
   ): Promise<T> {
     const remainingMs = deadline - performance.now();
     if (remainingMs <= 0) {
+      void operation.catch(() => {});
       return Promise.reject(new Error("The comparison timed out."));
     }
     if (signal.aborted) {
+      void operation.catch(() => {});
       return Promise.reject(
         signal.reason instanceof Error
           ? signal.reason
@@ -2303,6 +2312,106 @@ export class GiRenderer {
       accumFrames: this.accumFrames,
       details: { ...referenceDetails, settings: { ...this.settings } },
     };
+  }
+
+  async compareBdptSpatial(
+    camera: OrbitCamera,
+    signal: AbortSignal,
+    report: (line: string) => void,
+  ) {
+    if (
+      !this.supportsGpuTiming ||
+      this.bdptDispatchPixels <= 0 ||
+      this.settings.restirMethod !== "bdpt"
+    )
+      throw new Error(
+        "This diagnostic requires timestamp-query, BDPT, and a positive bdptDispatchPixels cap.",
+      );
+    const controller = this.beginComparison();
+    const abort = () => controller.abort(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    const deadline = performance.now() + 10 * 60_000;
+    const wait = <T>(operation: Promise<T>) =>
+      this.waitForComparisonOperation(
+        operation,
+        controller.signal,
+        deadline,
+        "Spatial comparison failed.",
+      );
+    this.lastCamera = camera;
+    try {
+      await wait(this.prepareComparisonRenderer(controller.signal));
+      const runtime = this.bdpt;
+      if (runtime === null) throw new Error("BDPT is unavailable.");
+      const generation = this.comparisonGeneration;
+      const check = () => {
+        controller.signal.throwIfAborted();
+        const size = this.resolveSize();
+        if (
+          this.destroyed ||
+          this.deviceIsLost ||
+          this.comparisonGeneration !== generation ||
+          this.bdpt !== runtime ||
+          size.width !== runtime.width ||
+          size.height !== runtime.height
+        )
+          throw new Error(
+            "Renderer configuration changed during the comparison.",
+          );
+      };
+      this.setGpuTimingEnabled(true);
+      const { runBdptSpatialComparison } = await wait(
+        import("@/gi/diagnostics/bdpt-spatial-comparison"),
+      );
+      check();
+      const result = await wait(
+        runBdptSpatialComparison({
+          device: this.device,
+          runtime,
+          scene: this.sceneBindGroup,
+          signal: controller.signal,
+          report,
+          reset: () => {
+            check();
+            this.resetAccumulation();
+            this.frame = 0;
+            this.parity = 0;
+            this.previousBasis = null;
+            this.previousResolution = null;
+          },
+          frame: async () => {
+            check();
+            this.takeGpuSamples();
+            const frame = this.frame;
+            this.renderFrameNow(camera);
+            await this.waitForSubmittedWork(controller.signal, deadline);
+            check();
+            const samples = this.takeGpuSamples();
+            if (
+              this.frame !== frame + 1 ||
+              samples.length !== 1 ||
+              samples[0] === undefined
+            )
+              throw new Error("A completed GPU frame was not sampled.");
+            return samples[0];
+          },
+        }),
+      );
+      check();
+      return {
+        ...result,
+        settings: { ...this.settings },
+        camera,
+        atrousVariant: this.atrousVariant,
+        dispatchPixels: this.bdptDispatchPixels,
+      };
+    } finally {
+      controller.abort();
+      signal.removeEventListener("abort", abort);
+      this.setGpuTimingEnabled(false);
+      this.endComparison(controller);
+    }
   }
 
   get supportsGpuTiming(): boolean {
