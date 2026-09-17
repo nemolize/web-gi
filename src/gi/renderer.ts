@@ -1040,40 +1040,48 @@ export class GiRenderer {
   }
 
   async saveComparisonReference(): Promise<boolean> {
-    await this.settleComparisonFrame();
-    return this.comparisonSession.saveReference();
+    return this.withComparisonReadiness(() =>
+      this.comparisonSession.saveReference(),
+    );
   }
 
   async saveComparisonReferenceAfterFrames(frames: number): Promise<boolean> {
-    await this.settleComparisonFrame();
-    return this.comparisonSession.saveReferenceAfterFrames(frames);
+    return this.withComparisonReadiness(() =>
+      this.comparisonSession.saveReferenceAfterFrames(frames),
+    );
   }
 
   async compareReferenceAfter(
     label: string,
     durationMs: number,
   ): Promise<LinearComparisonReport | null> {
-    await this.settleComparisonFrame();
-    return this.comparisonSession.compareReferenceAfter(label, durationMs);
+    return this.withComparisonReadiness(() =>
+      this.comparisonSession.compareReferenceAfter(label, durationMs),
+    );
   }
 
-  private async settleComparisonFrame(): Promise<void> {
-    if (this.bdptPresentation === null) return;
+  private async withComparisonReadiness<T>(
+    operation: () => Promise<T>,
+  ): Promise<T> {
     if (this.comparisonReadinessController !== null)
       throw new Error("A comparison operation is already running.");
     const controller = new AbortController();
     this.comparisonReadinessController = controller;
     try {
-      await this.waitForComparisonOperation(
-        this.bdptPresentation,
-        controller.signal,
-        performance.now() + REFERENCE_CAPTURE_TIMEOUT_MS,
-        "The GPU could not finish the pending frame.",
-      );
+      if (this.bdptPresentation !== null) {
+        await this.waitForComparisonOperation(
+          this.bdptPresentation,
+          controller.signal,
+          performance.now() + REFERENCE_CAPTURE_TIMEOUT_MS,
+          "The GPU could not finish the pending frame.",
+        );
+        if (!this.destroyed && this.targets !== null) this.ensureTargets();
+      }
+      controller.signal.throwIfAborted();
+      return operation();
     } finally {
       this.comparisonReadinessController = null;
     }
-    if (!this.destroyed && this.targets !== null) this.ensureTargets();
   }
 
   releaseComparisonResources(): void {
