@@ -95,6 +95,17 @@ Two things the script names do not tell you:
   WGSL compile errors reach the console with the shader name and `line:column`;
   without that they surface only as invalid-pipeline warnings at dispatch time.
 
+Run the BDPT and GPU diagnostics E2Es on a local hardware GPU:
+
+```bash
+CI= E2E_PREVIEW=0 E2E_WEBGPU=1 pnpm run test:e2e --workers=1 'bdpt-.*\.spec\.js' gpu-diagnostics.spec.js
+```
+
+`E2E_WEBGPU=1` enables Chromium's unsafe WebGPU flag and selects Metal on macOS.
+The command uses the development server for harnesses that import source modules.
+Tests skip without an adapter; the spatial-profile tests also need
+`timestamp-query`. The hosted CI runner does not provide hardware GPU coverage.
+
 ## Deployment
 
 `main` deploys to Cloudflare Workers; pull requests upload a preview version and
