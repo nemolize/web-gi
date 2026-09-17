@@ -84,9 +84,6 @@ pnpm dev
 
 `pnpm run` lists the rest — build, test, `test:e2e`, lint and fix.
 
-See [Contributing](CONTRIBUTING.md) for required local GPU verification of BDPT
-changes; green CI alone does not establish rendering correctness.
-
 Two things the script names do not tell you:
 
 - `E2E_PREVIEW=1 pnpm run test:e2e` builds first and runs against `vite preview`
@@ -97,6 +94,17 @@ Two things the script names do not tell you:
   [manual comparison](docs/benchmarking.md#manual-comparison-in-development-builds).
   WGSL compile errors reach the console with the shader name and `line:column`;
   without that they surface only as invalid-pipeline warnings at dispatch time.
+
+Run the BDPT and GPU diagnostics E2Es on a local hardware GPU:
+
+```bash
+CI= E2E_PREVIEW=0 E2E_WEBGPU=1 pnpm run test:e2e --workers=1 'bdpt-.*\.spec\.js' gpu-diagnostics.spec.js
+```
+
+`E2E_WEBGPU=1` enables Chromium's unsafe WebGPU flag and selects Metal on macOS.
+The command uses the development server for harnesses that import source modules.
+Tests skip without an adapter; the spatial-profile tests also need
+`timestamp-query`. The hosted CI runner does not provide hardware GPU coverage.
 
 ## Deployment
 
