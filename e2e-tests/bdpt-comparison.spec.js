@@ -54,6 +54,19 @@ test("BDPT comparison uses a shared size and cancels during lazy compilation", a
       renderer.cancelComparison("cancelled during BDPT preparation");
       const cancelled = await active;
       const cancellationMs = performance.now() - started;
+      const compilationDeadline = performance.now() + 10_000;
+      while (pending === 0 && performance.now() < compilationDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      const pendingAtCancellation = pending;
+      const duringCompilation = renderer
+        .compareReferenceAfter("restir", 1000)
+        .then(
+          () => "completed",
+          (error) => String(error),
+        );
+      renderer.cancelComparison("cancelled during active compilation");
+      const compilationCancelled = await duringCompilation;
       const deadline = performance.now() + 20_000;
       while (renderer.stats.accumFrames < 2 && performance.now() < deadline) {
         renderer.renderFrame(DEFAULT_CAMERA);
@@ -65,8 +78,9 @@ test("BDPT comparison uses a shared size and cancels during lazy compilation", a
         referenceSize,
         targetSize: [renderer.stats.width, renderer.stats.height],
         cancelled,
+        compilationCancelled,
         cancellationMs,
-        pending,
+        pendingAtCancellation,
         compared: report !== null,
       };
     } finally {
@@ -81,7 +95,11 @@ test("BDPT comparison uses a shared size and cancels during lazy compilation", a
   expect(result.referenceSize[0] * result.referenceSize[1]).toBeLessThanOrEqual(
     260744,
   );
+  expect(result.pendingAtCancellation).toBeGreaterThan(0);
   expect(result.cancelled).toContain("cancelled during BDPT preparation");
+  expect(result.compilationCancelled).toContain(
+    "cancelled during active compilation",
+  );
   expect(result.cancellationMs).toBeLessThan(250);
   expect(result.compared).toBe(true);
 });
@@ -128,14 +146,20 @@ test("cancelled comparison cannot initialize obsolete targets after resize", asy
         .compareReferenceAfter("restir", 100)
         .catch((error) => String(error));
       renderer.cancelComparison("cancel and resize");
-      await comparing;
+      const cancelled = await comparing;
       canvas.style.width = "240px";
       const deadline = performance.now() + 15_000;
       while (renderer.stats.accumFrames < 2 && performance.now() < deadline) {
         renderer.renderFrame(DEFAULT_CAMERA);
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
-      return { oldSize, logs, frames: renderer.stats.accumFrames };
+      return {
+        oldSize,
+        newSize: `${renderer.stats.width}x${renderer.stats.height}`,
+        logs,
+        cancelled,
+        frames: renderer.stats.accumFrames,
+      };
     } finally {
       GPUDevice.prototype.createComputePipelineAsync = compile;
       renderer.destroy();
@@ -143,7 +167,10 @@ test("cancelled comparison cannot initialize obsolete targets after resize", asy
     }
   });
   test.skip(result === null, "WebGPU unavailable");
+  expect(result.cancelled).toContain("cancel and resize");
+  expect(result.newSize).not.toBe(result.oldSize);
   expect(result.frames).toBeGreaterThanOrEqual(2);
+  expect(result.logs).toContain(`BDPT READY ${result.newSize}`);
   expect(
     result.logs.filter(
       (line) => line === `BDPT INITIALIZING ${result.oldSize}`,

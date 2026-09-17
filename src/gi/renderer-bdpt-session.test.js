@@ -113,3 +113,39 @@ test("cancelling reference readiness rejects before the pending tile completes",
   expect(capture).not.toHaveBeenCalled();
   expect(captureFrames).not.toHaveBeenCalled();
 });
+
+test.each(["compareReferenceAfter", "saveComparisonReferenceAfterFrames"])(
+  "%s accepts immediate cancellation before lazy preparation completes",
+  async (method) => {
+    const { renderer, captureWindow, captureFrames, release } =
+      pendingRenderer();
+    release();
+    await renderer.bdptPresentation;
+    renderer.settings = { ...renderer.settings, mode: "reference" };
+    await renderer.saveComparisonReference();
+    if (method === "compareReferenceAfter") {
+      renderer.settings = { ...renderer.settings, mode: "restir" };
+    }
+    renderer.lastCamera = {};
+    renderer.prepareComparisonRenderer = vi.fn(() => new Promise(() => {}));
+    captureWindow.mockImplementation(
+      renderer.captureAfterCompletionWindow.bind(renderer),
+    );
+    captureFrames.mockImplementation(
+      renderer.captureAfterCompletionFrames.bind(renderer),
+    );
+    const active =
+      method === "compareReferenceAfter"
+        ? renderer.compareReferenceAfter("restir", 100)
+        : renderer.saveComparisonReferenceAfterFrames(2);
+    const rejected = expect(active).rejects.toThrow(
+      "Cancel before preparation",
+    );
+    renderer.cancelComparison("Cancel before preparation");
+    await rejected;
+    expect(renderer.prepareComparisonRenderer).toHaveBeenCalledOnce();
+    expect(renderer.comparisonInProgress).toBe(false);
+    expect(renderer.comparisonReadinessController).toBeNull();
+    expect(renderer.comparisonAbortController).toBeNull();
+  },
+);
