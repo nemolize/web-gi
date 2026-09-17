@@ -84,6 +84,9 @@ pnpm dev
 
 `pnpm run` lists the rest — build, test, `test:e2e`, lint and fix.
 
+See [Contributing](CONTRIBUTING.md) for required local GPU verification of BDPT
+changes; green CI alone does not establish rendering correctness.
+
 Two things the script names do not tell you:
 
 - `E2E_PREVIEW=1 pnpm run test:e2e` builds first and runs against `vite preview`

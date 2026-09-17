@@ -19,7 +19,21 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(process.env["E2E_WEBGPU"] === "1"
+          ? {
+              launchOptions: {
+                args: [
+                  "--enable-unsafe-webgpu",
+                  ...(process.platform === "darwin"
+                    ? ["--use-angle=metal"]
+                    : []),
+                ],
+              },
+            }
+          : {}),
+      },
     },
   ],
   webServer: {
