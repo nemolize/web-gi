@@ -180,3 +180,62 @@ removing the forward MIS arrays accounts for the larger combined glass gain.
 The classic gain is small relative to its run-to-run spread. These desktop
 results do not establish Fold 7 performance or compilation compatibility, and
 the heavy glass scene remains below interactive frame rates.
+
+## Profiling inside spatial reuse (#208)
+
+Use the development-only probe to price neighbor selection separately from the
+remaining replay and reservoir work, on the same frozen production inputs:
+
+```sh
+node e2e-tests/measure-bdpt-spatial.mjs http://127.0.0.1:5198 classic.json
+node e2e-tests/measure-bdpt-spatial.mjs http://127.0.0.1:5198 glass.json glassShapes 8 6
+```
+
+Close other rendering tabs and run these serially. Arguments after the output
+path are scene, attempted neighbors, bounces, width, and height. The default is
+classic / 4 / 3 at 352x738. The tool opens a headed Chrome with its own temporary
+profile, requires WebGPU with `timestamp-query`, and forces untiled
+full-image dispatches. It fails on unsupported timing, empty radiance, an empty
+neighbor workload, shader-source drift, or differing output; a missing adapter
+is not a successful measurement. Verify the reported adapter is the hardware
+you intend to measure; software adapters are not rejected. Restart the dev
+server after editing the probe, because its files live outside `src`.
+
+Ten completed production frames populate history. The probe retains the final
+spatial pass's pipeline, uniforms and bindings, then stops advancing the renderer.
+All variants read that same input. A diagnostic shader split stores selected
+neighbor coordinates and RNG state in a 272-byte-per-pixel buffer. The second
+pass restores them and executes the unmodified replay/reservoir suffix. Before
+measurement, every output word must match the original production pass, including
+caustics. Selection-disabled, classic, and heavy glass GPU tests exercise this
+check. No production shader, estimator or renderer setting is changed.
+
+The report records twelve pairs after four warmup pairs, alternating original /
+selection+replay order. Times are GPU pass timestamps in milliseconds; readback,
+compilation, other passes and CPU/submission gaps are excluded. Selection includes
+primary hits, rejection, deduplication and intermediate writes; replay includes
+intermediate reads, source preparation, forward/inverse shifts, MIS and reservoir
+updates. The split sum can differ from the original because storage traffic and
+compiler decisions change. Compare that sum to the original before interpreting
+the split: these are diagnostic costs, not an exact additive decomposition of the
+production kernel or an end-to-end speedup. The frozen history is one frame, not a
+sample of motion or long-running convergence.
+
+Apple M2 Max / Apple Metal 3 / Chrome 152, at 352x738 and workgroup 8x8,
+gave these medians across twelve pairs (milliseconds). The final column compares
+the sum of the selection/replay medians to the original median:
+
+| Scene / neighbors / bounces | Original | Selection | Replay | Split sum vs original |
+| --------------------------- | -------: | --------: | -----: | --------------------: |
+| Classic / 4 / 3             |    34.35 |      0.56 |  35.22 |                 +4.2% |
+| Glass / 8 / 6               |    78.91 |      0.78 |  76.95 |                 -1.5% |
+
+Both outputs matched bit-for-bit. Classic had 213,643 active pixels and 618,355
+accepted neighbors; glass had 187,612 and 922,050. An earlier separate browser
+run put the split sums 0.6% and 1.0% below
+production respectively; this variability is another reason not to call the
+split a speedup. Across both runs, selection remains below 1 ms and the replay
+suffix dominates. This supports investigating replay cost on this desktop. It
+does not establish the split on Fold 7, the
+benefit of a particular replay optimization, or a whole-frame speedup. #208
+remains open for those measurements and the subsequent optimization.
