@@ -9,6 +9,7 @@ export const profileSpatial = async ({
   height = 738,
   repeats = 12,
   expectedShader,
+  referenceSpatial,
 } = {}) => {
   if (
     !["classic", "manyLights", "glassShapes"].includes(scene) ||
@@ -119,6 +120,14 @@ export const profileSpatial = async ({
       entries: [{ binding: 0, resource: { buffer: domains } }],
     });
     const split = splitSpatialShader(frozen.code);
+    if (referenceSpatial !== undefined) {
+      const marker =
+        "@group(1) @binding(0) var<storage, read> temporalReservoirs:";
+      if (frozen.code.split(marker).length !== 2)
+        throw Error("Cannot locate spatial entry for reference comparison");
+      split.reference =
+        frozen.code.slice(0, frozen.code.indexOf(marker)) + referenceSpatial;
+    }
     const splitLayout = device.createPipelineLayout({
       bindGroupLayouts: [
         ...[0, 1, 2].map((index) => frozen.pipeline.getBindGroupLayout(index)),
@@ -195,6 +204,15 @@ export const profileSpatial = async ({
       if (radiance.some((value) => value > 0)) positivePixels++;
     }
     if (!positivePixels) throw Error("Production output has no radiance");
+    if (referenceSpatial !== undefined) {
+      const reference = await readOutput(["reference"]);
+      const mismatches = original.reduce(
+        (count, word, index) => count + Number(word !== reference[index]),
+        0,
+      );
+      if (mismatches)
+        throw Error(`Reference differs from production in ${mismatches} words`);
+    }
     const separated = await readOutput(["selection", "replay"]);
     const mismatchWords = original.reduce(
       (count, word, index) => count + Number(word !== separated[index]),

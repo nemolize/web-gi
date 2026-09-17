@@ -1,3 +1,4 @@
+// Frozen spatial pass from 5251eb5; rebuilds the center light path per neighbor.
 @group(1) @binding(0) var<storage, read> temporalReservoirs: array<BdptReservoirPair>;
 @group(1) @binding(1) var<storage, read_write> finalReservoirs: array<BdptReservoirPair>;
 
@@ -48,24 +49,19 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   if (centerTarget > 0.0) {
     preparedCenter = bdptPrepareShift(bdptReservoirSample(center.normal), uni.cam, pixel, lightCount, &workspace);
   }
-  // Forward shifts overwrite the light prefix, so finish center shifts first.
   for (var sourceIndex = 1u; sourceIndex < count; sourceIndex++) {
     let sourcePixel = domains[sourceIndex];
     let source = temporalReservoirs[sourcePixel.y * uni.resolution.x + sourcePixel.x].normal;
+    confidence += source.path.confidence;
     var centerPairWeight = 1.0;
     if (centerTarget > 0.0 && source.path.confidence > 0.0) {
-      let inverse = bdptApplyPreparedShift(preparedCenter, uni.cam, uni.cam, pixel, sourcePixel, lightCount, &workspace, true);
+      let inverse = bdptApplyShift(preparedCenter, uni.cam, uni.cam, pixel, sourcePixel, lightCount, &workspace);
       let inverseSample = BdptPathSample(inverse.sample.techniqueSeeds,
         vec4f(inverse.evaluation.candidate.estimator, inverse.evaluation.candidate.misWeight));
       let other = bdptBalanceNumerator(source.path.confidence, bdptTarget(inverseSample), inverse.jacobian);
       centerPairWeight = bdptPairwiseWeight(centerConfidence * centerTarget, other);
     }
     centerWeight += centerPairWeight;
-  }
-  for (var sourceIndex = 1u; sourceIndex < count; sourceIndex++) {
-    let sourcePixel = domains[sourceIndex];
-    let source = temporalReservoirs[sourcePixel.y * uni.resolution.x + sourcePixel.x].normal;
-    confidence += source.path.confidence;
     if (source.path.targetDensity <= 0.0 || source.path.confidence <= 0.0) { continue; }
     let shifted = bdptShiftReplay(bdptReservoirSample(source), uni.cam, sourcePixel, pixel, lightCount, &workspace);
     if (shifted.jacobian <= 0.0) { continue; }

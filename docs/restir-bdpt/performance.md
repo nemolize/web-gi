@@ -3,7 +3,7 @@
 Spatial pairwise weighting shifts the center reservoir into each accepted
 neighbor's domain. The source sample, source camera, source pixel, and uniforms
 are invariant throughout that loop. `bdptPrepareShift` now evaluates that source
-once; `bdptApplyShift` rebuilds the destination path for each neighbor. The
+once; destination replay is evaluated for each neighbor. The
 prepared value owns its source data and does not retain pointers into the mutable
 workspace. Other callers retain the prepare-and-apply convenience wrapper.
 
@@ -139,9 +139,10 @@ compatibility; its conservative dispatch limit is unchanged.
 
 `bdptShiftBetweenCameras` now reuses the seeded light prefix left by its
 immediately preceding `bdptPrepareShift`. Destination camera replay and light
-endpoint replacement still run. Cached center sources continue rebuilding the
-light subpath: their workspace may have been overwritten by another neighbor.
-This avoids adding an owned subpath copy to the prepared source.
+endpoint replacement still run. At this revision, cached center sources still
+rebuilt the light subpath because another neighbor could overwrite the workspace.
+The center-prefix optimization below removes that interleaving without adding
+an owned subpath copy to the prepared source.
 
 MIS accumulates the forward log density and zero count while consuming technique
 scores, removing two function-local arrays. Reverse densities retain their
@@ -239,3 +240,44 @@ suffix dominates. This supports investigating replay cost on this desktop. It
 does not establish the split on Fold 7, the
 benefit of a particular replay optimization, or a whole-frame speedup. #208
 remains open for those measurements and the subsequent optimization.
+
+## Reusing the center light prefix (2026-09-17, #208)
+
+Spatial reuse now completes the center-to-neighbor inverse shifts before any
+neighbor-to-center forward shifts. The inverse loop reuses the light subpath
+left by center preparation; forward preparation then owns the workspace as
+before. Camera replay, visibility, MIS, Jacobians, accepted neighbors and
+reservoir update order are unchanged. The selection RNG is restored separately.
+For light-side endpoint shifts, each destination overwrites the endpoint while
+the predecessor and seeded prefix remain intact.
+
+Before editing, the existing internal profiler measured selection medians of
+0.56 ms in classic and 0.77 ms in heavy glass, versus replay medians of 35.32 and
+77.09 ms. That localized the change to replay, rather than neighbor selection.
+
+Whole-frame comparisons use baseline `5251eb5`, matched capacities, M2 Max / Metal
+3 / installed Chrome 152, and a 430x900 viewport at DPR 2.25 with 352x738 output.
+The runner now opens headed Chrome. Each row interleaves three baseline and three
+modified runs in B/A/A/B/B/A order, ten warmup frames and at least thirty measured
+frames each, with only one rendering tab at a time. All unchanged passes and
+submission waits remain in the measured frame cadence. The batched row uses the
+desktop 8x8 workgroup with an explicit 4096-pixel cap; it is not an Adreno run.
+
+| Scene / neighbors / bounces / dispatch cap | Baseline ms/frame      | Reused-prefix ms/frame | Reduction |
+| ------------------------------------------ | ---------------------- | ---------------------- | --------- |
+| Classic / 4 / 3 / none                     | 49.27, 49.98, 49.76    | 48.77, 46.40, 48.65    | 3.5%      |
+| Glass / 8 / 6 / none                       | 171.78, 170.82, 171.53 | 161.36, 162.91, 161.15 | 5.6%      |
+| Classic / 4 / 3 / 4096 pixels              | 149.17, 148.21, 148.22 | 136.54, 136.19, 135.80 | 8.3%      |
+
+Reproduce with `e2e-tests/measure-bdpt.mjs`, baseline `5251eb5`, and final argument
+`matched`; use the scene, samples, bounces and dispatch cap from the table.
+These are observed desktop improvements, with the small classic gain still
+sensitive to run variability. Fold 7 was not connected: compilation, output and
+performance on Adreno remain unverified, and #208 stays open.
+
+The frozen independent spatial shader in `e2e-tests/bdpt-spatial-independent.wgsl`
+retains the baseline's interleaved, rebuilding loop. The profile tests compare
+every output word against it on the same production input buffers, including
+classic, heavy glass, zero neighbors and the 32-neighbor limit. They also retain
+the original selection/replay split comparison. Existing cache and reuse GPU
+tests cover motion, reconnection, energy, confidence and history clearing.

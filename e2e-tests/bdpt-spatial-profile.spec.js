@@ -1,13 +1,21 @@
+import { readFileSync } from "node:fs";
+
 import { expect, test } from "@playwright/test";
 
 import { isPreviewTarget } from "./target";
+
+const referenceSpatial = readFileSync(
+  new URL("./bdpt-spatial-independent.wgsl", import.meta.url),
+  "utf8",
+);
 
 for (const [scene, samples, bounces] of [
   ["classic", 4, 3],
   ["glassShapes", 8, 6],
   ["classic", 0, 3],
+  ["glassShapes", 32, 6],
 ]) {
-  test(`spatial split preserves frozen production output: ${scene}, ${samples} neighbors`, async ({
+  test(`spatial reuse and profiling match independent replay: ${scene}, ${samples} neighbors`, async ({
     page,
   }) => {
     test.skip(isPreviewTarget, "Imports development renderer modules.");
@@ -22,7 +30,15 @@ for (const [scene, samples, bounces] of [
           await import("/e2e-tests/bdpt-spatial-profile.js");
         return profileSpatial(options);
       },
-      { scene, samples, bounces, width: 48, height: 64, repeats: 2 },
+      {
+        scene,
+        samples,
+        bounces,
+        width: 48,
+        height: 64,
+        repeats: 2,
+        referenceSpatial,
+      },
     );
     test.skip(result === null, "WebGPU timestamps unavailable.");
     expect(result.mismatchWords).toBe(0);

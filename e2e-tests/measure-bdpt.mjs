@@ -31,6 +31,7 @@ const sources = paths.map((n) => ({
 }));
 const browser = await chromium.launch({
   channel: "chrome",
+  headless: false,
   args: ["--enable-unsafe-webgpu"],
 });
 const results = [];
