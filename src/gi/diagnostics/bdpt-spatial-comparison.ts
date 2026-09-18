@@ -1,14 +1,13 @@
-import {
-  bdptSubmissionBatch,
-  submitBdptFrame,
-} from "@/gi/bdpt/frame-submissions";
+import { bdptSubmissionBatch } from "@/gi/bdpt/frame-submissions";
 import type { BdptSpatialExperiment } from "@/gi/bdpt/passes";
 import type { BdptRuntime } from "@/gi/bdpt/runtime";
 import type { GpuFrameSample } from "@/gi/performance";
 import { summarizeDurations } from "@/gi/performance";
 
 import candidateSource from "./bdpt-spatial-candidate.wgsl?raw";
+import { readFrozenSpatial } from "./frozen-spatial";
 import { compareReservoirWords } from "./reservoir-diff";
+import { traceSpatialWeights } from "./spatial-weight-trace";
 
 export interface SpatialComparisonHost {
   readonly device: GPUDevice;
@@ -24,7 +23,7 @@ const verifyFrozen = async (
   host: SpatialComparisonHost,
   experiment: BdptSpatialExperiment,
 ) => {
-  const { device, runtime, scene, signal } = host;
+  const { device, runtime, signal } = host;
   const staging = device.createBuffer({
     size: runtime.reservoirs.size,
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
@@ -36,52 +35,15 @@ const verifyFrozen = async (
     for (const [index, candidate] of [false, true, true, false].entries()) {
       signal.throwIfAborted();
       experiment.select(candidate);
-      const commands: { label: string; finish: () => GPUCommandBuffer }[] = [];
-      const spatialEncoder = device.createCommandEncoder();
-      spatialEncoder.clearBuffer(runtime.reservoirs);
-      const encoder = experiment.recordFrozen(
-        spatialEncoder,
-        scene,
-        (encoder, label) => {
-          const command = encoder.finish();
-          commands.push({ label, finish: () => command });
-          return device.createCommandEncoder();
-        },
-      );
-      encoder.copyBufferToBuffer(
-        runtime.reservoirs,
-        0,
-        staging,
-        0,
-        staging.size,
-      );
-      const readback = encoder.finish();
-      commands.push({ label: "readback", finish: () => readback });
-      if (
-        !(await submitBdptFrame(
-          device.queue,
-          commands,
-          () => !signal.aborted,
-          () => {},
-          bdptSubmissionBatch(location.search),
-        ))
-      )
-        signal.throwIfAborted();
-      await staging.mapAsync(GPUMapMode.READ);
-      try {
-        const words = new Uint32Array(staging.getMappedRange());
-        if (index === 0) {
-          baseline = words.slice();
-        } else {
-          const reference = index === 2 ? candidateWords : baseline;
-          if (!reference) throw new Error("Missing frozen reference.");
-          comparisons.push(
-            compareReservoirWords(reference, words, runtime.width),
-          );
-          if (index === 1) candidateWords = words.slice();
-        }
-      } finally {
-        staging.unmap();
+      const words = await readFrozenSpatial(host, experiment, staging);
+      if (index === 0) baseline = words;
+      else {
+        const reference = index === 2 ? candidateWords : baseline;
+        if (!reference) throw new Error("Missing frozen reference.");
+        comparisons.push(
+          compareReservoirWords(reference, words, runtime.width),
+        );
+        if (index === 1) candidateWords = words;
       }
     }
     signal.throwIfAborted();
@@ -110,6 +72,20 @@ const verifyFrozen = async (
           (comparison) =>
             comparison.changedWords === 0 && comparison.nonFiniteValues === 0,
         ),
+      trace:
+        candidateDifference.changedWords > 0 ||
+        new URLSearchParams(location.search).get("bdptSpatialTrace") === "1"
+          ? await traceSpatialWeights(
+              host,
+              baseline,
+              candidateWords,
+              staging,
+            ).catch((error: unknown) => {
+              signal.throwIfAborted();
+              host.report(`Weight trace unavailable: ${String(error)}`);
+              return { comparable: false, error: String(error), results: [] };
+            })
+          : null,
       candidateDifference,
       candidateRepeat,
       baselineRepeat,

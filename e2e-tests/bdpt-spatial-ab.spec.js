@@ -139,6 +139,11 @@ test("frozen comparison rejects a candidate that leaves the output unwritten", a
   expect(frozen.candidateRepeatChangedWords).toBe(0);
   expect(frozen.baselineRepeatChangedWords).toBe(0);
   expect(frozen.candidateNonzero).toBe(false);
+  expect(frozen.trace.comparable).toBe(false);
+  expect(frozen.trace.results[1].instrumentationChangedWords).toBeGreaterThan(
+    0,
+  );
+  expect(frozen.trace.results[1].targetChangedWords).toBeGreaterThan(0);
   expect(
     frozen.candidateDifference.fields.find(
       (field) => field.name === "normal.path.weightSum",
@@ -333,4 +338,126 @@ test("comparison holds a screen lock only until completion", async ({
   expect(
     await page.evaluate(() => [window.wakeRequests, window.wakeReleases]),
   ).toEqual([1, 1]);
+});
+
+test("weight tracing reports output parity and exposes neighbor calculations", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await open(page);
+  await page.evaluate(() =>
+    history.replaceState(null, "", location.href + "&bdptSpatialTrace=1"),
+  );
+  await page.getByRole("button", { name: "Run comparison" }).click();
+  await expect(page.getByRole("status")).toContainText("Complete.", {
+    timeout: 150_000,
+  });
+  const result = JSON.parse(
+    await page.getByLabel("Comparison report").inputValue(),
+  );
+  for (const cycle of result.cycles) {
+    expect(cycle.frozen.trace.comparable).toBe(
+      cycle.frozen.trace.results.every(
+        (entry) => entry.instrumentationChangedWords === 0,
+      ),
+    );
+    expect(cycle.frozen.trace.results.map((entry) => entry.variant)).toEqual([
+      "baseline",
+      "candidate",
+    ]);
+    for (const entry of cycle.frozen.trace.results) {
+      expect(entry.targetChangedWords).toBe(0);
+      expect(entry.workgroupSize).toBe(4);
+      expect(
+        entry.header.pixelX_pixelY_domainCount_selectionState.values.slice(
+          0,
+          2,
+        ),
+      ).toEqual([6, 28]);
+      expect(
+        entry.header.selectionState_finalRng_selectedCenter_completed.values[3],
+      ).toBe(1);
+      expect(entry.neighbors.length).toBeGreaterThan(0);
+      expect(
+        entry.neighbors.some(
+          (row) => row.pixelX_pixelY_stageFlags_selectionState.values[2] === 15,
+        ),
+      ).toBe(true);
+    }
+    expect(cycle.frozen.trace.results[0].header).toEqual(
+      cycle.frozen.trace.results[1].header,
+    );
+  }
+});
+
+test("stop cancels pending weight trace compilation", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.addInitScript(() => {
+    const original = GPUDevice.prototype.createComputePipelineAsync;
+    GPUDevice.prototype.createComputePipelineAsync = function (descriptor) {
+      if (descriptor.label.startsWith("bdpt-spatial-trace-baseline-"))
+        return new Promise(() => {});
+      return original.call(this, descriptor);
+    };
+  });
+  await open(page);
+  await page.evaluate(() =>
+    history.replaceState(null, "", location.href + "&bdptSpatialTrace=1"),
+  );
+  await page.getByRole("button", { name: "Run comparison" }).click();
+  await expect(page.getByLabel("Comparison report")).toHaveValue(
+    /COMPILE START bdpt-spatial-trace-baseline/,
+    { timeout: 60_000 },
+  );
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Stopped.");
+  await expect(
+    page.getByRole("button", { name: "Run comparison" }),
+  ).toBeEnabled();
+});
+
+test("trace compilation failure preserves the original mismatch report", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.addInitScript(() => {
+    const shader = GPUDevice.prototype.createShaderModule;
+    GPUDevice.prototype.createShaderModule = function (descriptor) {
+      if (descriptor.label === "bdpt-spatial-candidate")
+        descriptor = {
+          ...descriptor,
+          code: descriptor.code.replace(
+            /finalReservoirs\[index\] = [^;]+;/g,
+            "",
+          ),
+        };
+      return shader.call(this, descriptor);
+    };
+    const pipeline = GPUDevice.prototype.createComputePipelineAsync;
+    GPUDevice.prototype.createComputePipelineAsync = function (descriptor) {
+      if (descriptor.label.startsWith("bdpt-spatial-trace-"))
+        return Promise.reject(
+          new GPUPipelineError("injected trace failure", {
+            reason: "validation",
+          }),
+        );
+      return pipeline.call(this, descriptor);
+    };
+  });
+  await open(page);
+  await page.getByRole("button", { name: "Run comparison" }).click();
+  await expect(page.getByRole("status")).toContainText("Output mismatch", {
+    timeout: 60_000,
+  });
+  const result = JSON.parse(
+    await page.getByLabel("Comparison report").inputValue(),
+  );
+  expect(result.cycles).toHaveLength(1);
+  expect(result.cycles[0].phases).toHaveLength(3);
+  expect(result.cycles[0].frozen.candidateChangedWords).toBeGreaterThan(0);
+  expect(result.cycles[0].frozen.trace.comparable).toBe(false);
+  expect(result.cycles[0].frozen.trace.error).toContain(
+    "injected trace failure",
+  );
+  await expect(page.getByRole("button", { name: "Copy report" })).toBeEnabled();
 });
