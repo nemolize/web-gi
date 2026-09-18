@@ -1,0 +1,218 @@
+import { bdptSubmissionBatch } from "@/gi/bdpt/frame-submissions";
+import type { BdptSpatialExperiment } from "@/gi/bdpt/passes";
+import type { BdptRuntime } from "@/gi/bdpt/runtime";
+import type { GpuFrameSample } from "@/gi/performance";
+import { summarizeDurations } from "@/gi/performance";
+
+import candidateSource from "./bdpt-spatial-candidate.wgsl?raw";
+import { readFrozenSpatial } from "./frozen-spatial";
+import { compareReservoirWords } from "./reservoir-diff";
+import { traceSpatialWeights } from "./spatial-weight-trace";
+
+export interface SpatialComparisonHost {
+  readonly device: GPUDevice;
+  readonly runtime: BdptRuntime;
+  readonly scene: GPUBindGroup;
+  readonly signal: AbortSignal;
+  readonly report: (line: string) => void;
+  readonly reset: () => void;
+  readonly frame: () => Promise<GpuFrameSample>;
+}
+
+const verifyFrozen = async (
+  host: SpatialComparisonHost,
+  experiment: BdptSpatialExperiment,
+) => {
+  const { device, runtime, signal } = host;
+  const staging = device.createBuffer({
+    size: runtime.reservoirs.size,
+    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+  });
+  let baseline: Uint32Array | undefined;
+  let candidateWords: Uint32Array | undefined;
+  const comparisons: ReturnType<typeof compareReservoirWords>[] = [];
+  try {
+    for (const [index, candidate] of [false, true, true, false].entries()) {
+      signal.throwIfAborted();
+      experiment.select(candidate);
+      const words = await readFrozenSpatial(host, experiment, staging);
+      if (index === 0) baseline = words;
+      else {
+        const reference = index === 2 ? candidateWords : baseline;
+        if (!reference) throw new Error("Missing frozen reference.");
+        comparisons.push(
+          compareReservoirWords(reference, words, runtime.width),
+        );
+        if (index === 1) candidateWords = words;
+      }
+    }
+    signal.throwIfAborted();
+    const [candidateDifference, candidateRepeat, baselineRepeat] = comparisons;
+    if (
+      !baseline ||
+      !candidateWords ||
+      !candidateDifference ||
+      !candidateRepeat ||
+      !baselineRepeat
+    )
+      throw new Error("Incomplete frozen verification.");
+    const baselineNonzero = baseline.some((word) => word !== 0);
+    const candidateNonzero = candidateWords.some((word) => word !== 0);
+    return {
+      comparedWords: baseline.length,
+      candidateChangedWords: candidateDifference.changedWords,
+      candidateRepeatChangedWords: candidateRepeat.changedWords,
+      baselineRepeatChangedWords: baselineRepeat.changedWords,
+      baselineNonzero,
+      candidateNonzero,
+      passed:
+        baselineNonzero &&
+        candidateNonzero &&
+        comparisons.every(
+          (comparison) =>
+            comparison.changedWords === 0 && comparison.nonFiniteValues === 0,
+        ),
+      trace:
+        candidateDifference.changedWords > 0 ||
+        new URLSearchParams(location.search).get("bdptSpatialTrace") === "1"
+          ? await traceSpatialWeights(
+              host,
+              baseline,
+              candidateWords,
+              staging,
+            ).catch((error: unknown) => {
+              signal.throwIfAborted();
+              host.report(`Weight trace unavailable: ${String(error)}`);
+              return { comparable: false, error: String(error), results: [] };
+            })
+          : null,
+      candidateDifference,
+      candidateRepeat,
+      baselineRepeat,
+    };
+  } finally {
+    experiment.select(false);
+    staging.destroy();
+  }
+};
+
+export const runBdptSpatialComparison = async (host: SpatialComparisonHost) => {
+  const { device, runtime, signal, report } = host;
+  const experiment = await runtime.prepareSpatialExperiment(candidateSource);
+  signal.throwIfAborted();
+  const {
+    vendor,
+    architecture,
+    device: adapterDevice,
+    description,
+  } = device.adapterInfo;
+  const metadata = {
+    schemaVersion: 2,
+    kind: "bdpt-spatial-ab-a",
+    capturedAt: new Date().toISOString(),
+    url: location.origin + location.pathname + location.search,
+    userAgent: navigator.userAgent,
+    adapter: { vendor, architecture, device: adapterDevice, description },
+    workgroups: {
+      ...runtime.workgroups,
+      "bdpt-spatial-candidate": experiment.workgroups["candidate"],
+    },
+    renderResolution: { width: runtime.width, height: runtime.height },
+    maxVertices: runtime.maxVertices,
+    submissionCount: runtime.submissionCount,
+    submissionBatch: bdptSubmissionBatch(location.search),
+    candidateRevision: "0a85a9783db6aa83b9f66c6f04011aa6174889a6",
+    frozenOrder: ["A1", "B1", "B2", "A2"],
+    relativeError:
+      "abs(reference - actual) / max(abs(reference), abs(actual)); zero for two finite zeros; non-finite values counted separately",
+    warmupFrames: 5,
+    sampleFrames: 6,
+    cycles: 3,
+    inputPolicy:
+      "Full frames reset history and frame seeds; atomic light insertion can differ. Frozen spatial checks reuse exactly the same uniforms and temporal reservoirs.",
+  };
+  report(JSON.stringify(metadata));
+  const cycles = [];
+  try {
+    for (let cycle = 1; cycle <= metadata.cycles; cycle++) {
+      const phases = [];
+      for (const phase of ["A1", "B", "A2"] as const) {
+        signal.throwIfAborted();
+        experiment.select(phase === "B");
+        host.reset();
+        report(`Cycle ${cycle}/3 ${phase}: warming up`);
+        for (let frame = 0; frame < metadata.warmupFrames; frame++)
+          await host.frame();
+        const samples = [];
+        report(`Cycle ${cycle}/3 ${phase}: measuring`);
+        for (let frame = 0; frame < metadata.sampleFrames; frame++) {
+          const started = performance.now();
+          const sample = await host.frame();
+          const spatialMs =
+            sample.passMs[
+              phase === "B" ? "bdpt-spatial-candidate" : "bdpt-spatial"
+            ];
+          if (
+            spatialMs === undefined ||
+            !Number.isFinite(spatialMs) ||
+            spatialMs <= 0 ||
+            !Number.isFinite(sample.frameMs) ||
+            sample.frameMs <= 0
+          )
+            throw new Error(
+              "Missing or invalid GPU timestamps; comparison aborted.",
+            );
+          samples.push({
+            ...sample,
+            spatialMs,
+            completionMs: performance.now() - started,
+          });
+        }
+        const result = {
+          phase,
+          frameMs: summarizeDurations(samples.map((sample) => sample.frameMs)),
+          spatialMs: summarizeDurations(
+            samples.map((sample) => sample.spatialMs),
+          ),
+          completionMs: summarizeDurations(
+            samples.map((sample) => sample.completionMs),
+          ),
+          samples,
+        };
+        phases.push(result);
+        report(
+          `${phase}: frame ${result.frameMs.median.toFixed(2)} ms, spatial ${result.spatialMs.median.toFixed(2)} ms`,
+        );
+      }
+      report(`Cycle ${cycle}/3: checking frozen spatial output`);
+      const frozen = await verifyFrozen(host, experiment);
+      report(JSON.stringify({ cycle, frozen }));
+      const [a1, b, a2] = phases;
+      if (!a1 || !b || !a2) throw new Error("Incomplete comparison cycle.");
+      cycles.push({
+        cycle,
+        phases,
+        frozen,
+        ratios: {
+          candidateFrameVsA1: b.frameMs.median / a1.frameMs.median,
+          candidateFrameVsA2: b.frameMs.median / a2.frameMs.median,
+          candidateSpatialVsA1: b.spatialMs.median / a1.spatialMs.median,
+          candidateSpatialVsA2: b.spatialMs.median / a2.spatialMs.median,
+          baselineFrameDrift: a2.frameMs.median / a1.frameMs.median,
+          baselineSpatialDrift: a2.spatialMs.median / a1.spatialMs.median,
+        },
+      });
+      if (!frozen.passed) break;
+    }
+    signal.throwIfAborted();
+    return {
+      ...metadata,
+      outcome: cycles.every((cycle) => cycle.frozen.passed)
+        ? "matched"
+        : "mismatch",
+      cycles,
+    };
+  } finally {
+    experiment.select(false);
+  }
+};

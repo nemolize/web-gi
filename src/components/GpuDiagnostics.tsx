@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { runGpuDiagnostics } from "@/gi/diagnostics/runner";
+import { keepDiagnosticScreenAwake } from "@/gi/diagnostics/screen-awake";
 import { diagnosticSuites } from "@/gi/diagnostics/suites";
 
 const GpuDiagnostics = () => {
@@ -16,6 +17,7 @@ const GpuDiagnostics = () => {
     diagnosticSuites[0];
   const [lines, setLines] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
+  const [screenStatus, setScreenStatus] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
   const active = useRef<AbortController | null>(null);
   useEffect(() => () => active.current?.abort(), []);
@@ -25,6 +27,7 @@ const GpuDiagnostics = () => {
     setLines([]);
     setCopyStatus("");
     setRunning(true);
+    setScreenStatus("Requesting screen wake lock…");
     const started = performance.now();
     const report = (line: string) => {
       const elapsed = ((performance.now() - started) / 1000).toFixed(3);
@@ -33,11 +36,19 @@ const GpuDiagnostics = () => {
         ...line.split("\n").map((part) => `[+${elapsed}s] ${part}`),
       ]);
     };
+    const releaseWakeLock = keepDiagnosticScreenAwake(
+      controller.signal,
+      (message) => {
+        setScreenStatus(message);
+        report(message);
+      },
+    );
     try {
       await runGpuDiagnostics(suite, report, controller.signal);
     } catch (error) {
       report(String(error));
     } finally {
+      releaseWakeLock();
       if (controller.signal.aborted) report("Stopped.");
       active.current = null;
       setRunning(false);
@@ -108,6 +119,11 @@ const GpuDiagnostics = () => {
           Back to renderer
         </a>
       </div>
+      {running && (
+        <p aria-label="Screen wake lock" className="my-2 text-sm">
+          {screenStatus}
+        </p>
+      )}
       <p role="status">
         {running ? "Running…" : "Ready"} {copyStatus}
       </p>
