@@ -39,10 +39,12 @@ for (const scene of ["classic", "glassShapes"]) {
     expect(result.adapter.vendor).toBeDefined();
     expect(result.cycles).toHaveLength(3);
     for (const cycle of result.cycles) {
-      expect(cycle.frozen).toEqual({
+      expect(cycle.frozen).toMatchObject({
         comparedWords: 48 * 64 * 40,
         candidateChangedWords: 0,
         baselineRepeatChangedWords: 0,
+        candidateRepeatChangedWords: 0,
+        passed: true,
       });
       expect(cycle.phases.map((phase) => phase.phase)).toEqual([
         "A1",
@@ -123,13 +125,25 @@ test("frozen comparison rejects a candidate that leaves the output unwritten", a
   });
   await open(page);
   await page.getByRole("button", { name: "Run comparison" }).click();
-  await expect(page.getByRole("status")).toContainText(
-    "Frozen spatial output differs",
-    { timeout: 60_000 },
+  await expect(page.getByRole("status")).toContainText("Output mismatch", {
+    timeout: 60_000,
+  });
+  const result = JSON.parse(
+    await page.getByLabel("Comparison report").inputValue(),
   );
-  expect(await page.getByLabel("Comparison report").inputValue()).not.toMatch(
-    /^\{/,
-  );
+  expect(result.schemaVersion).toBe(2);
+  expect(result.outcome).toBe("mismatch");
+  expect(result.cycles).toHaveLength(1);
+  const frozen = result.cycles[0].frozen;
+  expect(frozen.candidateChangedWords).toBeGreaterThan(0);
+  expect(frozen.candidateRepeatChangedWords).toBe(0);
+  expect(frozen.baselineRepeatChangedWords).toBe(0);
+  expect(frozen.candidateNonzero).toBe(false);
+  expect(
+    frozen.candidateDifference.fields.find(
+      (field) => field.name === "normal.path.weightSum",
+    ).changedWords,
+  ).toBeGreaterThan(0);
 });
 
 test("stop settles pending adapter acquisition and allows retry", async ({
@@ -240,4 +254,83 @@ test("late adapter completion cannot replace the retry's canvas device", async (
     timeout: 60_000,
   });
   expect(errors).toEqual([]);
+});
+
+test("field diagnostics distinguish unsigned seeds from non-finite floats", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.addInitScript(() => {
+    const original = GPUDevice.prototype.createShaderModule;
+    GPUDevice.prototype.createShaderModule = function (descriptor) {
+      if (descriptor.label === "bdpt-spatial-candidate")
+        descriptor = {
+          ...descriptor,
+          code: descriptor.code.replace(
+            "finalReservoirs[index] = center;",
+            "finalReservoirs[index] = center; finalReservoirs[index].normal.path.weightSum = bitcast<f32>(0x7fc00000u | (index & 0xffu)); finalReservoirs[index].caustic.path.sample.techniqueSeeds.x = 0xffffffffu;",
+          ),
+        };
+      return original.call(this, descriptor);
+    };
+  });
+  await open(page);
+  await page.getByRole("button", { name: "Run comparison" }).click();
+  await expect(page.getByRole("status")).toContainText("Output mismatch", {
+    timeout: 60_000,
+  });
+  const result = JSON.parse(
+    await page.getByLabel("Comparison report").inputValue(),
+  );
+  const frozen = result.cycles[0].frozen;
+  expect(frozen.candidateRepeatChangedWords).toBe(0);
+  expect(frozen.baselineRepeatChangedWords).toBe(0);
+  const fields = frozen.candidateDifference.fields;
+  const weight = fields.find((field) => field.name === "normal.path.weightSum");
+  expect(weight.float.actualNonFinite.nan).toBeGreaterThan(0);
+  expect(weight.examples.some((example) => example.actual === "NaN")).toBe(
+    true,
+  );
+  const seeds = fields.find(
+    (field) => field.name === "caustic.path.sample.techniqueSeeds",
+  );
+  expect(seeds.float).toBeNull();
+  expect(seeds.examples.some((example) => example.actual === 4294967295)).toBe(
+    true,
+  );
+});
+
+test("comparison holds a screen lock only until completion", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.wakeRequests = 0;
+    window.wakeReleases = 0;
+    Object.defineProperty(navigator, "wakeLock", {
+      configurable: true,
+      value: {
+        request: async (type) => {
+          if (type !== "screen") throw new Error("Unexpected wake lock type");
+          window.wakeRequests++;
+          const lock = new EventTarget();
+          Object.assign(lock, {
+            released: false,
+            release: async () => {
+              window.wakeReleases++;
+              lock.dispatchEvent(new Event("release"));
+            },
+          });
+          return lock;
+        },
+      },
+    });
+  });
+  await open(page);
+  await page.getByRole("button", { name: "Run comparison" }).click();
+  await expect(page.getByRole("status")).toContainText("Complete.", {
+    timeout: 60_000,
+  });
+  expect(
+    await page.evaluate(() => [window.wakeRequests, window.wakeReleases]),
+  ).toEqual([1, 1]);
 });

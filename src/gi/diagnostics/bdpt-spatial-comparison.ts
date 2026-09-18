@@ -8,6 +8,7 @@ import type { GpuFrameSample } from "@/gi/performance";
 import { summarizeDurations } from "@/gi/performance";
 
 import candidateSource from "./bdpt-spatial-candidate.wgsl?raw";
+import { compareReservoirWords } from "./reservoir-diff";
 
 export interface SpatialComparisonHost {
   readonly device: GPUDevice;
@@ -29,9 +30,10 @@ const verifyFrozen = async (
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   });
   let baseline: Uint32Array | undefined;
-  const mismatches: number[] = [];
+  let candidateWords: Uint32Array | undefined;
+  const comparisons: ReturnType<typeof compareReservoirWords>[] = [];
   try {
-    for (const candidate of [false, true, false]) {
+    for (const [index, candidate] of [false, true, true, false].entries()) {
       signal.throwIfAborted();
       experiment.select(candidate);
       const commands: { label: string; finish: () => GPUCommandBuffer }[] = [];
@@ -68,27 +70,49 @@ const verifyFrozen = async (
       await staging.mapAsync(GPUMapMode.READ);
       try {
         const words = new Uint32Array(staging.getMappedRange());
-        if (!baseline) {
-          if (!words.some((word) => word !== 0))
-            throw new Error("Frozen spatial output is empty.");
+        if (index === 0) {
           baseline = words.slice();
         } else {
-          let changed = 0;
-          for (let i = 0; i < words.length; i++)
-            if (words[i] !== baseline[i]) changed++;
-          mismatches.push(changed);
+          const reference = index === 2 ? candidateWords : baseline;
+          if (!reference) throw new Error("Missing frozen reference.");
+          comparisons.push(
+            compareReservoirWords(reference, words, runtime.width),
+          );
+          if (index === 1) candidateWords = words.slice();
         }
       } finally {
         staging.unmap();
       }
     }
     signal.throwIfAborted();
-    if (!baseline || mismatches[0] === undefined || mismatches[1] === undefined)
+    const [candidateDifference, candidateRepeat, baselineRepeat] = comparisons;
+    if (
+      !baseline ||
+      !candidateWords ||
+      !candidateDifference ||
+      !candidateRepeat ||
+      !baselineRepeat
+    )
       throw new Error("Incomplete frozen verification.");
+    const baselineNonzero = baseline.some((word) => word !== 0);
+    const candidateNonzero = candidateWords.some((word) => word !== 0);
     return {
       comparedWords: baseline.length,
-      candidateChangedWords: mismatches[0],
-      baselineRepeatChangedWords: mismatches[1],
+      candidateChangedWords: candidateDifference.changedWords,
+      candidateRepeatChangedWords: candidateRepeat.changedWords,
+      baselineRepeatChangedWords: baselineRepeat.changedWords,
+      baselineNonzero,
+      candidateNonzero,
+      passed:
+        baselineNonzero &&
+        candidateNonzero &&
+        comparisons.every(
+          (comparison) =>
+            comparison.changedWords === 0 && comparison.nonFiniteValues === 0,
+        ),
+      candidateDifference,
+      candidateRepeat,
+      baselineRepeat,
     };
   } finally {
     experiment.select(false);
@@ -107,7 +131,7 @@ export const runBdptSpatialComparison = async (host: SpatialComparisonHost) => {
     description,
   } = device.adapterInfo;
   const metadata = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: "bdpt-spatial-ab-a",
     capturedAt: new Date().toISOString(),
     url: location.origin + location.pathname + location.search,
@@ -122,6 +146,9 @@ export const runBdptSpatialComparison = async (host: SpatialComparisonHost) => {
     submissionCount: runtime.submissionCount,
     submissionBatch: bdptSubmissionBatch(location.search),
     candidateRevision: "0a85a9783db6aa83b9f66c6f04011aa6174889a6",
+    frozenOrder: ["A1", "B1", "B2", "A2"],
+    relativeError:
+      "abs(reference - actual) / max(abs(reference), abs(actual)); zero for two finite zeros; non-finite values counted separately",
     warmupFrames: 5,
     sampleFrames: 6,
     cycles: 3,
@@ -184,11 +211,6 @@ export const runBdptSpatialComparison = async (host: SpatialComparisonHost) => {
       report(`Cycle ${cycle}/3: checking frozen spatial output`);
       const frozen = await verifyFrozen(host, experiment);
       report(JSON.stringify({ cycle, frozen }));
-      if (
-        frozen.candidateChangedWords !== 0 ||
-        frozen.baselineRepeatChangedWords !== 0
-      )
-        throw new Error("Frozen spatial output differs; comparison failed.");
       const [a1, b, a2] = phases;
       if (!a1 || !b || !a2) throw new Error("Incomplete comparison cycle.");
       cycles.push({
@@ -204,9 +226,16 @@ export const runBdptSpatialComparison = async (host: SpatialComparisonHost) => {
           baselineSpatialDrift: a2.spatialMs.median / a1.spatialMs.median,
         },
       });
+      if (!frozen.passed) break;
     }
     signal.throwIfAborted();
-    return { ...metadata, cycles };
+    return {
+      ...metadata,
+      outcome: cycles.every((cycle) => cycle.frozen.passed)
+        ? "matched"
+        : "mismatch",
+      cycles,
+    };
   } finally {
     experiment.select(false);
   }

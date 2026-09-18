@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { DEFAULT_CAMERA } from "@/gi/camera";
+import { keepDiagnosticScreenAwake } from "@/gi/diagnostics/screen-awake";
 import { GiRenderer } from "@/gi/renderer";
 import { DEFAULT_SETTINGS } from "@/gi/settings";
 
@@ -8,6 +9,7 @@ const BdptSpatialComparison = () => {
   const canvas = useRef<HTMLCanvasElement>(null);
   const active = useRef<AbortController | null>(null);
   const [running, setRunning] = useState(false);
+  const [screenStatus, setScreenStatus] = useState("");
   const [scene, setScene] = useState<"classic" | "glassShapes">("classic");
   const [size, setSize] = useState("353x738");
   const [lines, setLines] = useState<string[]>([]);
@@ -19,6 +21,7 @@ const BdptSpatialComparison = () => {
     const controller = new AbortController();
     active.current = controller;
     setRunning(true);
+    setScreenStatus("Requesting screen wake lock…");
     setLines([]);
     setResult("");
     setStatus("Running… Keep this tab visible.");
@@ -41,6 +44,13 @@ const BdptSpatialComparison = () => {
     };
     document.addEventListener("visibilitychange", visibility);
     controller.signal.addEventListener("abort", stop, { once: true });
+    const releaseWakeLock = keepDiagnosticScreenAwake(
+      controller.signal,
+      (message) => {
+        setScreenStatus(message);
+        report(message);
+      },
+    );
     try {
       if (document.hidden) throw new Error("The tab must be visible.");
       const url = new URL(location.href);
@@ -103,11 +113,14 @@ const BdptSpatialComparison = () => {
       controller.signal.throwIfAborted();
       setResult(JSON.stringify(output, null, 2));
       setStatus(
-        "Complete. Copy the result for comparison; no winner is selected automatically.",
+        output.outcome === "matched"
+          ? "Complete. Frozen outputs match; no winner is selected automatically."
+          : "Output mismatch. Stopped after this cycle; copy the report for diagnosis.",
       );
     } catch (error) {
       setStatus(String(controller.signal.reason ?? error));
     } finally {
+      releaseWakeLock();
       renderer?.destroy();
       document.removeEventListener("visibilitychange", visibility);
       controller.signal.removeEventListener("abort", stop);
@@ -134,8 +147,9 @@ const BdptSpatialComparison = () => {
       </p>
       <p className="mb-4">
         The candidate is experimental. Normal rendering continues to use the
-        baseline. Frozen spatial checks require identical output; full-frame
-        light sampling may vary. Nothing is uploaded automatically.
+        baseline. Frozen spatial checks report field differences and
+        repeatability; full-frame light sampling may vary. Nothing is uploaded
+        automatically.
       </p>
       <div className="mb-4 flex flex-wrap items-center gap-4">
         <label>
@@ -195,6 +209,11 @@ const BdptSpatialComparison = () => {
           Back to renderer
         </a>
       </div>
+      {running && (
+        <p aria-label="Screen wake lock" className="my-2 text-sm">
+          {screenStatus}
+        </p>
+      )}
       <p role="status">{status}</p>
       <div className="mt-4 flex flex-wrap items-start gap-4">
         <canvas aria-label="Comparison preview" ref={canvas} />
