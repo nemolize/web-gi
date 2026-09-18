@@ -52,8 +52,32 @@ or empty output stops further cycles but preserves the complete structured repor
 with `outcome: "mismatch"`, timings, and field details. A matching run has
 `outcome: "matched"`; this checks only sampled equivalence, not general rendering
 correctness. GPU errors, missing timestamps, changed dimensions, and cancellation
-remain execution failures. Frozen checks retain two CPU snapshots (about 83 MB
-at 353 × 738) plus one reusable GPU staging buffer.
+remain execution failures. Frozen checks retain two reference CPU snapshots
+(about 83 MB at 353 × 738), a transient output snapshot, and one reusable GPU
+staging buffer.
+
+When baseline/candidate words differ, `frozen.trace` records intermediate weights
+at the first differing pixel, using the same frozen input outside timing windows.
+It includes center inputs, accepted neighbor coordinates, inverse and forward
+estimators/Jacobians, pair weights, random selection values, running weight sums,
+and selected seeds. Each neighbor's stage flags distinguish skipped calculations
+from zero results. The candidate's inverse loop precedes its forward loop; rows
+are aligned by neighbor index, not execution time.
+
+Trace pipelines preserve the original shader calculations and write to a separate
+4,224-byte buffer. Instrumentation can change compiler output: each trace reports
+`instrumentationChangedWords` against its uninstrumented full-frame output and
+`targetChangedWords` for the traced pixel. `comparable` requires both full outputs
+to match exactly; a false value prevents treating the trace as a proven explanation
+of the original mismatch. An exact target match alone does not prove unchanged
+intermediate calculations. Raw bits and typed values are retained, including
+non-finite values as strings. A trace compilation or workgroup error is retained
+in `trace.error` without discarding the original comparison. Cancellation, device
+errors, and the overall diagnostic deadline still abort execution.
+
+For a diagnostic smoke test, `bdptSpatialTrace=1` also traces matching output,
+using pixel (6, 28), clamped to the render dimensions. This flag adds work between
+cycles and is not a performance measurement mode.
 
 Reports include the effective resolution, settings, camera, adapter information
 (as exposed by the browser), every BDPT workgroup size, dispatch cap, submission

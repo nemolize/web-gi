@@ -27,7 +27,10 @@ export interface BdptSpatialExperiment {
 
 export interface BdptPasses {
   readonly workgroups: Readonly<Record<string, number>>;
-  prepareSpatialExperiment(source: string): Promise<BdptSpatialExperiment>;
+  prepareSpatialExperiment(
+    source: string,
+    trace?: { buffer: GPUBuffer; label: string },
+  ): Promise<BdptSpatialExperiment>;
   readonly initialReservoirs: GPUBuffer;
   readonly reservoirs: GPUBuffer;
   readonly lightPathCount: number;
@@ -174,13 +177,16 @@ export const createBdptPasses = async (
             ]),
           ),
         },
-        prepareSpatialExperiment: async (source) => {
+        prepareSpatialExperiment: async (source, trace) => {
+          const experimentLayout = trace
+            ? layout(["read-only-storage", "storage", "storage"])
+            : spatialLayout;
           const candidate: BdptPipeline = await createBdptPipeline(
             device,
             sceneLayout,
-            "bdpt-spatial-candidate",
+            trace?.label ?? "bdpt-spatial-candidate",
             source,
-            spatialLayout,
+            experimentLayout,
             report,
             maxVertices,
           );
@@ -188,6 +194,11 @@ export const createBdptPasses = async (
             throw new Error(
               "Spatial workgroup sizes differ; this comparison is not controlled.",
             );
+          const experimentGroups = trace
+            ? history.map((input) =>
+                bind(experimentLayout, [input, scratch, trace.buffer]),
+              )
+            : spatialGroups;
           return {
             workgroups: {
               baseline: spatialPipeline.workgroupSize,
@@ -203,7 +214,9 @@ export const createBdptPasses = async (
                 encoder,
                 selectedSpatial,
                 scene,
-                spatialGroups[lastSpatialParity],
+                selectedSpatial === candidate
+                  ? experimentGroups[lastSpatialParity]
+                  : spatialGroups[lastSpatialParity],
                 initial.dispatch,
                 checkpoint,
               );
