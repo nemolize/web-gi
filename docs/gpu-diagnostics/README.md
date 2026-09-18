@@ -99,3 +99,29 @@ and reports stage completion plus periodic tile progress. This preserves image
 resolution and path budgets. See [mobile execution](../restir-bdpt/mobile-execution.md)
 for the normal-renderer path, comparison switch and remaining resource-pressure
 uncertainty.
+
+## Isolated spatial compilation
+
+For device loss while compiling `bdpt-spatial`, run these suites separately:
+
+| URL query                                | Change from production spatial                          |
+| ---------------------------------------- | ------------------------------------------------------- |
+| `?diagnostics=bdpt-spatial-full`         | None; compile spatial without earlier BDPT pipelines    |
+| `?diagnostics=bdpt-spatial-no-inverse`   | Remove center preparation and inverse replay            |
+| `?diagnostics=bdpt-spatial-no-forward`   | Remove forward replay and its reservoir update          |
+| `?diagnostics=bdpt-spatial-no-replay`    | Remove both replay paths                                |
+| `?diagnostics=bdpt-spatial-one-neighbor` | Bound the replay loop to exactly one neighbor iteration |
+
+Each Run requests a new device and compiles one variant with a 1x1 workgroup
+and capacity for 10 vertices (the reported classic-scene configuration).
+No render targets are allocated and no GPU work is dispatched. The existing
+30-second compiler timeout and Stop control apply. Restart the browser after
+a device loss before comparing another variant; a new device does not promise
+a fresh driver process or compiler cache.
+
+Start with `full`, then compare the reduced variants. A passing isolated full
+shader shifts investigation toward prior compilation or renderer setup; a
+failing one reproduces without those conditions. Removed calculations can
+also remove dependent code during compiler optimization, so a passing variant
+identifies a useful reduction, not a proven driver defect or rendering fix.
+The one-neighbor variant retains neighbor discovery and both replay directions.
