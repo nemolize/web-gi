@@ -1,6 +1,7 @@
 import { bdptShaderPrefix } from "@/gi/bdpt/pipeline";
 import type { DiagnosticSuite } from "@/gi/diagnostics/runner";
 import spatial from "@/gi/shaders/bdpt-spatial.wgsl?raw";
+import temporal from "@/gi/shaders/bdpt-temporal.wgsl?raw";
 
 const replaceOnce = (source: string, before: string, after: string): string => {
   if (source.split(before).length !== 2)
@@ -71,3 +72,37 @@ export const bdptSpatialCompileSuites: DiagnosticSuite[] = variants.map(
     ],
   }),
 );
+
+const fullSpatial = bdptSpatialCompileSuites[0]?.probes[0];
+if (!fullSpatial || !("code" in fullSpatial))
+  throw new Error("Expected a spatial compiler probe.");
+
+const [sceneBindings, , dispatchBindings] = fullSpatial.bindings;
+if (!sceneBindings || !dispatchBindings)
+  throw new Error("Missing compiler bindings.");
+
+bdptSpatialCompileSuites.push({
+  id: "bdpt-spatial-after-temporal",
+  label: "BDPT spatial: temporal then spatial",
+  version: 1,
+  retainPipelines: true,
+  stopOnFailure: true,
+  description:
+    "Compile temporal then full spatial on the same new device, retaining the temporal pipeline. Both use 10 vertices and a 1x1 workgroup. No buffers, rendering, or dispatches. Browser/compiler caches may survive a restart; success does not prove a fresh compilation.",
+  probes: [
+    {
+      ...fullSpatial,
+      label: "temporal / vertices=10 / workgroup=1x1",
+      code: `${replaceOnce(bdptShaderPrefix, "const BDPT_MAX_VERTICES: u32 = 32u;", "const BDPT_MAX_VERTICES: u32 = 10u;")}\n${temporal}`,
+      bindings: [
+        sceneBindings,
+        [0, 1, 2, 3].map((binding) => ({
+          binding,
+          buffer: { type: binding < 2 ? "read-only-storage" : "storage" },
+        })),
+        dispatchBindings,
+      ],
+    },
+    fullSpatial,
+  ],
+});

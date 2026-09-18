@@ -125,3 +125,13 @@ failing one reproduces without those conditions. Removed calculations can
 also remove dependent code during compiler optimization, so a passing variant
 identifies a useful reduction, not a proven driver defect or rendering fix.
 The one-neighbor variant retains neighbor discovery and both replay directions.
+
+Use `?diagnostics=bdpt-spatial-after-temporal` to compile production temporal,
+then the identical full spatial probe, on the same newly requested device.
+Both use capacity 10 and workgroup 1x1. The runner retains both pipelines until
+the suite finishes, reports their release count, and stops on the first failure
+so a failed temporal prerequisite cannot masquerade as a successful comparison.
+No buffers are allocated or GPU commands dispatched. Compare against
+`bdpt-spatial-full`; a passing pair leaves earlier initial pipelines and renderer
+allocations untested. Browser or driver caches can survive a browser restart,
+so a fast pass does not establish fresh backend compilation.
