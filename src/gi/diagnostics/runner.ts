@@ -18,6 +18,9 @@ export interface DiagnosticSuite {
   readonly label: string;
   readonly version: number;
   readonly description: string;
+  /** Keep compiled pipelines alive until the suite finishes. */
+  readonly retainPipelines?: boolean;
+  readonly stopOnFailure?: boolean;
   readonly probes: readonly (ComputeProbe | ExecutionProbe)[];
 }
 
@@ -45,6 +48,7 @@ export const runGpuDiagnostics = async (
     `Adapter: ${JSON.stringify({ vendor, architecture, device: adapterDevice, description })}`,
   );
   const device = await adapter.requestDevice();
+  const retainedPipelines: GPUComputePipeline[] = [];
   let loss: GPUDeviceLostInfo | null = null;
   void device.lost.then((info) => {
     loss = info;
@@ -99,7 +103,7 @@ export const runGpuDiagnostics = async (
               throw new Error(
                 errors.map((message) => message.message).join("\n"),
               );
-            await device.createComputePipelineAsync({
+            const pipeline = await device.createComputePipelineAsync({
               label,
               layout: device.createPipelineLayout({
                 bindGroupLayouts: probe.bindings.map((entries) =>
@@ -117,6 +121,8 @@ export const runGpuDiagnostics = async (
                 ...(probe.constants ? { constants: probe.constants } : {}),
               },
             });
+            if (active && suite.retainPipelines === true)
+              retainedPipelines.push(pipeline);
           })(),
           new Promise<never>((_, reject) => {
             timeout = setTimeout(() => reject(timeoutError), timeoutMs);
@@ -131,7 +137,12 @@ export const runGpuDiagnostics = async (
       } catch (error) {
         if (signal.aborted) return;
         report(`FAIL ${label}: ${String(error)}`);
-        if (error === timeoutError || loss !== null) return;
+        if (
+          error === timeoutError ||
+          loss !== null ||
+          suite.stopOnFailure === true
+        )
+          return;
       } finally {
         active = false;
         clearTimeout(timeout);
@@ -142,6 +153,9 @@ export const runGpuDiagnostics = async (
     report(`DONE. ${suite.description}`);
   } finally {
     signal.removeEventListener("abort", cancel);
+    if (suite.retainPipelines === true)
+      report(`Releasing ${retainedPipelines.length} retained pipeline(s).`);
+    retainedPipelines.length = 0;
     device.destroy();
   }
 };
