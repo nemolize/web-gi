@@ -135,3 +135,10 @@ No buffers are allocated or GPU commands dispatched. Compare against
 `bdpt-spatial-full`; a passing pair leaves earlier initial pipelines and renderer
 allocations untested. Browser or driver caches can survive a browser restart,
 so a fast pass does not establish fresh backend compilation.
+
+Use `?diagnostics=bdpt-temporal-after-spatial` for the reverse order. It reuses
+the exact same two probes, retention policy, and failure handling; only their
+order changes. Compare both reports after restarting the browser between runs.
+Failure at the second pipeline in both orders is consistent with cumulative
+pressure but does not prove it; only one failing order suggests order dependence.
+Neither result identifies the driver mechanism, and cache reuse remains possible.

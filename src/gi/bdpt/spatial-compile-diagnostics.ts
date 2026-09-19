@@ -81,7 +81,7 @@ const [sceneBindings, , dispatchBindings] = fullSpatial.bindings;
 if (!sceneBindings || !dispatchBindings)
   throw new Error("Missing compiler bindings.");
 
-bdptSpatialCompileSuites.push({
+const temporalThenSpatial: DiagnosticSuite = {
   id: "bdpt-spatial-after-temporal",
   label: "BDPT spatial: temporal then spatial",
   version: 1,
@@ -105,4 +105,13 @@ bdptSpatialCompileSuites.push({
     },
     fullSpatial,
   ],
+};
+
+bdptSpatialCompileSuites.push(temporalThenSpatial, {
+  ...temporalThenSpatial,
+  id: "bdpt-temporal-after-spatial",
+  label: "BDPT spatial: spatial then temporal",
+  description:
+    "Compile full spatial then temporal on the same new device, retaining the spatial pipeline. Both use 10 vertices and a 1x1 workgroup. No buffers, rendering, or dispatches. Browser/compiler caches may survive a restart; success does not prove a fresh compilation.",
+  probes: [...temporalThenSpatial.probes].reverse(),
 });
