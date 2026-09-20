@@ -142,3 +142,27 @@ order changes. Compare both reports after restarting the browser between runs.
 Failure at the second pipeline in both orders is consistent with cumulative
 pressure but does not prove it; only one failing order suggests order dependence.
 Neither result identifies the driver mechanism, and cache reuse remains possible.
+
+## Inverse preparation and application
+
+`?diagnostics=bdpt-inverse-prepare` compiles `bdptPrepareShift` alone.
+`?diagnostics=bdpt-inverse-apply` compiles `bdptApplyShift` alone, loading
+synthetic prepared metadata from runtime storage inputs. Both use capacity 10,
+workgroup 1x1, and a new device; neither allocates buffers or dispatches work.
+Restart the browser after device loss before trying the other suite.
+
+Preparation writes every returned field consumed by application to storage.
+Application reads those fields from storage and writes its shifted sample,
+candidate, PDF terms, film, caustic flag, and Jacobian. This keeps relevant
+helper results observable to the compiler without inventing constant paths
+that could eliminate branches. Unused endpoint/predecessor hit records are
+omitted because application does not read them.
+
+These remove the spatial neighbor loop and its guards as well as the other
+helper. Synthetic metadata does not represent a valid rendered path, and
+application's workspace starts empty (`bdptApplyShift` rebuilds its paths).
+A pass narrows the next experiment but does not establish rendering correctness
+or prove either helper safe when combined. Cache reuse remains possible.
+
+These helpers are also used by other replay paths; the probes isolate shared
+code used by the inverse path, not inverse-exclusive calculations.

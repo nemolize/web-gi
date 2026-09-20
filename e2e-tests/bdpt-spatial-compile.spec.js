@@ -115,3 +115,29 @@ for (const [suite, first, second] of [
     });
   }
 }
+
+for (const phase of ["prepare", "apply"]) {
+  test(`isolated inverse ${phase} compiles`, async ({ page }) => {
+    test.setTimeout(90_000);
+    await page.goto(`/?diagnostics=bdpt-inverse-${phase}`);
+    await expect(page.getByRole("combobox")).toHaveValue(
+      `bdpt-inverse-${phase}`,
+    );
+    await expect(page.locator("canvas")).toHaveCount(0);
+    test.skip(
+      !(await page.evaluate(async () =>
+        Boolean(await navigator.gpu?.requestAdapter()),
+      )),
+      "WebGPU is unavailable.",
+    );
+    await page
+      .getByRole("button", { name: "Run diagnostics", exact: true })
+      .click();
+    await expect(page.getByLabel("Diagnostic report")).toHaveValue(/DONE\./, {
+      timeout: 40_000,
+    });
+    const report = await page.getByLabel("Diagnostic report").inputValue();
+    expect(report).not.toContain("FAIL");
+    expect(report.match(/\] PASS /g)).toHaveLength(1);
+  });
+}
