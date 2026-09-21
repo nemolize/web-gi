@@ -53,12 +53,22 @@ const loadPrepared = `
   prepared.pdf = input.pdf;
 `;
 
+const prepareShift = `  let prepared = bdptPrepareShift(input.sample, uni.cam, gid.xy, uni.resolution.x * uni.resolution.y, &workspace);`;
+
+const applyShift = `
+  let shifted = bdptApplyShift(prepared, uni.cam, uni.cam, gid.xy, input.sample.techniqueSeeds.zw, uni.resolution.x * uni.resolution.y, &workspace);
+  var result: BdptShiftSource;
+  result.sample = shifted.sample;
+  result.evaluation = shifted.evaluation;
+  result.pdf = shifted.jacobian;
+  storePrepared(index, result);
+`;
+
 export const bdptInverseCompileSuites: DiagnosticSuite[] = [
   {
     id: "bdpt-inverse-prepare",
     label: "BDPT inverse: preparation only",
-    body: `
-  let prepared = bdptPrepareShift(input.sample, uni.cam, gid.xy, uni.resolution.x * uni.resolution.y, &workspace);
+    body: `${prepareShift}
   storePrepared(index, prepared);
 `,
   },
@@ -66,19 +76,21 @@ export const bdptInverseCompileSuites: DiagnosticSuite[] = [
     id: "bdpt-inverse-apply",
     label: "BDPT inverse: application only (synthetic input)",
     body: `${loadPrepared}
-  let shifted = bdptApplyShift(prepared, uni.cam, uni.cam, gid.xy, input.sample.techniqueSeeds.zw, uni.resolution.x * uni.resolution.y, &workspace);
-  var result: BdptShiftSource;
-  result.sample = shifted.sample;
-  result.evaluation = shifted.evaluation;
-  result.pdf = shifted.jacobian;
-  storePrepared(index, result);
-`,
+${applyShift}`,
   },
-].map(({ id, label, body }) => ({
+  {
+    id: "bdpt-inverse-combined",
+    label: "BDPT inverse: preparation then application once",
+    description:
+      "Compile preparation then application once in the same shader, with 10 vertices and a 1x1 workgroup. Application consumes the actual prepared result using the same workspace. Runtime storage inputs and output writes retain relevant data flow. No dispatch, buffers, neighbor loop, or earlier pipelines. Cache reuse remains possible.",
+    body: `${prepareShift}\n${applyShift}`,
+  },
+].map(({ id, label, body, description }) => ({
   id,
   label,
   version: 1,
   description:
+    description ??
     "Compile one isolated inverse helper, with 10 vertices and a 1x1 workgroup. Runtime storage inputs and output writes retain relevant data flow. Application uses synthetic prepared metadata, not a valid rendered path. No dispatch, buffers, neighbor loop, or earlier pipelines. Cache reuse remains possible.",
   probes: [
     {

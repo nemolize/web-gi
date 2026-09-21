@@ -166,3 +166,12 @@ or prove either helper safe when combined. Cache reuse remains possible.
 
 These helpers are also used by other replay paths; the probes isolate shared
 code used by the inverse path, not inverse-exclusive calculations.
+
+`?diagnostics=bdpt-inverse-combined` calls preparation once, then feeds its
+actual result to one application call in the same shader and workspace.
+It shares the standalone probes' input layout, runtime destination, output
+writes, vertex capacity, and workgroup size. No spatial neighbor loop or
+renderer resources are included. Compare with both standalone helpers:
+a failure here reproduces without the neighbor loop; a pass leaves combined
+code inside the spatial loop and surrounding control flow untested. Source
+calls remain subject to compiler optimization and caching.
