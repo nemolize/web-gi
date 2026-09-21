@@ -25,14 +25,11 @@ const withoutInverse = replaceOnce(
   applyInverse,
   "",
 );
+const withoutForward = replaceOnce(spatial, applyForward, "");
 const variants = [
   ["full", "production spatial alone", spatial],
   ["no-inverse", "without inverse replay", withoutInverse],
-  [
-    "no-forward",
-    "without forward replay",
-    replaceOnce(spatial, applyForward, ""),
-  ],
+  ["no-forward", "without forward replay", withoutForward],
   [
     "no-replay",
     "without either replay",
@@ -42,6 +39,11 @@ const variants = [
     "one-neighbor",
     "one neighbor iteration",
     replaceOnce(spatial, "sourceIndex < count", "sourceIndex < 2u"),
+  ],
+  [
+    "inverse-one-neighbor",
+    "inverse replay with one neighbor iteration",
+    replaceOnce(withoutForward, "sourceIndex < count", "sourceIndex < 2u"),
   ],
 ] as const;
 

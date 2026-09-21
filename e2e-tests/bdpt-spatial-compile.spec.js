@@ -6,6 +6,7 @@ for (const variant of [
   "no-forward",
   "no-replay",
   "one-neighbor",
+  "inverse-one-neighbor",
 ]) {
   test(`isolated spatial compilation: ${variant}`, async ({ page }) => {
     test.setTimeout(90_000);

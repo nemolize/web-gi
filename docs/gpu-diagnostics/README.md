@@ -175,3 +175,14 @@ renderer resources are included. Compare with both standalone helpers:
 a failure here reproduces without the neighbor loop; a pass leaves combined
 code inside the spatial loop and surrounding control flow untested. Source
 calls remain subject to compiler optimization and caching.
+
+`?diagnostics=bdpt-spatial-inverse-one-neighbor` starts from the inverse-only
+`bdpt-spatial-no-forward` variant and changes only the source replay loop bound
+to one neighbor. Neighbor discovery, preparation, inverse guards, and pairwise
+weight/output calculations remain in the source. The existing `count == 1`
+early return still skips pixels with no accepted neighbor. This is a compiler
+reduction, not a correctly normalized rendering mode. Compare against
+`bdpt-spatial-no-forward` from the same preview; unlike `bdpt-inverse-combined`,
+it retains spatial's surrounding control flow. A passing reduction implicates
+loop-dependent compilation but does not prove a driver mechanism or exclude
+cache/state effects.
