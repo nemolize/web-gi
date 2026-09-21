@@ -186,3 +186,12 @@ reduction, not a correctly normalized rendering mode. Compare against
 it retains spatial's surrounding control flow. A passing reduction implicates
 loop-dependent compilation but does not prove a driver mechanism or exclude
 cache/state effects.
+
+`?diagnostics=bdpt-spatial-inverse-two-neighbors` uses a constant two-slot replay
+loop bound. A guard skips a slot before reading `domains[sourceIndex]` when
+fewer than two neighbors were discovered; the no-neighbor return remains.
+Compare with `inverse-one-neighbor` and `no-forward` from the same preview.
+This adds a guarded second inverse replay while preserving discovery and weight
+calculations. Actual compiler unrolling is not guaranteed. Success or failure
+helps distinguish a fixed small bound from the original variable bound, but
+cannot by itself identify a driver defect or prove a general resource limit.

@@ -45,6 +45,15 @@ const variants = [
     "inverse replay with one neighbor iteration",
     replaceOnce(withoutForward, "sourceIndex < count", "sourceIndex < 2u"),
   ],
+  [
+    "inverse-two-neighbors",
+    "inverse replay with up to two neighbors",
+    replaceOnce(
+      withoutForward,
+      "for (var sourceIndex = 1u; sourceIndex < count; sourceIndex++) {",
+      "for (var sourceIndex = 1u; sourceIndex < 3u; sourceIndex++) {\n    if (sourceIndex >= count) { continue; }",
+    ),
+  ],
 ] as const;
 
 export const bdptSpatialCompileSuites: DiagnosticSuite[] = variants.map(
