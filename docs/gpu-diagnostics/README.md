@@ -195,3 +195,18 @@ This adds a guarded second inverse replay while preserving discovery and weight
 calculations. Actual compiler unrolling is not guaranteed. Success or failure
 helps distinguish a fixed small bound from the original variable bound, but
 cannot by itself identify a driver defect or prove a general resource limit.
+
+`?diagnostics=bdpt-inverse-combined-twice` prepares once and explicitly applies
+twice in separate source blocks, sharing the prepared result and workspace.
+The destinations come from two runtime input fields. Each result is stored
+in a separate output slot so the first write is not overwritten or dead.
+This removes only the outer replay loop; helper-internal loops remain.
+
+For a closer loop comparison, `?diagnostics=bdpt-inverse-combined-loop-two`
+uses the same inputs, destinations, output slots, and workspace but calls
+application inside a fixed two-iteration loop. Neither probe includes spatial
+neighbor discovery, pairwise weighting, or neighbor-availability guards.
+Both remain compilation-only with capacity 10 and workgroup 1x1. A difference
+between the pair implicates their compilation structure, not necessarily the
+original spatial loop; optimizer transformations and cache/state effects remain
+unmeasured. A pass does not establish valid rendered output from synthetic inputs.

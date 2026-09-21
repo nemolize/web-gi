@@ -55,13 +55,13 @@ const loadPrepared = `
 
 const prepareShift = `  let prepared = bdptPrepareShift(input.sample, uni.cam, gid.xy, uni.resolution.x * uni.resolution.y, &workspace);`;
 
-const applyShift = `
-  let shifted = bdptApplyShift(prepared, uni.cam, uni.cam, gid.xy, input.sample.techniqueSeeds.zw, uni.resolution.x * uni.resolution.y, &workspace);
+const applyShift = (destination: string, outputIndex: string) => `
+  let shifted = bdptApplyShift(prepared, uni.cam, uni.cam, gid.xy, ${destination}, uni.resolution.x * uni.resolution.y, &workspace);
   var result: BdptShiftSource;
   result.sample = shifted.sample;
   result.evaluation = shifted.evaluation;
   result.pdf = shifted.jacobian;
-  storePrepared(index, result);
+  storePrepared(${outputIndex}, result);
 `;
 
 export const bdptInverseCompileSuites: DiagnosticSuite[] = [
@@ -76,14 +76,33 @@ export const bdptInverseCompileSuites: DiagnosticSuite[] = [
     id: "bdpt-inverse-apply",
     label: "BDPT inverse: application only (synthetic input)",
     body: `${loadPrepared}
-${applyShift}`,
+${applyShift("input.sample.techniqueSeeds.zw", "index")}`,
   },
   {
     id: "bdpt-inverse-combined",
     label: "BDPT inverse: preparation then application once",
     description:
       "Compile preparation then application once in the same shader, with 10 vertices and a 1x1 workgroup. Application consumes the actual prepared result using the same workspace. Runtime storage inputs and output writes retain relevant data flow. No dispatch, buffers, neighbor loop, or earlier pipelines. Cache reuse remains possible.",
-    body: `${prepareShift}\n${applyShift}`,
+    body: `${prepareShift}\n${applyShift("input.sample.techniqueSeeds.zw", "index")}`,
+  },
+  {
+    id: "bdpt-inverse-combined-twice",
+    label: "BDPT inverse: two explicit applications",
+    description:
+      "Compile one preparation and two explicit applications sharing one workspace, with 10 vertices and a 1x1 workgroup. Destinations come from two independent runtime input fields; results go to separate output slots. No outer replay loop, dispatch, buffers, or earlier pipelines. Cache reuse remains possible.",
+    body: `${prepareShift}
+  { ${applyShift("input.sample.techniqueSeeds.zw", "2u * index")} }
+  { ${applyShift("input.pixel", "2u * index + 1u")} }`,
+  },
+  {
+    id: "bdpt-inverse-combined-loop-two",
+    label: "BDPT inverse: two applications in a loop",
+    description:
+      "Compile one preparation and a fixed two-iteration application loop sharing one workspace, with 10 vertices and a 1x1 workgroup. Uses the same two destinations and separate outputs as the explicit-call probe. No neighbor discovery, dispatch, buffers, or earlier pipelines. Compiler unrolling and cache behavior are unknown.",
+    body: `${prepareShift}
+  for (var slot = 0u; slot < 2u; slot++) {
+    ${applyShift("select(input.sample.techniqueSeeds.zw, input.pixel, slot == 1u)", "2u * index + slot")}
+  }`,
   },
 ].map(({ id, label, body, description }) => ({
   id,

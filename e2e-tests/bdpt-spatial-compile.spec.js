@@ -118,7 +118,13 @@ for (const [suite, first, second] of [
   }
 }
 
-for (const phase of ["prepare", "apply", "combined"]) {
+for (const phase of [
+  "prepare",
+  "apply",
+  "combined",
+  "combined-twice",
+  "combined-loop-two",
+]) {
   test(`isolated inverse ${phase} compiles`, async ({ page }) => {
     test.setTimeout(90_000);
     await page.goto(`/?diagnostics=bdpt-inverse-${phase}`);
