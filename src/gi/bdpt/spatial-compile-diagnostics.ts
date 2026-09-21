@@ -26,6 +26,17 @@ const withoutInverse = replaceOnce(
   "",
 );
 const withoutForward = replaceOnce(spatial, applyForward, "");
+const inverseTwoNeighbors = replaceOnce(
+  withoutForward,
+  "for (var sourceIndex = 1u; sourceIndex < count; sourceIndex++) {",
+  "for (var sourceIndex = 1u; sourceIndex < 3u; sourceIndex++) {\n    if (sourceIndex >= count) { continue; }",
+);
+const discoverNeighbors =
+  "  var count = 1u;\n  let radius = spatialPixelRadius(uni.cam, surfaceDepth(uni.cam, surface.pos));\n  for (var attempt = 0u; attempt < min(32u, uni.spatialSamples); attempt++) {\n    let offset = spatialOffset(radius, bdptRandom() * 2.0 * PI, bdptRandom());\n    let coordinate = vec2i(pixel) + offset;\n    if (any(coordinate < vec2i(0)) || any(coordinate >= vec2i(uni.resolution))) { continue; }\n    let neighbor = vec2u(coordinate);\n    var duplicate = false;\n    for (var other = 0u; other < count; other++) {\n      duplicate = duplicate || all(domains[other] == neighbor);\n    }\n    if (duplicate) { continue; }\n    let hit = traceScenePrimary(uni.cam.pos.xyz, primaryRayDir(uni.cam, pixelNdc(neighbor)));\n    let difference = hit.pos - surface.pos;\n    let normalDistance = dot(difference, surface.normal);\n    if (!hit.hit || hit.materialIndex > 0u || dot(hit.normal, surface.normal) < 0.9\n      || abs(normalDistance) > 0.05 || length(difference - normalDistance * surface.normal) > uni.spatialRadius) { continue; }\n    domains[count] = neighbor;\n    count++;\n  }\n";
+const syntheticNeighbors = `  let count = 1u + center.normal.path.sample.techniqueSeeds.w % 3u;
+  domains[1] = vec2u((pixel.x + 1u) % uni.resolution.x, pixel.y);
+  domains[2] = vec2u(pixel.x, (pixel.y + 1u) % uni.resolution.y);
+`;
 const variants = [
   ["full", "production spatial alone", spatial],
   ["no-inverse", "without inverse replay", withoutInverse],
@@ -48,11 +59,12 @@ const variants = [
   [
     "inverse-two-neighbors",
     "inverse replay with up to two neighbors",
-    replaceOnce(
-      withoutForward,
-      "for (var sourceIndex = 1u; sourceIndex < count; sourceIndex++) {",
-      "for (var sourceIndex = 1u; sourceIndex < 3u; sourceIndex++) {\n    if (sourceIndex >= count) { continue; }",
-    ),
+    inverseTwoNeighbors,
+  ],
+  [
+    "inverse-two-no-discovery",
+    "inverse replay: two slots without neighbor discovery",
+    replaceOnce(inverseTwoNeighbors, discoverNeighbors, syntheticNeighbors),
   ],
 ] as const;
 

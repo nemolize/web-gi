@@ -210,3 +210,20 @@ Both remain compilation-only with capacity 10 and workgroup 1x1. A difference
 between the pair implicates their compilation structure, not necessarily the
 original spatial loop; optimizer transformations and cache/state effects remain
 unmeasured. A pass does not establish valid rendered output from synthetic inputs.
+
+`?diagnostics=bdpt-spatial-inverse-two-no-discovery` starts from the failing
+guarded two-neighbor inverse spatial variant and replaces discovery with two
+synthetic adjacent coordinates (wrapped to the render dimensions). The active
+slot count comes from reservoir data, allowing zero, one, or two neighbors so
+the no-neighbor and slot-availability guards remain runtime-dependent.
+
+Center-surface tracing, RNG initialization, inverse preparation/application,
+the two-slot replay loop, pairwise weighting, and output writes remain in the
+source. Random neighbor search, duplicate rejection, and neighbor geometric
+checks are absent. Tiny render dimensions can produce duplicate synthetic
+coordinates; no claim of valid resampling is made. This changes neighbor/count
+provenance and RNG consumption as well as discovery code, so a passing probe
+identifies a reduction rather than proving that a specific discovery operation
+causes the compiler failure. Compare with `inverse-two-neighbors` from the same
+preview. No rendering is performed, and compiler optimization/caches remain
+unmeasured.
