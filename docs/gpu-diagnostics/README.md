@@ -279,3 +279,22 @@ the same preview to separate the source-level gate change from the added output
 writes. The gate intentionally prevents replay on rejected surfaces; all other
 source, bindings, and constants match. A differing outcome still does not establish
 which compiler transformation fails, and cache/state effects remain possible.
+
+The matched surface-gate control passed on Adreno (2178 ms), while the unchanged
+`inverse-two-direct-output` failed again on that same preview (2276 ms).
+Two further reductions each remove one predicate-output assignment from the
+passing control, keeping the surface trace, early return, and inverse payloads:
+
+- `?diagnostics=bdpt-spatial-inverse-two-surface-pre-output` stores the predicate
+  before the gate only. The final pair write overwrites it when replay completes;
+  it remains observable on the surface-rejection and no-neighbor return paths.
+- `?diagnostics=bdpt-spatial-inverse-two-surface-final-output` stores the predicate
+  at the end only. Early-return paths retain the original center output. At the
+  final write the surface has passed the gate, so the predicate must be zero and
+  a compiler may fold it to a constant.
+
+Neither reduction promises identical optimized tracing or control flow. They test
+which source-level output assignment affects compilation, not a driver mechanism
+or valid resampling. Compare each with `inverse-two-surface-with-gate` and the
+unchanged direct-output control on the same preview; restart the browser after
+any device loss. Compilation only, no rendering, and cache effects remain possible.

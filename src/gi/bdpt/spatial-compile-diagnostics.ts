@@ -94,6 +94,11 @@ const inverseSurfaceNoGate = replaceOnce(
   "  finalReservoirs[index] = diagnosticOutput;",
   "  diagnosticOutput.normal.path.confidence = surfaceRejected;\n  finalReservoirs[index] = diagnosticOutput;",
 );
+const inverseSurfaceWithGate = replaceOnce(
+  inverseSurfaceNoGate,
+  "  finalReservoirs[index].normal.path.confidence = surfaceRejected;",
+  "  finalReservoirs[index].normal.path.confidence = surfaceRejected;\n  if (!surface.hit || surface.materialIndex > 0u) { return; }",
+);
 const variants = [
   ["full", "production spatial alone", spatial],
   ["no-inverse", "without inverse replay", withoutInverse],
@@ -145,10 +150,24 @@ const variants = [
   [
     "inverse-two-surface-with-gate",
     "inverse replay: surface result with early return",
+    inverseSurfaceWithGate,
+  ],
+  [
+    "inverse-two-surface-pre-output",
+    "inverse replay: surface predicate output before gate only",
     replaceOnce(
-      inverseSurfaceNoGate,
-      "  finalReservoirs[index].normal.path.confidence = surfaceRejected;",
-      "  finalReservoirs[index].normal.path.confidence = surfaceRejected;\n  if (!surface.hit || surface.materialIndex > 0u) { return; }",
+      inverseSurfaceWithGate,
+      "  diagnosticOutput.normal.path.confidence = surfaceRejected;\n",
+      "",
+    ),
+  ],
+  [
+    "inverse-two-surface-final-output",
+    "inverse replay: surface predicate output at end only",
+    replaceOnce(
+      inverseSurfaceWithGate,
+      "  finalReservoirs[index].normal.path.confidence = surfaceRejected;\n",
+      "",
     ),
   ],
 ] as const;
