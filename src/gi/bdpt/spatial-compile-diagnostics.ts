@@ -37,6 +37,54 @@ const syntheticNeighbors = `  let count = 1u + center.normal.path.sample.techniq
   domains[1] = vec2u((pixel.x + 1u) % uni.resolution.x, pixel.y);
   domains[2] = vec2u(pixel.x, (pixel.y + 1u) % uni.resolution.y);
 `;
+const inverseNoDiscovery = replaceOnce(
+  inverseTwoNeighbors,
+  discoverNeighbors,
+  syntheticNeighbors,
+);
+const directInverse = `    if (centerTarget > 0.0 && source.path.confidence > 0.0) {
+      let inverse = bdptApplyShift(preparedCenter, uni.cam, uni.cam, pixel, sourcePixel, lightCount, &workspace);
+      var result = center.normal;
+      result.path.sample = BdptPathSample(inverse.sample.techniqueSeeds,
+        vec4f(inverse.evaluation.candidate.estimator, inverse.evaluation.candidate.misWeight));
+      result.path.weightSum = inverse.jacobian;
+      if (sourceIndex == 1u) { diagnosticOutput.normal = result; }
+      else { diagnosticOutput.caustic = result; }
+    }
+`;
+const finalizeWeights = `  gRngState = selectionState;
+  let selectedCenter = bdptUpdateReservoir(&output.path, center.normal.path.sample,
+    center.normal.path.contributionWeight, centerWeight / f32(count), 1.0, bdptRandom());
+  if (selectedCenter) { output.coordinates = center.normal.coordinates; output.cameraReconnection = center.normal.cameraReconnection; }
+  output.path.confidence = min(confidence, f32(max(1u, uni.maxHistory)));
+  bdptFinalizeReservoir(&output.path);
+  finalReservoirs[index] = BdptReservoirPair(output, center.caustic);`;
+let inverseDirectOutput = replaceOnce(
+  inverseNoDiscovery,
+  applyInverse,
+  directInverse,
+);
+inverseDirectOutput = replaceOnce(
+  inverseDirectOutput,
+  finalizeWeights,
+  "  finalReservoirs[index] = diagnosticOutput;",
+);
+inverseDirectOutput = replaceOnce(
+  inverseDirectOutput,
+  "  var selectionState = gRngState;",
+  "  var diagnosticOutput = center;",
+);
+for (const statement of [
+  "  var confidence = center.normal.path.confidence;\n",
+  "  var output = bdptEmptyReplayReservoir(confidence);\n",
+  "  let centerConfidence = confidence / f32(min(32u, uni.spatialSamples));\n",
+  "  var centerWeight = 1.0;\n",
+  "    confidence += source.path.confidence;\n",
+  "    var centerPairWeight = 1.0;\n",
+  "    centerWeight += centerPairWeight;\n",
+]) {
+  inverseDirectOutput = replaceOnce(inverseDirectOutput, statement, "");
+}
 const variants = [
   ["full", "production spatial alone", spatial],
   ["no-inverse", "without inverse replay", withoutInverse],
@@ -64,7 +112,12 @@ const variants = [
   [
     "inverse-two-no-discovery",
     "inverse replay: two slots without neighbor discovery",
-    replaceOnce(inverseTwoNeighbors, discoverNeighbors, syntheticNeighbors),
+    inverseNoDiscovery,
+  ],
+  [
+    "inverse-two-direct-output",
+    "inverse replay: two slots with direct output",
+    inverseDirectOutput,
   ],
 ] as const;
 

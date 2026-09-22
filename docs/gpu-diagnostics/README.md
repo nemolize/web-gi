@@ -227,3 +227,19 @@ identifies a reduction rather than proving that a specific discovery operation
 causes the compiler failure. Compare with `inverse-two-neighbors` from the same
 preview. No rendering is performed, and compiler optimization/caches remain
 unmeasured.
+
+`?diagnostics=bdpt-spatial-inverse-two-direct-output` starts from
+`inverse-two-no-discovery` (which also failed on the affected Adreno device).
+It removes pairwise weighting, confidence accumulation, reservoir selection,
+and finalization. Each inverse result's technique seeds, estimator, MIS weight,
+and Jacobian go to a separate member of the output pair: slot one uses `normal`,
+slot two uses `caustic`, with the Jacobian stored in `path.weightSum`.
+These fields are diagnostic payloads, not valid rendering reservoirs.
+
+The runtime count, slot-availability guard, center-surface checks, preparation
+condition, source-confidence guard, and shared workspace remain. Separate output
+members keep the first result observable when the second slot runs. This changes
+output data flow and loop-carried state as well as weight calculations; a pass
+would not prove a specific weighting operation caused the failure. Compare with
+`inverse-two-no-discovery` from the same preview. Compilation only, no dispatch;
+compiler optimization and cache behavior remain unknown.
