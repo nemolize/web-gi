@@ -170,6 +170,24 @@ const variants = [
       "",
     ),
   ],
+  [
+    "inverse-two-final-zero-confidence",
+    "inverse replay: final constant zero confidence",
+    replaceOnce(
+      inverseDirectOutput,
+      "  finalReservoirs[index] = diagnosticOutput;",
+      "  diagnosticOutput.normal.path.confidence = 0.0;\n  finalReservoirs[index] = diagnosticOutput;",
+    ),
+  ],
+  [
+    "inverse-two-final-restore-confidence",
+    "inverse replay: final original confidence",
+    replaceOnce(
+      inverseDirectOutput,
+      "  finalReservoirs[index] = diagnosticOutput;",
+      "  diagnosticOutput.normal.path.confidence = center.normal.path.confidence;\n  finalReservoirs[index] = diagnosticOutput;",
+    ),
+  ],
 ] as const;
 
 export const bdptSpatialCompileSuites: DiagnosticSuite[] = variants.map(

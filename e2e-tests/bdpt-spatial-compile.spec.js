@@ -15,6 +15,8 @@ for (const variant of [
   "inverse-two-surface-with-gate",
   "inverse-two-surface-pre-output",
   "inverse-two-surface-final-output",
+  "inverse-two-final-zero-confidence",
+  "inverse-two-final-restore-confidence",
 ]) {
   test(`isolated spatial compilation: ${variant}`, async ({ page }) => {
     test.setTimeout(90_000);
