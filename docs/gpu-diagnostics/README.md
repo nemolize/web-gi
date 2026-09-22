@@ -269,3 +269,13 @@ scheduling, register pressure, and caching remain unmeasured. A pass would narro
 the source-level trigger, not establish a driver mechanism. Compare both preceding
 variants on the same preview. These remain compilation-only diagnostic payloads,
 not valid rendering modes.
+
+`?diagnostics=bdpt-spatial-inverse-two-surface-with-gate` is the matched control
+for `inverse-two-surface-no-gate`, which passed on the affected Adreno device
+(2331 ms). It retains exactly the same predicate output writes and adds the
+original miss/material early return immediately after the first predicate write.
+The no-gate variant's generated source remains unchanged. Compare this pair on
+the same preview to separate the source-level gate change from the added output
+writes. The gate intentionally prevents replay on rejected surfaces; all other
+source, bindings, and constants match. A differing outcome still does not establish
+which compiler transformation fails, and cache/state effects remain possible.

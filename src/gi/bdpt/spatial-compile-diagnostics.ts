@@ -85,6 +85,15 @@ for (const statement of [
 ]) {
   inverseDirectOutput = replaceOnce(inverseDirectOutput, statement, "");
 }
+const inverseSurfaceNoGate = replaceOnce(
+  replaceOnce(
+    inverseDirectOutput,
+    "  if (!surface.hit || surface.materialIndex > 0u) { return; }",
+    "  let surfaceRejected = select(0.0, 1.0, !surface.hit || surface.materialIndex > 0u);\n  finalReservoirs[index].normal.path.confidence = surfaceRejected;",
+  ),
+  "  finalReservoirs[index] = diagnosticOutput;",
+  "  diagnosticOutput.normal.path.confidence = surfaceRejected;\n  finalReservoirs[index] = diagnosticOutput;",
+);
 const variants = [
   ["full", "production spatial alone", spatial],
   ["no-inverse", "without inverse replay", withoutInverse],
@@ -131,14 +140,15 @@ const variants = [
   [
     "inverse-two-surface-no-gate",
     "inverse replay: surface result without early return",
+    inverseSurfaceNoGate,
+  ],
+  [
+    "inverse-two-surface-with-gate",
+    "inverse replay: surface result with early return",
     replaceOnce(
-      replaceOnce(
-        inverseDirectOutput,
-        "  if (!surface.hit || surface.materialIndex > 0u) { return; }",
-        "  let surfaceRejected = select(0.0, 1.0, !surface.hit || surface.materialIndex > 0u);\n  finalReservoirs[index].normal.path.confidence = surfaceRejected;",
-      ),
-      "  finalReservoirs[index] = diagnosticOutput;",
-      "  diagnosticOutput.normal.path.confidence = surfaceRejected;\n  finalReservoirs[index] = diagnosticOutput;",
+      inverseSurfaceNoGate,
+      "  finalReservoirs[index].normal.path.confidence = surfaceRejected;",
+      "  finalReservoirs[index].normal.path.confidence = surfaceRejected;\n  if (!surface.hit || surface.materialIndex > 0u) { return; }",
     ),
   ],
 ] as const;
