@@ -243,3 +243,14 @@ output data flow and loop-carried state as well as weight calculations; a pass
 would not prove a specific weighting operation caused the failure. Compare with
 `inverse-two-no-discovery` from the same preview. Compilation only, no dispatch;
 compiler optimization and cache behavior remain unknown.
+
+`?diagnostics=bdpt-spatial-inverse-two-no-surface` reduces `inverse-two-direct-output`
+(which also failed on the affected Adreno device). It removes the center's primary
+surface trace and its miss/material early return. All remaining source is unchanged:
+dispatch bounds, feature flags, runtime count and slot guards, conditional inverse
+preparation/application, shared workspace, and separate direct outputs remain.
+Replay-internal scene tracing is still present. This removes both a trace and its
+control dependency, so a difference cannot distinguish trace complexity from the
+early return's compilation effects. This is a compilation probe, not a rendering
+fix; compare with `inverse-two-direct-output` on the same preview. Optimizer and
+cache behavior remain unmeasured.

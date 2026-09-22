@@ -10,6 +10,7 @@ for (const variant of [
   "inverse-two-neighbors",
   "inverse-two-no-discovery",
   "inverse-two-direct-output",
+  "inverse-two-no-surface",
 ]) {
   test(`isolated spatial compilation: ${variant}`, async ({ page }) => {
     test.setTimeout(90_000);

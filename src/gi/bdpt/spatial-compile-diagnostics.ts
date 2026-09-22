@@ -119,6 +119,15 @@ const variants = [
     "inverse replay: two slots with direct output",
     inverseDirectOutput,
   ],
+  [
+    "inverse-two-no-surface",
+    "inverse replay: direct output without center surface check",
+    replaceOnce(
+      inverseDirectOutput,
+      "  let surface = traceScenePrimary(uni.cam.pos.xyz, primaryRayDir(uni.cam, pixelNdc(pixel)));\n  if (!surface.hit || surface.materialIndex > 0u) { return; }\n",
+      "",
+    ),
+  ],
 ] as const;
 
 export const bdptSpatialCompileSuites: DiagnosticSuite[] = variants.map(
