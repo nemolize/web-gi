@@ -128,6 +128,19 @@ const variants = [
       "",
     ),
   ],
+  [
+    "inverse-two-surface-no-gate",
+    "inverse replay: surface result without early return",
+    replaceOnce(
+      replaceOnce(
+        inverseDirectOutput,
+        "  if (!surface.hit || surface.materialIndex > 0u) { return; }",
+        "  let surfaceRejected = select(0.0, 1.0, !surface.hit || surface.materialIndex > 0u);\n  finalReservoirs[index].normal.path.confidence = surfaceRejected;",
+      ),
+      "  finalReservoirs[index] = diagnosticOutput;",
+      "  diagnosticOutput.normal.path.confidence = surfaceRejected;\n  finalReservoirs[index] = diagnosticOutput;",
+    ),
+  ],
 ] as const;
 
 export const bdptSpatialCompileSuites: DiagnosticSuite[] = variants.map(

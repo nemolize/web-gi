@@ -254,3 +254,18 @@ control dependency, so a difference cannot distinguish trace complexity from the
 early return's compilation effects. This is a compilation probe, not a rendering
 fix; compare with `inverse-two-direct-output` on the same preview. Optimizer and
 cache behavior remain unmeasured.
+
+`?diagnostics=bdpt-spatial-inverse-two-surface-no-gate` returns to
+`inverse-two-direct-output`, retaining the center surface trace but replacing its
+early return with an observable predicate. The original miss/material predicate
+is encoded as 0 or 1 in `normal.path.confidence`, written both before the
+no-neighbor return and after replay so neither path discards it. All other guards,
+shared workspace, inverse calls, and separate inverse output payloads remain.
+
+The no-surface reduction passed on the affected Adreno device (1776 ms), whereas
+direct-output failed. This probe tests the trace without making inverse replay
+conditional on its result. It changes control and output data flow; compiler
+scheduling, register pressure, and caching remain unmeasured. A pass would narrow
+the source-level trigger, not establish a driver mechanism. Compare both preceding
+variants on the same preview. These remain compilation-only diagnostic payloads,
+not valid rendering modes.
