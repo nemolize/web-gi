@@ -657,11 +657,106 @@ describe("frame-count ratios", () => {
           ]),
         );
         expect(summary.cases[0]?.frameRatio).toBeNull();
+        expect(summary.cases[0]?.fpsRatio).toBeNull();
         expect(formatComparisonMatrixSummary(summary)).toContain(
           "| classic/front | n/a | n/a | n/a | 2 |",
         );
         expect(
           JSON.parse(JSON.stringify(summary)).cases[0].frameRatio,
+        ).toBeNull();
+      }
+    },
+  );
+});
+
+describe("measured FPS ratios", () => {
+  it("normalizes actual durations within each repeat before summarizing", () => {
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase(
+          "classic",
+          "front",
+          { targetFrames: 10, actualDurationMs: 5000 },
+          { targetFrames: 20, actualDurationMs: 20000 },
+          0,
+        ),
+        matrixCase("manyLights", "front", {}, { targetFrames: 30 }, 0),
+        matrixCase(
+          "classic",
+          "front",
+          { targetFrames: 100, actualDurationMs: 10000 },
+          { targetFrames: 30, actualDurationMs: 1000 },
+          1,
+        ),
+        matrixCase(
+          "classic",
+          "front",
+          { targetFrames: 101, actualDurationMs: 5000 },
+          { targetFrames: 202, actualDurationMs: 10000 },
+          2,
+        ),
+      ]),
+    );
+    expect(summary.cases[0]?.fpsRatio).toEqual({
+      median: 1,
+      min: 0.5,
+      max: 3,
+      count: 3,
+    });
+    expect(summary.cases[0]?.frameRatio?.median).toBe(2);
+    expect(summary.cases[1]?.fpsRatio).toEqual({
+      median: 3,
+      min: 3,
+      max: 3,
+      count: 1,
+    });
+    const text = formatComparisonMatrixSummary(summary).split(
+      "## Measured FPS ratios",
+    )[1];
+    expect(text).toContain("| classic/front | 1.000 | 0.500 | 3.000 | 3 |");
+    expect(text).toContain("| manyLights/front | 3.000 | 3.000 | 3.000 | 1 |");
+    expect(summary.overall.tallies.relativeL2.ties).toBe(2);
+  });
+
+  it("uses the midpoint for two paired ratios", () => {
+    const summary = summarizeComparisonMatrix(
+      matrix([
+        matrixCase("classic", "front", {}, { actualDurationMs: 2500 }, 0),
+        matrixCase("classic", "front", {}, { actualDurationMs: 10000 }, 1),
+      ]),
+    );
+    expect(summary.cases[0]?.fpsRatio).toEqual({
+      median: 1.25,
+      min: 0.5,
+      max: 2,
+      count: 2,
+    });
+  });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, undefined])(
+    "keeps quality and frame-count results when a duration is unusable: %s",
+    (duration) => {
+      for (const mode of ["restir", "path-traced"] as const) {
+        const invalid = matrixCase("classic", "front", {}, {}, 1);
+        if (duration === undefined) {
+          Reflect.deleteProperty(invalid.comparisons[mode], "actualDurationMs");
+        } else {
+          Object.assign(invalid.comparisons[mode], {
+            actualDurationMs: duration,
+          });
+        }
+        const runs = [matrixCase("classic", "front", {}, {}, 0), invalid];
+        const summary = summarizeComparisonMatrix(matrix(runs));
+        expect(summary.cases[0]?.fpsRatio).toBeNull();
+        expect(summary.cases[0]?.frameRatio?.median).toBe(1);
+        expect(summary.overall.tallies.relativeL2.ties).toBe(1);
+        expect(
+          formatComparisonMatrixSummary(summary).split(
+            "## Measured FPS ratios",
+          )[1],
+        ).toContain("| classic/front | n/a | n/a | n/a | 2 |");
+        expect(
+          JSON.parse(JSON.stringify(summary)).cases[0].fpsRatio,
         ).toBeNull();
       }
     },

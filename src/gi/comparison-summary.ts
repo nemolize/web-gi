@@ -78,6 +78,7 @@ export type CaseVerdict = {
   readonly cameraLabel: string;
   readonly repeats: number;
   readonly frameRatio: MetricSamples | null;
+  readonly fpsRatio: MetricSamples | null;
   readonly metrics: Readonly<Record<ComparisonMetric, MetricVerdict>>;
 };
 
@@ -136,20 +137,34 @@ const relativeDifference = (restir: number, pathTraced: number): number => {
   return total === 0 ? 0 : (2 * (pathTraced - restir)) / total;
 };
 
-const summarizeFrameRatios = (
+const summarizeRatios = (
   runs: readonly ComparisonMatrixRunReport[],
+  kind: "frames" | "fps",
 ): MetricSamples | null => {
   const ratios = runs.map(({ comparisons }) => {
     const restir = comparisons.restir.targetFrames;
     const pathTraced = comparisons["path-traced"].targetFrames;
-    return Number.isSafeInteger(restir) &&
-      restir > 0 &&
-      Number.isSafeInteger(pathTraced) &&
-      pathTraced > 0
-      ? pathTraced / restir
-      : Number.NaN;
+    if (
+      !Number.isSafeInteger(restir) ||
+      restir <= 0 ||
+      !Number.isSafeInteger(pathTraced) ||
+      pathTraced <= 0
+    )
+      return Number.NaN;
+    if (kind === "frames") return pathTraced / restir;
+    const restirDuration = comparisons.restir.actualDurationMs;
+    const pathTracedDuration = comparisons["path-traced"].actualDurationMs;
+    if (
+      !Number.isFinite(restirDuration) ||
+      restirDuration <= 0 ||
+      !Number.isFinite(pathTracedDuration) ||
+      pathTracedDuration <= 0
+    )
+      return Number.NaN;
+    return pathTraced / pathTracedDuration / (restir / restirDuration);
   });
-  return ratios.length > 0 && ratios.every(Number.isFinite)
+  return ratios.length > 0 &&
+    ratios.every((ratio) => Number.isFinite(ratio) && ratio > 0)
     ? summarizeSamples(ratios)
     : null;
 };
@@ -252,7 +267,8 @@ export const summarizeComparisonMatrix = (
       scene: first.scene,
       cameraLabel: first.cameraLabel,
       repeats: runs.length,
-      frameRatio: summarizeFrameRatios(runs),
+      frameRatio: summarizeRatios(runs, "frames"),
+      fpsRatio: summarizeRatios(runs, "fps"),
       metrics: byMetric((metric) => verdictFor(runs, metric)),
     }),
   );
@@ -364,6 +380,18 @@ export const formatComparisonMatrixSummary = (
       frameRatio === null
         ? `| ${label} | n/a | n/a | n/a | ${String(repeats)} |`
         : `| ${label} | ${frameRatio.median.toFixed(3)} | ${frameRatio.min.toFixed(3)} | ${frameRatio.max.toFixed(3)} | ${String(frameRatio.count)} |`,
+    ),
+    "",
+    "## Measured FPS ratios",
+    "",
+    "Denoised PT / ReSTIR FPS, paired within each repeat using targetFrames / actualDurationMs for each renderer. Values above 1 mean Denoised PT completed more frames per unit of measured time. They do not affect the quality verdicts.",
+    "",
+    "| case | median ratio | min | max | repeats |",
+    "| --- | --- | --- | --- | --- |",
+    ...summary.cases.map(({ label, fpsRatio, repeats }) =>
+      fpsRatio === null
+        ? `| ${label} | n/a | n/a | n/a | ${String(repeats)} |`
+        : `| ${label} | ${fpsRatio.median.toFixed(3)} | ${fpsRatio.min.toFixed(3)} | ${fpsRatio.max.toFixed(3)} | ${String(fpsRatio.count)} |`,
     ),
     "",
     "## Per-scene",
