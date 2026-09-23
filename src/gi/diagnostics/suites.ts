@@ -5,6 +5,8 @@ import {
   bdptLightFirstExecutionSuite,
   bdptStagedExecutionSuite,
 } from "@/gi/bdpt/execution-diagnostics";
+import { bdptInverseCompileSuites } from "@/gi/bdpt/inverse-compile-diagnostics";
+import { bdptSpatialCompileSuites } from "@/gi/bdpt/spatial-compile-diagnostics";
 import type { DiagnosticSuite } from "@/gi/diagnostics/runner";
 
 const core: DiagnosticSuite = {
@@ -38,6 +40,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) { ${body} }`,
 export const diagnosticSuites = [
   core,
   bdptDiagnosticSuite,
+  ...bdptSpatialCompileSuites,
+  ...bdptInverseCompileSuites,
   bdptExecutionSuite,
   bdptBatchedExecutionSuite,
   bdptLightFirstExecutionSuite,

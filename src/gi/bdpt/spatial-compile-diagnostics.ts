@@ -1,0 +1,262 @@
+import { bdptShaderPrefix } from "@/gi/bdpt/pipeline";
+import type { DiagnosticSuite } from "@/gi/diagnostics/runner";
+import spatial from "@/gi/shaders/bdpt-spatial.wgsl?raw";
+import temporal from "@/gi/shaders/bdpt-temporal.wgsl?raw";
+
+const replaceOnce = (source: string, before: string, after: string): string => {
+  if (source.split(before).length !== 2)
+    throw new Error(
+      "BDPT spatial diagnostic source no longer matches production.",
+    );
+  return source.replace(before, after);
+};
+
+const prepareInverse =
+  "  var preparedCenter: BdptShiftSource;\n  if (centerTarget > 0.0) {\n    preparedCenter = bdptPrepareShift(bdptReservoirSample(center.normal), uni.cam, pixel, lightCount, &workspace);\n  }\n";
+
+const applyInverse =
+  "    if (centerTarget > 0.0 && source.path.confidence > 0.0) {\n      let inverse = bdptApplyShift(preparedCenter, uni.cam, uni.cam, pixel, sourcePixel, lightCount, &workspace);\n      let inverseSample = BdptPathSample(inverse.sample.techniqueSeeds,\n        vec4f(inverse.evaluation.candidate.estimator, inverse.evaluation.candidate.misWeight));\n      let other = bdptBalanceNumerator(source.path.confidence, bdptTarget(inverseSample), inverse.jacobian);\n      centerPairWeight = bdptPairwiseWeight(centerConfidence * centerTarget, other);\n    }\n";
+
+const applyForward =
+  "    if (source.path.targetDensity <= 0.0 || source.path.confidence <= 0.0) { continue; }\n    let shifted = bdptShiftReplay(bdptReservoirSample(source), uni.cam, sourcePixel, pixel, lightCount, &workspace);\n    if (shifted.jacobian <= 0.0) { continue; }\n    let shiftedSample = BdptPathSample(shifted.sample.techniqueSeeds,\n      vec4f(shifted.evaluation.candidate.estimator, shifted.evaluation.candidate.misWeight));\n    let own = bdptBalanceNumerator(source.path.confidence, source.path.targetDensity, 1.0 / shifted.jacobian);\n    let weight = bdptPairwiseWeight(own, centerConfidence * bdptTarget(shiftedSample)) / f32(count);\n    gRngState = selectionState;\n    let random = bdptRandom();\n    selectionState = gRngState;\n    bdptUpdateReplayReservoir(&output, shifted.sample, shifted.evaluation.candidate,\n      source.path.contributionWeight, weight, shifted.jacobian, random);";
+
+const withoutInverse = replaceOnce(
+  replaceOnce(spatial, prepareInverse, ""),
+  applyInverse,
+  "",
+);
+const withoutForward = replaceOnce(spatial, applyForward, "");
+const inverseTwoNeighbors = replaceOnce(
+  withoutForward,
+  "for (var sourceIndex = 1u; sourceIndex < count; sourceIndex++) {",
+  "for (var sourceIndex = 1u; sourceIndex < 3u; sourceIndex++) {\n    if (sourceIndex >= count) { continue; }",
+);
+const discoverNeighbors =
+  "  var count = 1u;\n  let radius = spatialPixelRadius(uni.cam, surfaceDepth(uni.cam, surface.pos));\n  for (var attempt = 0u; attempt < min(32u, uni.spatialSamples); attempt++) {\n    let offset = spatialOffset(radius, bdptRandom() * 2.0 * PI, bdptRandom());\n    let coordinate = vec2i(pixel) + offset;\n    if (any(coordinate < vec2i(0)) || any(coordinate >= vec2i(uni.resolution))) { continue; }\n    let neighbor = vec2u(coordinate);\n    var duplicate = false;\n    for (var other = 0u; other < count; other++) {\n      duplicate = duplicate || all(domains[other] == neighbor);\n    }\n    if (duplicate) { continue; }\n    let hit = traceScenePrimary(uni.cam.pos.xyz, primaryRayDir(uni.cam, pixelNdc(neighbor)));\n    let difference = hit.pos - surface.pos;\n    let normalDistance = dot(difference, surface.normal);\n    if (!hit.hit || hit.materialIndex > 0u || dot(hit.normal, surface.normal) < 0.9\n      || abs(normalDistance) > 0.05 || length(difference - normalDistance * surface.normal) > uni.spatialRadius) { continue; }\n    domains[count] = neighbor;\n    count++;\n  }\n";
+const syntheticNeighbors = `  let count = 1u + center.normal.path.sample.techniqueSeeds.w % 3u;
+  domains[1] = vec2u((pixel.x + 1u) % uni.resolution.x, pixel.y);
+  domains[2] = vec2u(pixel.x, (pixel.y + 1u) % uni.resolution.y);
+`;
+const inverseNoDiscovery = replaceOnce(
+  inverseTwoNeighbors,
+  discoverNeighbors,
+  syntheticNeighbors,
+);
+const directInverse = `    if (centerTarget > 0.0 && source.path.confidence > 0.0) {
+      let inverse = bdptApplyShift(preparedCenter, uni.cam, uni.cam, pixel, sourcePixel, lightCount, &workspace);
+      var result = center.normal;
+      result.path.sample = BdptPathSample(inverse.sample.techniqueSeeds,
+        vec4f(inverse.evaluation.candidate.estimator, inverse.evaluation.candidate.misWeight));
+      result.path.weightSum = inverse.jacobian;
+      if (sourceIndex == 1u) { diagnosticOutput.normal = result; }
+      else { diagnosticOutput.caustic = result; }
+    }
+`;
+const finalizeWeights = `  gRngState = selectionState;
+  let selectedCenter = bdptUpdateReservoir(&output.path, center.normal.path.sample,
+    center.normal.path.contributionWeight, centerWeight / f32(count), 1.0, bdptRandom());
+  if (selectedCenter) { output.coordinates = center.normal.coordinates; output.cameraReconnection = center.normal.cameraReconnection; }
+  output.path.confidence = min(confidence, f32(max(1u, uni.maxHistory)));
+  bdptFinalizeReservoir(&output.path);
+  finalReservoirs[index] = BdptReservoirPair(output, center.caustic);`;
+let inverseDirectOutput = replaceOnce(
+  inverseNoDiscovery,
+  applyInverse,
+  directInverse,
+);
+inverseDirectOutput = replaceOnce(
+  inverseDirectOutput,
+  finalizeWeights,
+  "  finalReservoirs[index] = diagnosticOutput;",
+);
+inverseDirectOutput = replaceOnce(
+  inverseDirectOutput,
+  "  var selectionState = gRngState;",
+  "  var diagnosticOutput = center;",
+);
+for (const statement of [
+  "  var confidence = center.normal.path.confidence;\n",
+  "  var output = bdptEmptyReplayReservoir(confidence);\n",
+  "  let centerConfidence = confidence / f32(min(32u, uni.spatialSamples));\n",
+  "  var centerWeight = 1.0;\n",
+  "    confidence += source.path.confidence;\n",
+  "    var centerPairWeight = 1.0;\n",
+  "    centerWeight += centerPairWeight;\n",
+]) {
+  inverseDirectOutput = replaceOnce(inverseDirectOutput, statement, "");
+}
+const inverseSurfaceNoGate = replaceOnce(
+  replaceOnce(
+    inverseDirectOutput,
+    "  if (!surface.hit || surface.materialIndex > 0u) { return; }",
+    "  let surfaceRejected = select(0.0, 1.0, !surface.hit || surface.materialIndex > 0u);\n  finalReservoirs[index].normal.path.confidence = surfaceRejected;",
+  ),
+  "  finalReservoirs[index] = diagnosticOutput;",
+  "  diagnosticOutput.normal.path.confidence = surfaceRejected;\n  finalReservoirs[index] = diagnosticOutput;",
+);
+const inverseSurfaceWithGate = replaceOnce(
+  inverseSurfaceNoGate,
+  "  finalReservoirs[index].normal.path.confidence = surfaceRejected;",
+  "  finalReservoirs[index].normal.path.confidence = surfaceRejected;\n  if (!surface.hit || surface.materialIndex > 0u) { return; }",
+);
+const variants = [
+  ["full", "production spatial alone", spatial],
+  ["no-inverse", "without inverse replay", withoutInverse],
+  ["no-forward", "without forward replay", withoutForward],
+  [
+    "no-replay",
+    "without either replay",
+    replaceOnce(withoutInverse, applyForward, ""),
+  ],
+  [
+    "one-neighbor",
+    "one neighbor iteration",
+    replaceOnce(spatial, "sourceIndex < count", "sourceIndex < 2u"),
+  ],
+  [
+    "inverse-one-neighbor",
+    "inverse replay with one neighbor iteration",
+    replaceOnce(withoutForward, "sourceIndex < count", "sourceIndex < 2u"),
+  ],
+  [
+    "inverse-two-neighbors",
+    "inverse replay with up to two neighbors",
+    inverseTwoNeighbors,
+  ],
+  [
+    "inverse-two-no-discovery",
+    "inverse replay: two slots without neighbor discovery",
+    inverseNoDiscovery,
+  ],
+  [
+    "inverse-two-direct-output",
+    "inverse replay: two slots with direct output",
+    inverseDirectOutput,
+  ],
+  [
+    "inverse-two-no-surface",
+    "inverse replay: direct output without center surface check",
+    replaceOnce(
+      inverseDirectOutput,
+      "  let surface = traceScenePrimary(uni.cam.pos.xyz, primaryRayDir(uni.cam, pixelNdc(pixel)));\n  if (!surface.hit || surface.materialIndex > 0u) { return; }\n",
+      "",
+    ),
+  ],
+  [
+    "inverse-two-surface-no-gate",
+    "inverse replay: surface result without early return",
+    inverseSurfaceNoGate,
+  ],
+  [
+    "inverse-two-surface-with-gate",
+    "inverse replay: surface result with early return",
+    inverseSurfaceWithGate,
+  ],
+  [
+    "inverse-two-surface-pre-output",
+    "inverse replay: surface predicate output before gate only",
+    replaceOnce(
+      inverseSurfaceWithGate,
+      "  diagnosticOutput.normal.path.confidence = surfaceRejected;\n",
+      "",
+    ),
+  ],
+  [
+    "inverse-two-surface-final-output",
+    "inverse replay: surface predicate output at end only",
+    replaceOnce(
+      inverseSurfaceWithGate,
+      "  finalReservoirs[index].normal.path.confidence = surfaceRejected;\n",
+      "",
+    ),
+  ],
+  [
+    "inverse-two-final-zero-confidence",
+    "inverse replay: final constant zero confidence",
+    replaceOnce(
+      inverseDirectOutput,
+      "  finalReservoirs[index] = diagnosticOutput;",
+      "  diagnosticOutput.normal.path.confidence = 0.0;\n  finalReservoirs[index] = diagnosticOutput;",
+    ),
+  ],
+  [
+    "inverse-two-final-restore-confidence",
+    "inverse replay: final original confidence",
+    replaceOnce(
+      inverseDirectOutput,
+      "  finalReservoirs[index] = diagnosticOutput;",
+      "  diagnosticOutput.normal.path.confidence = center.normal.path.confidence;\n  finalReservoirs[index] = diagnosticOutput;",
+    ),
+  ],
+] as const;
+
+export const bdptSpatialCompileSuites: DiagnosticSuite[] = variants.map(
+  ([id, label, body]) => ({
+    id: `bdpt-spatial-${id}`,
+    label: `BDPT spatial: ${label}`,
+    version: 1,
+    description:
+      "One compilation per Run on a new device, with 10 vertices and a 1x1 workgroup. No rendering or earlier BDPT pipelines. Variants are compiler probes, not correct rendering modes. Restart the browser after device loss before comparing another variant.",
+    probes: [
+      {
+        label: `spatial-${id} / vertices=10 / workgroup=1x1`,
+        code: `${replaceOnce(bdptShaderPrefix, "const BDPT_MAX_VERTICES: u32 = 32u;", "const BDPT_MAX_VERTICES: u32 = 10u;")}\n${body}`,
+        bindings: [
+          Array.from({ length: 5 }, (_, binding) => ({
+            binding,
+            buffer: { type: binding === 0 ? "uniform" : "read-only-storage" },
+          })),
+          [
+            { binding: 0, buffer: { type: "read-only-storage" } },
+            { binding: 1, buffer: { type: "storage" } },
+          ],
+          [{ binding: 0, buffer: { type: "uniform", hasDynamicOffset: true } }],
+        ],
+        constants: { BDPT_WORKGROUP_SIZE: 1 },
+      },
+    ],
+  }),
+);
+
+const fullSpatial = bdptSpatialCompileSuites[0]?.probes[0];
+if (!fullSpatial || !("code" in fullSpatial))
+  throw new Error("Expected a spatial compiler probe.");
+
+const [sceneBindings, , dispatchBindings] = fullSpatial.bindings;
+if (!sceneBindings || !dispatchBindings)
+  throw new Error("Missing compiler bindings.");
+
+const temporalThenSpatial: DiagnosticSuite = {
+  id: "bdpt-spatial-after-temporal",
+  label: "BDPT spatial: temporal then spatial",
+  version: 1,
+  retainPipelines: true,
+  stopOnFailure: true,
+  description:
+    "Compile temporal then full spatial on the same new device, retaining the temporal pipeline. Both use 10 vertices and a 1x1 workgroup. No buffers, rendering, or dispatches. Browser/compiler caches may survive a restart; success does not prove a fresh compilation.",
+  probes: [
+    {
+      ...fullSpatial,
+      label: "temporal / vertices=10 / workgroup=1x1",
+      code: `${replaceOnce(bdptShaderPrefix, "const BDPT_MAX_VERTICES: u32 = 32u;", "const BDPT_MAX_VERTICES: u32 = 10u;")}\n${temporal}`,
+      bindings: [
+        sceneBindings,
+        [0, 1, 2, 3].map((binding) => ({
+          binding,
+          buffer: { type: binding < 2 ? "read-only-storage" : "storage" },
+        })),
+        dispatchBindings,
+      ],
+    },
+    fullSpatial,
+  ],
+};
+
+bdptSpatialCompileSuites.push(temporalThenSpatial, {
+  ...temporalThenSpatial,
+  id: "bdpt-temporal-after-spatial",
+  label: "BDPT spatial: spatial then temporal",
+  description:
+    "Compile full spatial then temporal on the same new device, retaining the spatial pipeline. Both use 10 vertices and a 1x1 workgroup. No buffers, rendering, or dispatches. Browser/compiler caches may survive a restart; success does not prove a fresh compilation.",
+  probes: [...temporalThenSpatial.probes].reverse(),
+});
