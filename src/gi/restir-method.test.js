@@ -1,3 +1,5 @@
+import { describe, expect, it } from "vitest";
+
 import {
   DEFAULT_SETTINGS,
   FLAG_PT_FALLBACK,

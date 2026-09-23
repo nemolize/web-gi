@@ -1,23 +1,31 @@
-import path from "node:path";
-
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    environment: "happy-dom",
-    setupFiles: ["./src/test-setup.ts"],
-    globals: true,
-    include: ["src/**/*.{test,spec}.{js,ts,tsx}", "*.{test,spec}.{js,ts}"],
-    exclude: ["e2e-tests/**/*", "node_modules/**/*"],
+    exclude: [...configDefaults.exclude, "e2e-tests/**"],
+    projects: [
+      {
+        test: {
+          name: "dom",
+          environment: "happy-dom",
+          setupFiles: ["./src/test-setup.ts"],
+          include: ["src/**/*.{test,spec}.{js,ts,tsx}"],
+        },
+      },
+      {
+        test: {
+          name: "node",
+          include: ["*.{test,spec}.{js,ts}"],
+        },
+      },
+    ],
     coverage: {
-      provider: "v8",
+      reportOnFailure: true,
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/**/*.{test,spec}.*", "src/test-setup.ts"],
+      exclude: ["src/**/*.{test,spec}.*", "src/**/*.d.ts", "src/test-setup.ts"],
     },
   },
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
+    tsconfigPaths: true,
   },
 });

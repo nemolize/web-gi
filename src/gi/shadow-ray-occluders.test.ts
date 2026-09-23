@@ -1,7 +1,7 @@
-// `traceOccluded` only walks the occluders, on the grounds that a segment
-// between two points on the room's interior surfaces can never reach a wall.
-// That holds because the room is the convex hull of the scene — a property of
-// the scene data, not of the shader, so it is checked here rather than assumed.
+import { describe, expect, it } from "vitest";
+
+// Skipping room walls in traceOccluded relies on the room being the convex hull.
+// Validate that scene-data invariant independently of the shader.
 import type { Vec3 } from "@/gi/math";
 import { add, normalize, scale, sub, vec3 } from "@/gi/math";
 import { intersectQuad, RAY_EPS } from "@/gi/ray-quad.test-helper";

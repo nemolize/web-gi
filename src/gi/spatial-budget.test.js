@@ -1,3 +1,5 @@
+import { expect, it } from "vitest";
+
 import { assembleRendererPipelines } from "@/gi/renderer";
 import { MATRIX_SPATIAL_SAMPLES } from "@/gi/settings";
 

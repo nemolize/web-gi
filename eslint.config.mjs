@@ -2,13 +2,14 @@ import { fileURLToPath } from "node:url";
 
 import { includeIgnoreFile } from "@eslint/compat";
 import js from "@eslint/js";
+import { defineConfig } from "eslint/config";
 import reactHooks from "eslint-plugin-react-hooks";
 import simpleImportSort from "eslint-plugin-simple-import-sort";
 import unusedImports from "eslint-plugin-unused-imports";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
-export default tseslint.config(
+export default defineConfig(
   includeIgnoreFile(fileURLToPath(new URL(".gitignore", import.meta.url))),
   js.configs.recommended,
   tseslint.configs.strict,
@@ -42,9 +43,5 @@ export default tseslint.config(
     rules: {
       "@typescript-eslint/strict-boolean-expressions": "error",
     },
-  },
-  {
-    files: ["**/*.{test,spec}.{js,ts,jsx,tsx}"],
-    languageOptions: { globals: globals.vitest },
   },
 );

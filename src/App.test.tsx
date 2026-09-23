@@ -45,7 +45,6 @@ const renderApp = (status: RendererStatus): void => {
 
 afterEach(() => {
   cleanup();
-  vi.clearAllMocks();
 });
 
 describe("stats HUD", () => {

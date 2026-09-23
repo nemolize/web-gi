@@ -1,3 +1,5 @@
+import { describe, expect, it } from "vitest";
+
 import { DEFAULT_CAMERA } from "@/gi/camera";
 import type {
   ComparisonMatrixRunReport,

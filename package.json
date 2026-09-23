@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "lint": "run-p --continue-on-error \"lint:*\"",
     "lint:eslint": "eslint .",
-    "lint:typecheck": "run-p --continue-on-error typecheck:app typecheck:node",
+    "lint:typecheck": "run-p --continue-on-error typecheck:app typecheck:node typecheck:e2e",
     "lint:prettier": "prettier --check .",
     "typecheck:app": "tsc --noEmit",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
@@ -21,7 +21,8 @@
     "test": "vitest run --passWithNoTests",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "prepare": "lefthook install"
+    "prepare": "lefthook install",
+    "typecheck:e2e": "tsc --noEmit -p e2e-tests/tsconfig.json"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -41,7 +42,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "^5.0.1",
     "@webgpu/types": "^0.1.71",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -58,7 +59,7 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.1",
     "vite": "^8.0.10",
-    "vitest": "^4.1.10",
+    "vitest": "^5.0.1",
     "wrangler": "^4.110.0"
   }
 }
