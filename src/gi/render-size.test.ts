@@ -1,3 +1,5 @@
+import { describe, expect, it } from "vitest";
+
 import type { RenderSizeRequest } from "@/gi/render-size";
 import {
   MAX_RENDER_PIXELS,

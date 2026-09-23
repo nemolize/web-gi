@@ -1,3 +1,5 @@
+import { describe, expect, it } from "vitest";
+
 import type { LinearImage } from "@/gi/compare";
 import { compareLinear } from "@/gi/compare";
 

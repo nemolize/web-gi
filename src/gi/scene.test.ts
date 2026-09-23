@@ -1,3 +1,5 @@
+import { describe, expect, it } from "vitest";
+
 import type { Vec3 } from "@/gi/math";
 import { add, dot, length, scale, sub, vec3 } from "@/gi/math";
 import { intersectQuad } from "@/gi/ray-quad.test-helper";

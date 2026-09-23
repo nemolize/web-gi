@@ -1,16 +1,7 @@
-/**
- * The reference pass is the oracle every comparison divides by, so two visits
- * to one case must produce the same image. That holds only if its RNG seed is
- * relative to the accumulation it is averaging: `uni.frame` is free-running and
- * never reset, so seeding from it draws each oracle from a different sequence
- * while `uni.accumFrames` restarts the average at zero — 1,024 samples of a
- * different sequence every time (#113).
- *
- * Checked against the shipped WGSL rather than a hand-mirrored copy, because
- * the defect was one identifier and a mirror would not have caught it. The
- * candidate set is derived from the glob rather than hand-listed, because a
- * shader added later would escape a list nobody remembered to update.
- */
+import { describe, expect, it } from "vitest";
+
+// The reference RNG must restart with accumulation, not the free-running frame.
+// Inspect shipped WGSL so a mirrored implementation cannot hide the regression.
 
 /** The same `?raw` sources the renderer compiles, not a re-read from disk. */
 const shaderSources = (): ReadonlyMap<string, string> =>

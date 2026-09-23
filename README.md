@@ -79,10 +79,18 @@ provisions them with `mise install`).
 
 ```bash
 pnpm install
-pnpm dev
+pnpm run dev
 ```
 
 `pnpm run` lists the rest — build, test, `test:e2e`, lint and fix.
+
+Vitest 5 runs source tests in the `dom` project (happy-dom) and root tooling
+tests in the `node` project. Run either with `pnpm run test --project dom` or
+`pnpm run test --project node`. Test APIs are imported from `vitest` explicitly.
+
+Install Chromium once before running local E2Es: `pnpm exec playwright install chromium`.
+CI provides Chromium through its Playwright container and retains failure traces
+in the `playwright-test-results` artifact for seven days.
 
 Two things the script names do not tell you:
 

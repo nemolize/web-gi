@@ -1,15 +1,7 @@
-/**
- * A `vec3` occupies 12 bytes but aligns to 16, so a scalar declared after it
- * lands in the padding word. WGSL defines that layout precisely, but drivers
- * disagree about it in practice: an Adreno 830 read `Camera.forward` as the
- * bytes of `Camera.up` and rendered a black canvas, while desktop Metal and
- * SwiftShader both read it correctly — so nothing but the affected device
- * catches it. Declaring the field as `vec4` with the scalar in `w` keeps the
- * byte layout and removes the ambiguity.
- *
- * Only structs reachable from a buffer binding are checked; function-local
- * structs never cross the CPU boundary and are free to pack however they like.
- */
+import { describe, expect, it } from "vitest";
+
+// Some mobile drivers misread vec3/scalar packing in buffer structs.
+// Local-only structs do not cross that boundary and are excluded.
 
 type Member = { readonly name: string; readonly type: string };
 

@@ -1,14 +1,7 @@
-// `spatialOffset` picks a neighbour on the pixel lattice, but the guard that
-// accepts it measures world distance. On a surface seen at a grazing angle the
-// accepted region projects to an ellipse whose minor axis spans only
-// `pixelRadius * cos(incidence)` pixels, so how the offset is rounded onto the
-// lattice decides what fraction of taps survive — and at a few pixels across,
-// rounding outward rejects nearly all of them. That is a property of the
-// rounding rather than of the shader's inputs, so it is checked here.
-//
-// Both offset rules below are hand-mirrored from WGSL, which TypeScript cannot
-// call: an edit to `common.wgsl` that is not repeated here leaves these tests
-// passing against code that no longer ships.
+import { describe, expect, it } from "vitest";
+
+// Grazing angles amplify pixel-rounding bias in world-distance rejection.
+// These WGSL mirrors must stay synchronized with common.wgsl.
 const SPATIAL_MIN_PIXEL_RADIUS = 1;
 
 const spatialOffset = (

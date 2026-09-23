@@ -1,3 +1,5 @@
+import { describe, expect, it } from "vitest";
+
 import captureWgsl from "@/gi/shaders/capture.wgsl?raw";
 import gbufferWgsl from "@/gi/shaders/gbuffer.wgsl?raw";
 import pathTraceWgsl from "@/gi/shaders/path-trace.wgsl?raw";

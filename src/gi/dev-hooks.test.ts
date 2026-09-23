@@ -1,3 +1,5 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
 import type { LinearImage } from "@/gi/compare";
 import type {
   ComparisonContext,

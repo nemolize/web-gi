@@ -1,3 +1,5 @@
+import { describe, expect, it } from "vitest";
+
 import {
   COMPARISON_MATRIX_BUDGET,
   COMPARISON_MATRIX_PROBE_BUDGET,

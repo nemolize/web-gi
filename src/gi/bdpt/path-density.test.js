@@ -1,3 +1,5 @@
+import { describe, expect, it, test } from "vitest";
+
 import { enumerateTechniqueMisScores } from "@/gi/bdpt/path-density";
 import { techniqueMisWeights } from "@/gi/bdpt/weights";
 

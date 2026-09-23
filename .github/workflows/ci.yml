@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   Lint:
@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: nemolize/actions/setup@0a6e86438446cdc086f5dc490688523d8fb8282c # v1.4.0
-      - run: pnpm lint
+      - run: pnpm run lint
 
   Test:
     runs-on: ubuntu-24.04
@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: nemolize/actions/setup@0a6e86438446cdc086f5dc490688523d8fb8282c # v1.4.0
-      - run: pnpm test
+      - run: pnpm run test
 
   Build:
     runs-on: ubuntu-24.04
@@ -59,7 +59,17 @@ jobs:
           pt="$(node -p "require('@playwright/test/package.json').version")"
           pw="$(node -p "require('playwright/package.json').version")"
           if [ "$pt" != "$img" ] || [ "$pw" != "$img" ]; then
-            echo "::error::image ships Playwright $img, but @playwright/test is $pt and playwright is $pw; update the container image tag in job E2ETests to v$pt"
+            echo "::error::image ships Playwright $img, but @playwright/test is $pt and playwright is $pw; update the container image tag in job E2ETests to v$pt-noble and its matching digest"
             exit 1
           fi
-      - run: pnpm test:e2e
+      - id: e2e
+        run: pnpm run test:e2e
+      - if: ${{ !cancelled() && (steps.e2e.outcome == 'success' || steps.e2e.outcome == 'failure') }}
+        name: Upload the Playwright test results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-test-results
+          path: test-results/
+          if-no-files-found: ignore
+          overwrite: true
+          retention-days: 7

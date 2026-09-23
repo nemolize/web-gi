@@ -1,3 +1,5 @@
+import { describe, expect, it } from "vitest";
+
 import {
   COMPARISON_MATRIX_CASES,
   COMPARISON_MATRIX_MODES,
