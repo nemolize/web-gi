@@ -1,6 +1,8 @@
 import {
+  CENSUS_ACCEPTED_INDEX,
   CENSUS_PHASES,
   CENSUS_REPLAY_FIELDS,
+  CENSUS_SHIFT_BASE,
   CENSUS_SHIFT_FIELDS,
   CENSUS_STRIDE_BYTES,
   CENSUS_WORDS,
@@ -141,9 +143,12 @@ export const profileSpatialCensus = async ({
         throw Error(`Census differs from production in ${mismatchWords} words`);
       const values = new Float32Array(original.buffer);
       let positivePixels = 0;
-      for (let pixel = 0; pixel < width * height; pixel++)
-        if (values.subarray(pixel * 40 + 4, pixel * 40 + 7).some((v) => v > 0))
-          positivePixels++;
+      for (let pixel = 0; pixel < width * height; pixel++) {
+        const radiance = values.subarray(pixel * 40 + 4, pixel * 40 + 7);
+        if (!radiance.every(Number.isFinite))
+          throw Error("Nonfinite production radiance");
+        if (radiance.some((value) => value > 0)) positivePixels++;
+      }
       if (!positivePixels) throw Error("Production output has no radiance");
       const censusEncoder = device.createCommandEncoder();
       censusEncoder.copyBufferToBuffer(
@@ -161,7 +166,8 @@ export const profileSpatialCensus = async ({
       for (let pixel = 0; pixel < width * height; pixel++) {
         for (let word = 0; word < CENSUS_WORDS; word++)
           totals[word] += words[pixel * CENSUS_WORDS + word];
-        if (words[pixel * CENSUS_WORDS + CENSUS_WORDS - 1] > 0) activePixels++;
+        if (words[pixel * CENSUS_WORDS + CENSUS_ACCEPTED_INDEX] > 0)
+          activePixels++;
       }
       censusReadback.unmap();
       if (samples > 0 && activePixels === 0)
@@ -175,11 +181,10 @@ export const profileSpatialCensus = async ({
           ]),
         );
       });
-      const shiftBase = CENSUS_PHASES.length * CENSUS_REPLAY_FIELDS.length;
       const shifts = Object.fromEntries(
         CENSUS_SHIFT_FIELDS.map((field, index) => [
           field,
-          totals[shiftBase + index],
+          totals[CENSUS_SHIFT_BASE + index],
         ]),
       );
       const runs = [];
@@ -214,7 +219,7 @@ export const profileSpatialCensus = async ({
         mismatchWords,
         positivePixels,
         activePixels,
-        acceptedNeighbors: totals[CENSUS_WORDS - 1],
+        acceptedNeighbors: totals[CENSUS_ACCEPTED_INDEX],
         replays,
         shifts,
         runs,

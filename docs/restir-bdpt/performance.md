@@ -244,8 +244,9 @@ remains open for those measurements and the subsequent optimization.
 
 `rejected-spatial-experiments.md` gates any replay optimization on capturing the
 real replay calls. The census counts them instead of timing split kernels: a
-counting variant of the production spatial shader adds stores only, so its
-output must match the production pass word for word on the same frozen inputs.
+counting variant of the production spatial shader adds counters and stores but
+writes nothing the production code reads, so its output must match the
+production pass word for word on the same frozen inputs.
 
 ```sh
 node e2e-tests/measure-bdpt-spatial.mjs --census http://127.0.0.1:5198 classic.json
@@ -308,7 +309,9 @@ Instrumentation check, twelve interleaved pairs after four warmup pairs, median
 GPU pass time of the counting pass over the production pass: classic 1.007
 (per-pair range 0.998–1.014), glass 1.008 (1.001–1.018). By the rule that the
 workload is distorted when the per-pair range excludes 1.0, classic is not
-distorted and glass is, by about 1%. This bounds the counting cost on this
+distorted and glass is, by about 1%. The range widens with more pairs, so the
+verdict says only whether this run's observed ratios straddle 1.0; the median
+ratio is the overhead figure. This bounds the counting cost on this
 desktop and says nothing about Adreno. #236 records compile crashes of the
 production spatial shader there, and the census compiles a modified one, so on
 Fold 7 read its counts only, never its timings.

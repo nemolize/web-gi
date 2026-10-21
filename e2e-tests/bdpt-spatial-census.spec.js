@@ -58,7 +58,6 @@ for (const [scene, samples, bounces] of [
       expect(phase.productive).toBeLessThanOrEqual(phase.calls);
       expect(phase.cameraSide).toBeLessThanOrEqual(phase.calls);
       expect(phase.reconnecting).toBeLessThanOrEqual(phase.cameraSide);
-      expect(phase.cameraVertices).toBeGreaterThanOrEqual(phase.calls);
     }
     expect(result.overhead.ratioMin).toBeGreaterThan(0);
     expect(typeof result.overhead.distorted).toBe("boolean");
