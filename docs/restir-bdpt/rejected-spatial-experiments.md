@@ -72,6 +72,9 @@ original output on frozen inputs, and compare the combined diagnostic cost to
 the unsplit workload. If instrumentation dominates or changes the workload,
 report that limitation instead of deriving production cost percentages.
 
-A trustworthy within-replay breakdown remains unfinished. Any subsequent
+The call census in `performance.md` counts those calls by class without
+splitting the kernel. It keeps aggregate counters, not each call's inputs, so
+the per-call source state this gate names stays uncaptured. A trustworthy
+within-replay time breakdown remains unfinished. Any subsequent
 optimization needs an early Fold comparison with recorded effective workgroup
 and adapter metadata, followed by repeated same-condition whole-frame timings.

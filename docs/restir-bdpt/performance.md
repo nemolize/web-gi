@@ -239,3 +239,98 @@ suffix dominates. This supports investigating replay cost on this desktop. It
 does not establish the split on Fold 7, the
 benefit of a particular replay optimization, or a whole-frame speedup. #208
 remains open for those measurements and the subsequent optimization.
+
+## Replay call census inside spatial reuse (#208)
+
+`rejected-spatial-experiments.md` gates any replay optimization on capturing the
+real replay calls. The census counts them instead of timing split kernels: a
+counting variant of the production spatial shader adds counters and stores but
+writes nothing the production code reads, so its output must match the
+production pass word for word on the same frozen inputs.
+
+```sh
+node e2e-tests/measure-bdpt-spatial.mjs --census http://127.0.0.1:5198 classic.json
+node e2e-tests/measure-bdpt-spatial.mjs --census http://127.0.0.1:5198 glass.json glassShapes 8 6
+```
+
+The shader transform lives in `e2e-tests/bdpt-spatial-census-shader.js` and the
+probe in `e2e-tests/bdpt-spatial-census.js`. Every call to `bdptReplayPath` is
+classified by phase, by whether the light subpath was rebuilt or reused, by
+technique side (`t > 1` is camera-side), by whether it carries a camera
+reconnection, and by whether its estimator is positive. Phases:
+
+- `centerPrepare`: the hoisted `bdptPrepareShift` of the center sample.
+- `forward`: `bdptShiftReplay` of a neighbor's sample. It prepares its source
+  (rebuilds the light subpath), then applies it (reuses that subpath), so each
+  forward shift is two replays.
+- `inverse`: `bdptApplyShift` of the prepared center into a neighbor's domain,
+  one replay that rebuilds the light subpath.
+
+The report also counts accepted neighbors, shifts attempted, and shifts with a
+non-positive Jacobian (rejected). Per pixel the counters are summed on the CPU;
+vertex counts are workspace sizes after each call, the light count only for
+calls that rebuilt it.
+
+Apple M2 Max / Apple Metal 3 / Chrome 155, 352x738, workgroup 8x8, frozen
+after ten production frames. Both outputs matched bit-for-bit. Accepted-neighbor
+counts equal the selection profile above (618,355 and 922,050).
+
+| Per scene                           | Classic / 4 / 3 | Glass / 8 / 6 |
+| ----------------------------------- | --------------: | ------------: |
+| Active pixels                       |         213,643 |       187,612 |
+| Accepted neighbors                  |         618,355 |       922,050 |
+| Replays: center prepare             |         213,643 |       187,612 |
+| Replays: forward (prepare + apply)  |       1,236,710 |     1,844,100 |
+| Replays: inverse                    |         618,355 |       922,050 |
+| Replays per accepted neighbor       |           3.000 |         3.000 |
+| Light subpath builds                |       1,450,353 |     2,031,712 |
+| Light subpath reuses (forward only) |         618,355 |       922,050 |
+| Camera-side share of forward calls  |           84.7% |         76.7% |
+| Forward calls with reconnection     |           22.3% |         15.5% |
+| Inverse calls with reconnection     |           44.6% |         30.9% |
+| Forward shifts rejected (Jacobian)  |            1.0% |          3.6% |
+| Inverse shifts rejected (Jacobian)  |            1.0% |          3.6% |
+
+Light subpath builds are the sum of the three phases' rebuilds. Mean vertices
+are 1.5 camera-side and 1.6 (classic) or 1.7 (glass) light-side per call that
+built one.
+
+What this shows: the issue's "two replays per accepted neighbor" is three —
+the forward shift prepares its source before applying it, and the inverse
+shift is a third — and two of the three rebuild the light subpath. A shift is
+rejected only after its replay has run, so the 1.0% and 3.6% rejected do not
+reduce the replay count. Almost every replay yields a positive estimator
+(96.7%–100%).
+
+What it does not show: how GPU time divides among those replays. Counts are not
+costs, and no per-phase time share is derived from them.
+
+Instrumentation check, twelve interleaved pairs after four warmup pairs, median
+GPU pass time of the counting pass over the production pass: classic 1.007
+(per-pair range 0.998–1.014), glass 1.008 (1.001–1.018). By the rule that the
+workload is distorted when the per-pair range excludes 1.0, classic is not
+distorted and glass is, by about 1%. The range widens with more pairs, so the
+verdict says only whether this run's observed ratios straddle 1.0; the median
+ratio is the overhead figure. This bounds the counting cost on this
+desktop and says nothing about Adreno. #236 records compile crashes of the
+production spatial shader there, and the census compiles a modified one, so on
+Fold 7 read its counts only, never its timings.
+
+### Capturing the same on Fold 7
+
+Not measured by this change: no Fold 7 figures are recorded here. The probe
+attaches to an already-running Chrome through `CDP_ENDPOINT` instead of
+launching one (this is the timing profile; add `--census` for the counts):
+
+```sh
+adb forward tcp:9222 localabstract:chrome_devtools_remote
+adb reverse tcp:5198 tcp:5198
+CDP_ENDPOINT=http://127.0.0.1:9222 node e2e-tests/measure-bdpt-spatial.mjs \
+  http://localhost:5198 fold-profile.json classic 4 3 353 738
+```
+
+Run it against `pnpm exec vite --port 5198` on the host, with Chrome open on the
+device, and pass the render size the device produces (the probe aborts on a
+mismatch). Record the report's `adapter`, `workgroupSize` and `capacity`
+fields with the run. This path was exercised against desktop Chrome only; the
+adb steps were not run.

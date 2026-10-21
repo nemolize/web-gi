@@ -6,6 +6,7 @@ import process from "node:process";
 
 import { chromium } from "playwright";
 
+const census = process.argv.includes("--census");
 const [
   baseURL,
   output,
@@ -14,37 +15,49 @@ const [
   bounces = "3",
   width = "352",
   height = "738",
-] = process.argv.slice(2);
+] = process.argv.slice(2).filter((argument) => argument !== "--census");
 if (!baseURL || !output)
   throw Error(
-    "Usage: node e2e-tests/measure-bdpt-spatial.mjs BASE_URL OUTPUT_JSON [SCENE SAMPLES BOUNCES WIDTH HEIGHT]",
+    "Usage: node e2e-tests/measure-bdpt-spatial.mjs [--census] BASE_URL OUTPUT_JSON [SCENE SAMPLES BOUNCES WIDTH HEIGHT]",
   );
 const profile = mkdtempSync(join(tmpdir(), "web-gi-spatial-208-"));
+const cdpEndpoint = process.env["CDP_ENDPOINT"];
 let browser;
+let page;
 let deadline;
 try {
-  browser = await chromium.launchPersistentContext(profile, {
-    viewport: { width: 430, height: 900 },
-    deviceScaleFactor: 1,
-    channel: "chrome",
-    headless: false,
-    args: ["--enable-unsafe-webgpu"],
-  });
-  const page = browser.pages()[0];
+  if (cdpEndpoint) {
+    browser = await chromium.connectOverCDP(cdpEndpoint);
+    page = await browser.contexts()[0].newPage();
+  } else {
+    browser = await chromium.launchPersistentContext(profile, {
+      viewport: { width: 430, height: 900 },
+      deviceScaleFactor: 1,
+      channel: "chrome",
+      headless: false,
+      args: ["--enable-unsafe-webgpu"],
+    });
+    page = browser.pages()[0];
+  }
   page.setDefaultTimeout(120000);
-  console.log("Profiling", scene, samples, bounces);
+  console.log(census ? "Census" : "Profiling", scene, samples, bounces);
   await page.goto(
     new URL("/?diagnostics=core&bdptDispatchPixels=0", baseURL).href,
   );
   await page.getByRole("heading", { name: "GPU diagnostics" }).waitFor();
   const result = await Promise.race([
     page.evaluate(
-      async (options) => {
+      async ({ census, ...options }) => {
+        if (census)
+          return (
+            await import("/e2e-tests/bdpt-spatial-census.js")
+          ).profileSpatialCensus(options);
         const { profileSpatial } =
           await import("/e2e-tests/bdpt-spatial-profile.js");
         return profileSpatial(options);
       },
       {
+        census,
         expectedShader: [
           "common",
           "scene",
@@ -86,7 +99,7 @@ try {
     throw Error("Stale profiling module; restart the dev server");
   const report = {
     schemaVersion: 1,
-    cpu: cpus()[0]?.model,
+    cpu: cdpEndpoint ? undefined : cpus()[0]?.model,
     revision: execFileSync("git", ["rev-parse", "HEAD"], {
       encoding: "utf8",
     }).trim(),
@@ -96,6 +109,7 @@ try {
   console.log(JSON.stringify(report));
 } finally {
   clearTimeout(deadline);
+  await page?.close();
   await browser?.close();
   rmSync(profile, { recursive: true });
 }
