@@ -72,6 +72,8 @@ original output on frozen inputs, and compare the combined diagnostic cost to
 the unsplit workload. If instrumentation dominates or changes the workload,
 report that limitation instead of deriving production cost percentages.
 
-A trustworthy within-replay breakdown remains unfinished. Any subsequent
+The call census in `performance.md` captures those calls and their classes
+without splitting the kernel. A trustworthy within-replay time breakdown
+remains unfinished. Any subsequent
 optimization needs an early Fold comparison with recorded effective workgroup
 and adapter metadata, followed by repeated same-condition whole-frame timings.
