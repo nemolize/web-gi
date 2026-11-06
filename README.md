@@ -127,7 +127,7 @@ Worker or other resources, so create anything new once with a broader token.
 `wrangler` must stay at 4.156 or newer: older versions fail after the upload,
 reading the account-level `workers.dev` subdomain with this token.
 
-One rule there is worth stating because the workflow cannot explain itself: fork
+One rule in the workflow is worth stating because the workflow cannot explain itself: fork
 and Dependabot pull requests are **deliberately** skipped rather than broken.
 Neither can read the Cloudflare token, so a deploy step would fail on every such
 PR; skipping keeps that signal honest.
