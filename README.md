@@ -120,6 +120,13 @@ Tests skip without an adapter; the spatial-profile tests also need
 post its URL as a sticky comment. The conditions live in
 `.github/workflows/deploy.yml`.
 
+The repository secret `CLOUDFLARE_API_TOKEN` is an account-owned Cloudflare token
+with the `Individual Workers Editor` permission scoped to the `web-gi` Worker only
+(**Specified Workers**, **Editor** role). A Worker-scoped token cannot create a
+Worker or other resources, so create anything new once with a broader token.
+`wrangler` must stay at 4.156 or newer: older versions fail after the upload,
+reading the account-level `workers.dev` subdomain with this token.
+
 One rule there is worth stating because the workflow cannot explain itself: fork
 and Dependabot pull requests are **deliberately** skipped rather than broken.
 Neither can read the Cloudflare token, so a deploy step would fail on every such
