@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   Lint:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     steps:
@@ -23,7 +23,7 @@ jobs:
       - run: pnpm run lint
 
   Test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     steps:
@@ -32,7 +32,7 @@ jobs:
       - run: pnpm run test
 
   Build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     steps:
@@ -41,7 +41,7 @@ jobs:
       - run: pnpm run build
 
   E2ETests:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     container:
       image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
