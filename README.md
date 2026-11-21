@@ -117,7 +117,7 @@ Tests skip without an adapter; the spatial-profile tests also need
 ## Deployment
 
 `main` deploys to Cloudflare Workers; pull requests upload a preview version and
-post its URL as a sticky comment. The conditions live in
+write its URL into the PR description. The conditions live in
 `.github/workflows/deploy.yml`.
 
 The repository secret `CLOUDFLARE_API_TOKEN` is an account-owned Cloudflare token
