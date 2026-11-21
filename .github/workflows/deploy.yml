@@ -19,7 +19,7 @@ jobs:
   Deploy:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    # `pull-requests: write` is needed only by the sticky-comment steps, which
+    # `pull-requests: write` is needed only by the PR-description steps, which
     # are themselves gated on `github.event_name == 'pull_request'`.
     permissions:
       contents: read
@@ -32,10 +32,11 @@ jobs:
       url: ${{ steps.deploy.outputs.deployment-url }}
     steps:
       - if: ${{ github.event_name == 'pull_request' }}
-        name: Show wip message in sticky comment
-        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        name: Show wip message in the PR description
+        uses: nemolize/actions/upsert@5d31663b9013a671ff8fe8b84900a88b9878f0c1 # v1.5.0
         with:
-          message: "Version Preview URL: ⏳deployment is in progress..."
+          marker: preview-url
+          body: "Version Preview URL: ⏳deployment is in progress..."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: nemolize/actions/setup@5d31663b9013a671ff8fe8b84900a88b9878f0c1 # v1.5.0
@@ -50,13 +51,15 @@ jobs:
           command: ${{ github.ref == 'refs/heads/main' && 'deploy' || 'versions upload' }}
 
       - if: ${{ github.event_name == 'pull_request' }}
-        name: Show version preview URL in sticky comment
-        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        name: Show preview URL in the PR description
+        uses: nemolize/actions/upsert@5d31663b9013a671ff8fe8b84900a88b9878f0c1 # v1.5.0
         with:
-          message: "Version Preview URL: ${{ steps.deploy.outputs.deployment-url }}"
+          marker: preview-url
+          body: "Version Preview URL: ${{ steps.deploy.outputs.deployment-url }}"
 
       - if: ${{ failure() && github.event_name == 'pull_request' }}
-        name: Show error message in sticky comment
-        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        name: Show error message in the PR description
+        uses: nemolize/actions/upsert@5d31663b9013a671ff8fe8b84900a88b9878f0c1 # v1.5.0
         with:
-          message: "Version Preview URL: ❌deployment failed."
+          marker: preview-url
+          body: "Version Preview URL: ❌deployment failed."
