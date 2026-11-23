@@ -114,6 +114,28 @@ The command uses the development server for harnesses that import source modules
 Tests skip without an adapter; the spatial-profile tests also need
 `timestamp-query`. The hosted CI runner does not provide hardware GPU coverage.
 
+### CI dependency pins
+
+Workflows reference GitHub Actions by readable tag; `.github/workflows/actions.lock`
+pins each action, and the actions those actions call, to a commit. CI verifies
+the lockfile without modifying files. Run the same check locally with the
+[`gh-actions-lock`](https://github.com/github/gh-actions-lock) extension:
+
+```bash
+gh actions-lock --verify
+```
+
+After changing a `uses:` reference, run `gh actions-lock` to regenerate the
+lockfile and commit it. Renovate does not rewrite action tags to SHAs here
+(`pinDigests` is off for GitHub Actions), and a bump that leaves the lockfile
+stale fails the verify step.
+
+Container images are outside the lockfile: the Playwright image in
+`.github/workflows/ci.yml` is pinned by version tag and registry digest.
+Renovate's shared preset updates the digest and updates the image together with
+the Playwright packages; the E2E job fails when their versions differ. When
+changing the image by hand, update both its tag and digest.
+
 ## Deployment
 
 `main` deploys to Cloudflare Workers; pull requests upload a preview version and

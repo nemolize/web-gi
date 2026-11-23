@@ -1,4 +1,12 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["local>nemolize/renovate-config"]
+  "extends": ["local>nemolize/renovate-config"],
+  "packageRules": [
+    {
+      "description": "actions.lock pins the commits; digest pinning would turn the readable tags back into SHAs",
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["action"],
+      "pinDigests": false
+    }
+  ]
 }
