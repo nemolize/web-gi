@@ -315,6 +315,40 @@ describe("useGiRenderer", () => {
     expect(create.mock.calls[1]?.[1].resolutionScale).toBe(0.5);
   });
 
+  it("keeps a compile-time loss event in the failure report once", async () => {
+    const first = createFakeRenderer();
+    const second = createFakeRenderer();
+    const event =
+      'BDPT_DEVICE_LOST {"phase":"createComputePipelineAsync","pipeline":"bdpt-spatial","workgroupSize":1,"attempt":2,"maxVertices":10,"reason":"unknown","message":"gone"}';
+    const create = vi.fn<RendererFactory>();
+    create
+      .mockImplementationOnce((_canvas, _settings, report) => {
+        void first.renderer.deviceLost.then(() => report?.(event));
+        return Promise.resolve(first.renderer);
+      })
+      .mockResolvedValueOnce(second.renderer);
+
+    render(<RendererHarness rendererFactory={create} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+    await act(async () => {
+      first.lose("unknown", "gone");
+      await first.renderer.deviceLost;
+    });
+
+    expect(screen.getByTestId("status")).toHaveTextContent("error");
+    const occurrences = screen
+      .getByTestId("report")
+      .textContent?.split("BDPT_DEVICE_LOST ").length;
+    expect(occurrences).toBe(2);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("running"),
+    );
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
   it("uses the latest renderer factory on retry", async () => {
     const first = createFakeRenderer();
     const second = createFakeRenderer();

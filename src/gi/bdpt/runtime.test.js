@@ -23,6 +23,7 @@ const fixture = () => {
   });
   const records = [];
   const device = {
+    lost: new Promise(() => undefined),
     limits: {
       maxBufferSize: 1 << 28,
       maxStorageBufferBindingSize: 1 << 27,

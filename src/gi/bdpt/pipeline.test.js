@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   BDPT_REGION_STRIDE,
+  BdptCompileDeviceLostError,
   bdptVertexLimit,
   configureBdptWorkgroups,
   createBdptDispatch,
   createBdptPipeline,
   dispatchBdptPipeline,
   recordBdptDispatch,
+  reportBdptCompileDeviceLoss,
 } from "./pipeline";
 
 class PipelineError extends Error {
@@ -21,6 +23,7 @@ const fixture = () => {
   vi.stubGlobal("GPUPipelineError", PipelineError);
   vi.stubGlobal("GPUShaderStage", { COMPUTE: 4 });
   return {
+    lost: new Promise(() => undefined),
     createShaderModule: vi.fn(() => ({
       getCompilationInfo: async () => ({ messages: [] }),
     })),
@@ -313,5 +316,180 @@ describe("BDPT tiled region binding", () => {
       () => encoder,
     );
     expect(offsets).toEqual([0]);
+  });
+});
+
+describe("device loss while compiling", () => {
+  const lossFixture = () => {
+    const device = fixture();
+    let lose;
+    device.lost = new Promise((resolve) => {
+      lose = resolve;
+    });
+    return { device, lose };
+  };
+  const events = (report) =>
+    report.mock.calls
+      .map(([line]) => line)
+      .filter((line) => line.startsWith("BDPT_DEVICE_LOST "));
+
+  it("records the pending attempt, aborts, and issues no later pipeline", async () => {
+    const { device, lose } = lossFixture();
+    device.createComputePipelineAsync
+      .mockRejectedValueOnce(new PipelineError("internal"))
+      .mockRejectedValueOnce(new PipelineError("internal"))
+      .mockReturnValueOnce(new Promise(() => undefined));
+    const report = vi.fn();
+    const first = createBdptPipeline(
+      device,
+      {},
+      "bdpt-spatial",
+      "",
+      {},
+      report,
+      10,
+    ).catch((error) => error);
+    const queued = createBdptPipeline(device, {}, "later", "", {}, report, 10);
+    queued.catch(() => undefined);
+    await vi.waitFor(() =>
+      expect(device.createComputePipelineAsync).toHaveBeenCalledTimes(3),
+    );
+    lose({ reason: "unknown", message: "Instance reference gone" });
+    expect(await first).toBeInstanceOf(BdptCompileDeviceLostError);
+    await expect(queued).rejects.toThrow("already lost");
+    expect(device.createComputePipelineAsync).toHaveBeenCalledTimes(3);
+    expect(events(report)).toEqual([
+      `BDPT_DEVICE_LOST ${JSON.stringify({
+        phase: "createComputePipelineAsync",
+        pipeline: "bdpt-spatial",
+        workgroupSize: 1,
+        attempt: 3,
+        maxVertices: 10,
+        reason: "unknown",
+        message: "Instance reference gone",
+      })}`,
+    ]);
+  });
+
+  it("numbers the attempt within the sizes actually tried", async () => {
+    const { device, lose } = lossFixture();
+    configureBdptWorkgroups(device, "?bdptWorkgroupSize=4");
+    device.createComputePipelineAsync
+      .mockRejectedValueOnce(new PipelineError("internal"))
+      .mockReturnValueOnce(new Promise(() => undefined));
+    const report = vi.fn();
+    const result = createBdptPipeline(
+      device,
+      {},
+      "bdpt-spatial",
+      "",
+      {},
+      report,
+      10,
+    ).catch((error) => error);
+    await vi.waitFor(() =>
+      expect(device.createComputePipelineAsync).toHaveBeenCalledTimes(2),
+    );
+    lose({ reason: "unknown", message: "gone" });
+    await result;
+    expect(
+      JSON.parse(events(report)[0].slice("BDPT_DEVICE_LOST ".length)),
+    ).toMatchObject({ workgroupSize: 1, attempt: 2 });
+  });
+
+  it.each([
+    ["resolves", (call) => call.resolve({})],
+    ["rejects", (call) => call.reject(new PipelineError("internal"))],
+  ])(
+    "adopts nothing and records once when the pending compile later %s",
+    async (_, settle) => {
+      const { device, lose } = lossFixture();
+      const call = {};
+      device.createComputePipelineAsync.mockReturnValueOnce(
+        new Promise((resolve, reject) =>
+          Object.assign(call, { resolve, reject }),
+        ),
+      );
+      const report = vi.fn();
+      const result = createBdptPipeline(
+        device,
+        {},
+        "camera",
+        "",
+        {},
+        report,
+      ).catch((error) => error);
+      await vi.waitFor(() =>
+        expect(device.createComputePipelineAsync).toHaveBeenCalledTimes(1),
+      );
+      lose({ reason: "unknown", message: "gone" });
+      expect(await result).toBeInstanceOf(BdptCompileDeviceLostError);
+      settle(call);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const lines = report.mock.calls.map(([line]) => line);
+      expect(events(report)).toHaveLength(1);
+      expect(lines.some((line) => line.startsWith("COMPILE PASS"))).toBe(false);
+      expect(device.createComputePipelineAsync).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("does not record a loss after the compile finished or an explicit destroy", async () => {
+    const finished = lossFixture();
+    finished.device.createComputePipelineAsync.mockResolvedValue({});
+    const report = vi.fn();
+    await createBdptPipeline(finished.device, {}, "camera", "", {}, report);
+    finished.lose({ reason: "unknown", message: "during rendering" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(events(report)).toEqual([]);
+    reportBdptCompileDeviceLoss(
+      finished.device,
+      { reason: "unknown", message: "late" },
+      report,
+    );
+    expect(events(report)).toEqual([]);
+
+    const destroyed = lossFixture();
+    destroyed.device.createComputePipelineAsync.mockReturnValueOnce(
+      new Promise(() => undefined),
+    );
+    const destroyReport = vi.fn();
+    const result = createBdptPipeline(
+      destroyed.device,
+      {},
+      "camera",
+      "",
+      {},
+      destroyReport,
+    ).catch((error) => error);
+    await vi.waitFor(() =>
+      expect(destroyed.device.createComputePipelineAsync).toHaveBeenCalled(),
+    );
+    destroyed.lose({ reason: "destroyed", message: "" });
+    expect(await result).not.toBeInstanceOf(BdptCompileDeviceLostError);
+    expect(events(destroyReport)).toEqual([]);
+  });
+
+  it("lets the first reporter win when two observers see the same loss", async () => {
+    const { device, lose } = lossFixture();
+    device.createComputePipelineAsync.mockReturnValueOnce(
+      new Promise(() => undefined),
+    );
+    const report = vi.fn();
+    const result = createBdptPipeline(
+      device,
+      {},
+      "camera",
+      "",
+      {},
+      report,
+    ).catch((error) => error);
+    await vi.waitFor(() =>
+      expect(device.createComputePipelineAsync).toHaveBeenCalled(),
+    );
+    const loss = { reason: "unknown", message: "gone" };
+    reportBdptCompileDeviceLoss(device, loss, report);
+    lose(loss);
+    await result;
+    expect(events(report)).toHaveLength(1);
   });
 });

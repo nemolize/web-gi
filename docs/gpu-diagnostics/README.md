@@ -47,6 +47,11 @@ A ten-second wait alone does not establish a compiler hang. Inspect the last
 COMPILE START without a matching PASS/FAIL; the 120-second limit applies to the
 entire execution probe, including compilation and all three frames.
 
+When the GPU device is lost while a production pipeline is compiling, the report
+carries one `BDPT_DEVICE_LOST` line with the JSON fields `phase`, `pipeline`,
+`workgroupSize`, `attempt`, `maxVertices`, `reason` and `message`. It names the
+attempt whose COMPILE START has no matching PASS/FAIL.
+
 The renderer error overlay also offers **Copy diagnostic report** and an
 expandable text field for manual copying. Its frozen snapshot includes browser,
 GPU adapter, settings, render dimensions, submitted-frame statistics, timestamped

@@ -247,6 +247,96 @@ export const recordBdptDispatch = (
   return encoder;
 };
 
+export interface BdptCompileAttempt {
+  readonly phase: "createComputePipelineAsync";
+  readonly pipeline: string;
+  readonly workgroupSize: number;
+  readonly attempt: number;
+  readonly maxVertices: number;
+}
+
+interface PendingCompile {
+  readonly attempt: BdptCompileAttempt;
+  reported: boolean;
+}
+
+const pendingCompiles = new WeakMap<GPUDevice, PendingCompile>();
+const lostDevices = new WeakMap<GPUDevice, GPUDeviceLostInfo>();
+
+const watchedDevices = new WeakSet<GPUDevice>();
+
+const watchDeviceLoss = (device: GPUDevice): void => {
+  if (watchedDevices.has(device)) return;
+  watchedDevices.add(device);
+  void device.lost.then((loss) => lostDevices.set(device, loss));
+};
+
+const assertDeviceAlive = (device: GPUDevice, label: string): void => {
+  const loss = lostDevices.get(device);
+  if (loss)
+    throw new Error(
+      `${label}: GPU device already lost (${loss.reason}): ${loss.message}`,
+    );
+};
+
+export class BdptCompileDeviceLostError extends Error {
+  readonly attempt: BdptCompileAttempt;
+  readonly loss: GPUDeviceLostInfo;
+
+  constructor(attempt: BdptCompileAttempt, loss: GPUDeviceLostInfo) {
+    super(
+      `${attempt.pipeline}: GPU device lost while compiling at ${String(attempt.workgroupSize)}x${String(attempt.workgroupSize)} (${loss.reason}): ${loss.message}`,
+    );
+    this.attempt = attempt;
+    this.loss = loss;
+  }
+}
+
+export const reportBdptCompileDeviceLoss = (
+  device: GPUDevice,
+  loss: GPUDeviceLostInfo,
+  report?: BdptProgressReporter,
+): void => {
+  const pending = pendingCompiles.get(device);
+  if (!pending || pending.reported || loss.reason === "destroyed") return;
+  pending.reported = true;
+  report?.(
+    `BDPT_DEVICE_LOST ${JSON.stringify({
+      ...pending.attempt,
+      reason: loss.reason,
+      message: loss.message,
+    })}`,
+  );
+};
+
+const compileAttempt = async (
+  device: GPUDevice,
+  attempt: BdptCompileAttempt,
+  descriptor: GPUComputePipelineDescriptor,
+  report?: BdptProgressReporter,
+): Promise<GPUComputePipeline> => {
+  assertDeviceAlive(device, attempt.pipeline);
+  const pending: PendingCompile = { attempt, reported: false };
+  pendingCompiles.set(device, pending);
+  const compiling = device.createComputePipelineAsync(descriptor);
+  compiling.catch(() => undefined);
+  const outcome = await Promise.race([
+    compiling.then((pipeline) => ({ pipeline })),
+    device.lost.then((loss) => ({ loss })),
+  ]).catch((error: unknown) => {
+    pendingCompiles.delete(device);
+    throw error;
+  });
+  if ("loss" in outcome) {
+    reportBdptCompileDeviceLoss(device, outcome.loss, report);
+    if (outcome.loss.reason === "destroyed")
+      throw new Error(`${attempt.pipeline}: GPU device destroyed`);
+    throw new BdptCompileDeviceLostError(attempt, outcome.loss);
+  }
+  pendingCompiles.delete(device);
+  return outcome.pipeline;
+};
+
 const compileBdptPipeline = async (
   maximumWorkgroupSize: number,
   device: GPUDevice,
@@ -265,6 +355,7 @@ const compileBdptPipeline = async (
     "const BDPT_MAX_VERTICES: u32 = 32u;",
     `const BDPT_MAX_VERTICES: u32 = ${String(maxVertices)}u;`,
   );
+  assertDeviceAlive(device, label);
   report?.(`SHADER START ${label}`, { pipeline: label });
   const module = device.createShaderModule({
     label,
@@ -283,20 +374,31 @@ const compileBdptPipeline = async (
     bindGroupLayouts: [sceneLayout, passLayout, getBdptDispatchLayout(device)],
   });
   const failures: string[] = [];
-  for (const workgroupSize of [8, 4, 1].filter(
-    (size) => size <= maximumWorkgroupSize,
-  )) {
+  for (const [index, workgroupSize] of [8, 4, 1]
+    .filter((size) => size <= maximumWorkgroupSize)
+    .entries()) {
     report?.(`COMPILE START ${label} / ${workgroupSize}x${workgroupSize}`);
     try {
-      const pipeline = await device.createComputePipelineAsync({
-        label,
-        layout,
-        compute: {
-          module,
-          entryPoint: "main",
-          constants: { BDPT_WORKGROUP_SIZE: workgroupSize },
+      const pipeline = await compileAttempt(
+        device,
+        {
+          phase: "createComputePipelineAsync",
+          pipeline: label,
+          workgroupSize,
+          attempt: index + 1,
+          maxVertices,
         },
-      });
+        {
+          label,
+          layout,
+          compute: {
+            module,
+            entryPoint: "main",
+            constants: { BDPT_WORKGROUP_SIZE: workgroupSize },
+          },
+        },
+        report,
+      );
       report?.(`COMPILE PASS ${label} / ${workgroupSize}x${workgroupSize}`);
       return { pipeline, workgroupSize };
     } catch (error) {
@@ -328,6 +430,7 @@ type BdptPipelineArguments =
 export const createBdptPipeline = (...args: BdptPipelineArguments) => {
   const [device, sceneLayout, label, , , report, maxVertices = 32] = args;
   const maximumWorkgroupSize = workgroupLimits.get(device) ?? 8;
+  watchDeviceLoss(device);
   const key = `${label}:${String(maxVertices)}:${String(maximumWorkgroupSize)}`;
   let layouts = pipelines.get(device);
   if (!layouts) {

@@ -1,3 +1,5 @@
+import { reportBdptCompileDeviceLoss } from "@/gi/bdpt/pipeline";
+
 export interface ComputeProbe {
   readonly label: string;
   readonly code: string;
@@ -129,10 +131,12 @@ export const runGpuDiagnostics = async (
           }),
         ]);
         const lostInfo = result ?? loss;
-        if (lostInfo)
+        if (lostInfo) {
+          reportBdptCompileDeviceLoss(device, lostInfo, report);
           throw new Error(
             `GPU device lost (${lostInfo.reason}): ${lostInfo.message}`,
           );
+        }
         report(`PASS ${label} (${Math.round(performance.now() - started)} ms)`);
       } catch (error) {
         if (signal.aborted) return;
