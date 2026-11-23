@@ -114,6 +114,24 @@ The command uses the development server for harnesses that import source modules
 Tests skip without an adapter; the spatial-profile tests also need
 `timestamp-query`. The hosted CI runner does not provide hardware GPU coverage.
 
+### CI dependency pins
+
+GitHub Actions use full commit SHAs with version comments. Check the pins and
+their comments without modifying files, with the command CI runs (`mise install`
+provisions `pinact`):
+
+```bash
+pinact run --check --verify-comment
+```
+
+The check reads the GitHub API; export `GITHUB_TOKEN` if you hit its anonymous
+rate limit. CI gives the step its read-only token.
+
+The Playwright container in `.github/workflows/ci.yml` is pinned by version tag
+and registry digest. Renovate's shared preset updates the digest and updates the
+image together with the Playwright packages; the E2E job fails when their
+versions differ. When changing the image by hand, update both its tag and digest.
+
 ## Deployment
 
 `main` deploys to Cloudflare Workers; pull requests upload a preview version and
