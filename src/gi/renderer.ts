@@ -16,7 +16,11 @@ import {
   type BdptFrameTiming,
   createBdptFrameTiming,
 } from "@/gi/bdpt/frame-timing";
-import { bdptVertexLimit, configureBdptWorkgroups } from "@/gi/bdpt/pipeline";
+import {
+  bdptVertexLimit,
+  configureBdptWorkgroups,
+  reportBdptCompileDeviceLoss,
+} from "@/gi/bdpt/pipeline";
 import type { BdptRuntime } from "@/gi/bdpt/runtime";
 import { createBdptRuntime } from "@/gi/bdpt/runtime";
 import type { CameraBasis, OrbitCamera } from "@/gi/camera";
@@ -1012,7 +1016,10 @@ export class GiRenderer {
   }
 
   get deviceLost(): Promise<DeviceLossInfo> {
-    return this.device.lost;
+    return this.device.lost.then((info) => {
+      reportBdptCompileDeviceLoss(this.device, info, this.report);
+      return info;
+    });
   }
 
   /** Non-null once the targets cannot be allocated at any usable size. */
