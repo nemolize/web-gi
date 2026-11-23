@@ -18,20 +18,24 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: nemolize/actions/setup@5d31663b9013a671ff8fe8b84900a88b9878f0c1 # v1.5.0
+      - uses: actions/checkout@v7.0.1
+      - uses: nemolize/actions/setup@v1.5.0
       - run: pnpm run lint
-      - run: pinact run --check --verify-comment
+      - if: ${{ !cancelled() }}
+        name: Verify the workflow lockfile
+        run: |
+          gh extension install github/gh-actions-lock --pin v0.4.0
+          gh actions-lock --verify
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
 
   Test:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: nemolize/actions/setup@5d31663b9013a671ff8fe8b84900a88b9878f0c1 # v1.5.0
+      - uses: actions/checkout@v7.0.1
+      - uses: nemolize/actions/setup@v1.5.0
       - run: pnpm run test
 
   Build:
@@ -39,8 +43,8 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: nemolize/actions/setup@5d31663b9013a671ff8fe8b84900a88b9878f0c1 # v1.5.0
+      - uses: actions/checkout@v7.0.1
+      - uses: nemolize/actions/setup@v1.5.0
       - run: pnpm run build
 
   E2ETests:
@@ -52,10 +56,10 @@ jobs:
       options: --init --ipc=host
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
       # checkout's own safe.directory lasts only for its step; `prepare` needs it too.
       - run: git config --global --add safe.directory "$(pwd)"
-      - uses: nemolize/actions/setup@5d31663b9013a671ff8fe8b84900a88b9878f0c1 # v1.5.0
+      - uses: nemolize/actions/setup@v1.5.0
       - name: Assert the image ships the Playwright version we depend on
         run: |
           img="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/ms-playwright/.docker-info', 'utf8')).driverVersion)")"
@@ -69,7 +73,7 @@ jobs:
         run: pnpm run test:e2e
       - if: ${{ !cancelled() && (steps.e2e.outcome == 'success' || steps.e2e.outcome == 'failure') }}
         name: Upload the Playwright test results
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: playwright-test-results
           path: test-results/

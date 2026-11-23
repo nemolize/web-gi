@@ -116,21 +116,25 @@ Tests skip without an adapter; the spatial-profile tests also need
 
 ### CI dependency pins
 
-GitHub Actions use full commit SHAs with version comments. Check the pins and
-their comments without modifying files, with the command CI runs (`mise install`
-provisions `pinact`):
+Workflows reference GitHub Actions by readable tag; `.github/workflows/actions.lock`
+pins each action, and the actions those actions call, to a commit. CI verifies
+the lockfile without modifying files. Run the same check locally with the
+[`gh-actions-lock`](https://github.com/github/gh-actions-lock) extension:
 
 ```bash
-pinact run --check --verify-comment
+gh actions-lock --verify
 ```
 
-The check reads the GitHub API; export `GITHUB_TOKEN` if you hit its anonymous
-rate limit. CI gives the step its read-only token.
+After changing a `uses:` reference, run `gh actions-lock` to regenerate the
+lockfile and commit it. Renovate does not rewrite action tags to SHAs here
+(`pinDigests` is off for GitHub Actions), and a bump that leaves the lockfile
+stale fails the verify step.
 
-The Playwright container in `.github/workflows/ci.yml` is pinned by version tag
-and registry digest. Renovate's shared preset updates the digest and updates the
-image together with the Playwright packages; the E2E job fails when their
-versions differ. When changing the image by hand, update both its tag and digest.
+Container images are outside the lockfile: the Playwright image in
+`.github/workflows/ci.yml` is pinned by version tag and registry digest.
+Renovate's shared preset updates the digest and updates the image together with
+the Playwright packages; the E2E job fails when their versions differ. When
+changing the image by hand, update both its tag and digest.
 
 ## Deployment
 
