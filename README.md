@@ -136,6 +136,24 @@ Renovate's shared preset updates the digest and updates the image together with
 the Playwright packages; the E2E job fails when their versions differ. When
 changing the image by hand, update both its tag and digest.
 
+### CI workflow audit
+
+[`zizmor`](https://docs.zizmor.sh/) (pinned in `mise.toml`) audits
+`.github/workflows` for credential persistence, excessive permissions and
+template injection. It never rewrites files and exits non-zero on any finding,
+so CI runs the same task as you do:
+
+```bash
+GH_TOKEN="$(gh auth token)" mise run zizmor
+```
+
+With a token zizmor also runs its online audits; without one it falls back to
+offline audits with a warning, so CI always passes `github.token`. zizmor reads
+`.github/workflows/actions.lock`, so `unpinned-uses` accepts references the
+lockfile covers and flags those in a workflow the lockfile does not list. As of
+zizmor 1.32.0 it does not flag an unlocked reference added to a workflow the
+lockfile already lists; `gh actions-lock --verify` above catches that one.
+
 ## Deployment
 
 `main` deploys to Cloudflare Workers; pull requests upload a preview version and

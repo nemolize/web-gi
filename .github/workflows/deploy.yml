@@ -39,6 +39,8 @@ jobs:
           body: "Version Preview URL: ⏳deployment is in progress..."
 
       - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: nemolize/actions/setup@v1.5.0
 
       - run: pnpm run build
