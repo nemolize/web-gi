@@ -19,6 +19,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: nemolize/actions/setup@v1.5.0
       - run: pnpm run lint
       - if: ${{ !cancelled() }}
@@ -28,6 +30,11 @@ jobs:
           gh actions-lock --verify
         env:
           GH_TOKEN: ${{ github.token }}
+      - if: ${{ !cancelled() }}
+        name: Audit the workflows with zizmor
+        run: mise run zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   Test:
     runs-on: ubuntu-24.04
@@ -35,6 +42,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: nemolize/actions/setup@v1.5.0
       - run: pnpm run test
 
@@ -44,6 +53,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: nemolize/actions/setup@v1.5.0
       - run: pnpm run build
 
@@ -57,6 +68,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       # checkout's own safe.directory lasts only for its step; `prepare` needs it too.
       - run: git config --global --add safe.directory "$(pwd)"
       - uses: nemolize/actions/setup@v1.5.0
