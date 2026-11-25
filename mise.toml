@@ -1,6 +1,6 @@
 [tools]
 node = "26.13.1"
-pnpm = "12.22.0"
+pnpm = "12.23.0"
 
 [tasks.zizmor]
 description = "Audit the GitHub Actions workflows for security problems; never rewrites files"
