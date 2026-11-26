@@ -4,5 +4,5 @@ pnpm = "12.23.0"
 
 [tasks.zizmor]
 description = "Audit the GitHub Actions workflows for security problems; never rewrites files"
-tools = { zizmor = "1.33.0" }
+tools = { zizmor = "1.33.1" }
 run = "zizmor .github/workflows"
